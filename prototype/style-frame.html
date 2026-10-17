@@ -1,0 +1,621 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Felix Metro style frame</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --void: #0a0f15;
+    --panel: rgba(10, 15, 21, 0.72);
+    --line: rgba(255, 255, 255, 0.1);
+    --text: #e8eef3;
+    --muted: #93a3b1;
+    --cyan: hsl(192, 90%, 46%);
+    --amber: #ffbe3c;
+    --coral: #ff6038;
+    --violet: #965ce6;
+  }
+  html, body { margin: 0; height: 100%; background: var(--void); color: var(--text); font: 500 14px/1.4 Inter, system-ui, sans-serif; overflow: hidden; }
+  canvas { display: block; }
+  .chip { position: fixed; display: flex; align-items: center; gap: 10px; padding: 8px 14px 8px 8px; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
+  .brand { top: 16px; left: 16px; font-weight: 700; letter-spacing: 0.01em; }
+  .brand img { width: 34px; height: 34px; object-fit: contain; }
+  .brand small { display: block; font-weight: 500; color: var(--muted); font-size: 12px; }
+  .clock { top: 16px; right: 16px; padding: 8px 14px; font: 500 20px/1 "JetBrains Mono", monospace; }
+  .clock span { color: var(--muted); font: 500 12px Inter, sans-serif; margin-right: 6px; }
+  .timeline { left: 50%; bottom: 18px; transform: translateX(-50%); width: min(720px, calc(100vw - 32px)); box-sizing: border-box; padding: 12px 16px; flex-direction: column; align-items: stretch; gap: 6px; }
+  .track { position: relative; height: 22px; }
+  .track input { position: absolute; inset: 0; width: 100%; margin: 0; opacity: 0; cursor: pointer; }
+  .rail { position: absolute; left: 0; right: 0; top: 9px; height: 4px; border-radius: 2px; background: linear-gradient(90deg, var(--coral) var(--p), var(--violet) var(--p)); box-shadow: 0 0 12px rgba(150, 92, 230, 0.35); }
+  .knob { position: absolute; top: 3px; left: var(--p); width: 16px; height: 16px; margin-left: -8px; border-radius: 50%; background: var(--amber); box-shadow: 0 0 14px var(--amber); pointer-events: none; }
+  .ticks { display: flex; justify-content: space-between; color: var(--muted); font: 500 11px "JetBrains Mono", monospace; }
+  .hidden { display: none; }
+  @media (max-width: 600px) { .brand small { display: none; } .clock { font-size: 16px; } }
+</style>
+<script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+    }
+  }
+</script>
+</head>
+<body>
+<div class="chip brand"><img src="../docs/brand/felix-metro-mark.png" alt=""><div>Felix Metro<small>style frame</small></div></div>
+<div class="chip clock"><span>Day 3</span><b id="clock">18:30</b></div>
+<div class="chip timeline" id="timeline">
+  <div class="track" id="track" style="--p: 77%"><div class="rail"></div><div class="knob"></div><input id="hour" type="range" min="0" max="24" step="0.05" value="18.5" aria-label="Time of day"></div>
+  <div class="ticks"><span>00:00</span><span>06:00</span><span>12:00</span><span>18:00</span><span>24:00</span></div>
+</div>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+
+// ?t=18.5 freezes the clock at that hour, ?still freezes motion, ?tier=low|medium|high, ?ui=0 hides the overlay.
+const params = new URLSearchParams(location.search);
+const frozenHour = params.has('t') ? parseFloat(params.get('t')) : null;
+const still = params.has('still');
+const tier = params.get('tier') || 'high';
+if (params.get('ui') === '0') document.querySelectorAll('.chip').forEach((e) => e.classList.add('hidden'));
+
+const PALETTE = {
+  grass: 0x79a85f,
+  grassFar: 0x4d8a4a,
+  water: 0x3f8fb0,
+  lamp: 0xffc46b,
+  window: new THREE.Color(1.0, 0.72, 0.38),
+  headlight: 0xfff1d0,
+  taillight: 0xff3b2a,
+};
+
+// Seeded so the frame is identical on every load.
+let seed = 7;
+const rand = () => ((seed = (seed * 16807) % 2147483647) - 1) / 2147483646;
+const pick = (a) => a[Math.floor(rand() * a.length)];
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance', preserveDrawingBuffer: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, tier === 'low' ? 1 : 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = tier !== 'low';
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.0;
+document.body.prepend(renderer.domElement);
+
+const scene = new THREE.Scene();
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+scene.fog = new THREE.Fog(0x9fb7c8, 30, 70);
+
+const camera = new THREE.PerspectiveCamera(28, innerWidth / innerHeight, 0.1, 200);
+camera.position.set(11.5, 9.6, 13.0);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0.4, 0, 0.8);
+controls.enableDamping = true;
+controls.minPolarAngle = 0.5;
+controls.maxPolarAngle = 1.15;
+controls.minDistance = 8;
+controls.maxDistance = 40;
+controls.update();
+
+const hemi = new THREE.HemisphereLight(0xcfe6ff, 0x5a6b4a, 0.8);
+scene.add(hemi);
+const sun = new THREE.DirectionalLight(0xffffff, 2.5);
+sun.castShadow = true;
+sun.shadow.mapSize.set(tier === 'high' ? 4096 : 2048, tier === 'high' ? 4096 : 2048);
+Object.assign(sun.shadow.camera, { left: -14, right: 14, top: 14, bottom: -14, near: 1, far: 80 });
+sun.shadow.bias = -0.0004;
+sun.shadow.normalBias = 0.02;
+scene.add(sun, sun.target);
+
+// Ground: grass under the city, darker toward the fog.
+const ground = new THREE.Mesh(new THREE.CircleGeometry(60, 64), new THREE.MeshStandardMaterial({ color: PALETTE.grass, roughness: 1 }));
+ground.rotation.x = -Math.PI / 2;
+ground.position.y = -0.01;
+ground.receiveShadow = true;
+scene.add(ground);
+
+// ---------- assets ----------
+const loader = new GLTFLoader();
+const cache = new Map();
+const packMaterials = new Map();
+async function model(pack, name) {
+  const key = `${pack}/${name}`;
+  if (!cache.has(key)) cache.set(key, loader.loadAsync(`assets/models/${pack}/${name}.glb`));
+  return cache.get(key);
+}
+
+// Windows are the light-blue swatches of Kenney's colormap. A copy of the
+// colormap with only those swatches kept becomes the emissive map, so lit
+// windows come from the texture the models already use.
+function windowMask(tex) {
+  const img = tex.image;
+  const c = document.createElement('canvas');
+  c.width = img.width; c.height = img.height;
+  const g = c.getContext('2d');
+  g.drawImage(img, 0, 0);
+  const d = g.getImageData(0, 0, c.width, c.height);
+  for (let i = 0; i < d.data.length; i += 4) {
+    const [r, gg, b] = [d.data[i], d.data[i + 1], d.data[i + 2]];
+    const isWindow = b > 170 && b > r + 25 && b >= gg && gg > 150;
+    const v = isWindow ? 255 : 0;
+    d.data[i] = v; d.data[i + 1] = v; d.data[i + 2] = v; d.data[i + 3] = 255;
+  }
+  g.putImageData(d, 0, 0);
+  const m = new THREE.CanvasTexture(c);
+  m.flipY = tex.flipY;
+  m.colorSpace = THREE.SRGBColorSpace;
+  m.magFilter = THREE.NearestFilter;
+  return m;
+}
+
+// Kenney's default colormap has white walls and green roofs; its orange and blue
+// previews are the same models with the colormap recoloured. Each variant here
+// tints the wall swatches (bright, unsaturated) and roof swatches (green) of a copy.
+const WALLS = [0xf1e3cb, 0xe8a77c, 0xd9785c, 0xc9d6e2, 0xf4f1ea, 0xe7c48f];
+const ROOFS = [0xc65a40, 0x4f6a8c, 0x3d434c, 0x8a5a44, 0x3f8f6a];
+const variants = new Map();
+function variantMap(tex, v) {
+  const key = `${tex.uuid}:${v}`;
+  if (variants.has(key)) return variants.get(key);
+  const img = tex.image;
+  const c = document.createElement('canvas');
+  c.width = img.width; c.height = img.height;
+  const g = c.getContext('2d');
+  g.drawImage(img, 0, 0);
+  const d = g.getImageData(0, 0, c.width, c.height);
+  const wall = new THREE.Color(WALLS[v % WALLS.length]);
+  const roof = new THREE.Color(ROOFS[(v * 3) % ROOFS.length]);
+  for (let i = 0; i < d.data.length; i += 4) {
+    const r = d.data[i], gg = d.data[i + 1], b = d.data[i + 2];
+    const mx = Math.max(r, gg, b), mn = Math.min(r, gg, b);
+    let tint = null, k = mx / 255;
+    if (mx > 200 && mx - mn < 18) tint = wall;
+    else if (gg > r + 40 && gg > b + 10) { tint = roof; k = 0.55 + 0.6 * (gg / 255); }
+    if (tint) {
+      d.data[i] = Math.min(255, tint.r * 255 * k);
+      d.data[i + 1] = Math.min(255, tint.g * 255 * k);
+      d.data[i + 2] = Math.min(255, tint.b * 255 * k);
+    }
+  }
+  g.putImageData(d, 0, 0);
+  const t = new THREE.CanvasTexture(c);
+  t.flipY = tex.flipY;
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.magFilter = THREE.NearestFilter;
+  t.anisotropy = 8;
+  variants.set(key, t);
+  return t;
+}
+
+// One material per pack, colour variant and light level, shared by every model using it.
+function materialFor(pack, src, lit, v = -1) {
+  const key = `${pack}:${lit}:${v}`;
+  if (!packMaterials.has(key)) {
+    const map = v >= 0 ? variantMap(src.map, v) : src.map;
+    map.magFilter = THREE.NearestFilter;
+    map.anisotropy = 8;
+    const m = new THREE.MeshStandardMaterial({ map, roughness: 0.82, metalness: 0.0, envMapIntensity: 0.45 });
+    if (lit > 0) {
+      if (!packMaterials.has(`${pack}:mask`)) packMaterials.set(`${pack}:mask`, windowMask(map));
+      m.emissiveMap = packMaterials.get(`${pack}:mask`);
+      m.emissive = PALETTE.window.clone();
+      m.userData.lit = lit;
+    }
+    packMaterials.set(key, m);
+  }
+  return packMaterials.get(key);
+}
+
+const litMaterials = () => [...packMaterials.values()].filter((m) => m.isMaterial && m.userData.lit);
+
+async function place(pack, name, x, z, rotY = 0, scale = 1, lit = 0, v = -1) {
+  const gltf = await model(pack, name);
+  const o = gltf.scene.clone(true);
+  o.traverse((n) => {
+    if (n.isMesh) {
+      n.material = materialFor(pack, n.userData.src || n.material, lit, v);
+      n.castShadow = true;
+      n.receiveShadow = true;
+    }
+  });
+  o.position.set(x, 0, z);
+  o.rotation.y = rotY;
+  o.scale.setScalar(scale);
+  scene.add(o);
+  return o;
+}
+
+// ---------- layout ----------
+// Roads every fourth tile; the three tiles between are a block of lots.
+const ROADS = [-8, -4, 0, 4, 8];
+const isRoad = (v) => ROADS.includes(v);
+// Blocks are indexed so the tiles between two roads share one index. The camera
+// looks from +x +z, so block (1, 1) is the foreground and (-2, -2) the back.
+const blockOf = (v) => Math.floor(v / 4);
+const district = (bx, bz) => {
+  if (bx === 1 && bz === 1) return 'park';
+  if ((bx === -1 || bx === 0) && (bz === -1 || bz === 0)) return 'downtown';
+  if ((bz === -2 && bx >= 0) || (bx === 1 && bz === -1)) return 'industrial';
+  if (bx === -2 || (bx === -1 && bz === 1)) return 'suburban';
+  return 'commercial';
+};
+
+const COMMERCIAL = 'abcdefghijklmn'.split('').map((c) => `building-${c}`);
+const SKYSCRAPERS = 'abcde'.split('').map((c) => `building-skyscraper-${c}`);
+const HOUSES = 'abcdefghij'.split('').map((c) => `building-type-${c}`);
+const INDUSTRIAL = 'abcdef'.split('').map((c) => `building-${c}`);
+
+// Facing: a lot's front turns toward the nearest road. Kenney fronts face +Z.
+function facing(x, z) {
+  const options = [];
+  if (isRoad(x + 1)) options.push(Math.PI / 2);
+  if (isRoad(x - 1)) options.push(-Math.PI / 2);
+  if (isRoad(z + 1)) options.push(0);
+  if (isRoad(z - 1)) options.push(Math.PI);
+  return options.length ? pick(options) : pick([0, Math.PI / 2, Math.PI, -Math.PI / 2]);
+}
+
+const lamps = [];
+const jobs = [];
+const N = 9;
+for (let x = -N; x <= N; x++) {
+  for (let z = -N; z <= N; z++) {
+    const rx = isRoad(x), rz = isRoad(z);
+    const dist = Math.hypot(x, z);
+    if (dist > 12.5 || Math.abs(x) > 8 || Math.abs(z) > 8) continue;
+    if (rx && rz) { jobs.push(place('roads', 'road-crossroad-path', x, z)); continue; }
+    if (rx || rz) {
+      // road-straight runs along X as modelled.
+      jobs.push(place('roads', 'road-straight', x, z, rx ? Math.PI / 2 : 0));
+      // A lamp on every other road tile, on alternating sides.
+      if ((x + z) % 2 === 0 && dist < 11.5) {
+        const side = ((rx ? z : x) % 4 === 2) ? 1 : -1;
+        const lx = rx ? x + 0.44 * side : x, lz = rz ? z + 0.44 * side : z;
+        jobs.push(place('roads', 'light-square', lx, lz, rx ? (side > 0 ? -Math.PI / 2 : Math.PI / 2) : (side > 0 ? Math.PI : 0)).then((o) => lamps.push(o)));
+      }
+      continue;
+    }
+    const kind = district(blockOf(x), blockOf(z));
+    // Window light levels; towers stay dimmer because their glass is one big swatch.
+    const lit = rand() < 0.75 ? pick([0.6, 1, 1.4]) : 0;
+    const center = !isRoad(x + 1) && !isRoad(x - 1) && !isRoad(z + 1) && !isRoad(z - 1);
+    if (kind === 'downtown') {
+      jobs.push(place('roads', 'tile-low', x, z));
+      if (x === -2 && z === 2) continue; // the Felix tower
+      if (center || rand() < 0.3) jobs.push(place('commercial', pick(SKYSCRAPERS), x, z, facing(x, z), 0.7, lit ? 0.3 : 0, Math.floor(rand() * 6)));
+      else jobs.push(place('commercial', pick(COMMERCIAL), x, z, facing(x, z), 1, lit, Math.floor(rand() * 6)));
+    } else if (kind === 'commercial') {
+      jobs.push(place('roads', 'tile-low', x, z));
+      if (center) {
+        jobs.push(place('commercial', 'detail-parasol-a', x - 0.2, z + 0.1, 0, 1));
+        jobs.push(place('suburban', 'tree-large', x + 0.25, z - 0.2, rand() * 6, 1.1));
+      } else jobs.push(place('commercial', pick(COMMERCIAL), x, z, facing(x, z), 1, lit, Math.floor(rand() * 6)));
+    } else if (kind === 'suburban') {
+      if (center) {
+        jobs.push(place('suburban', 'tree-large', x - 0.2, z - 0.15, rand() * 6, 1.2));
+        jobs.push(place('suburban', 'tree-small', x + 0.25, z + 0.2, rand() * 6, 1.2));
+      } else {
+        jobs.push(place('suburban', pick(HOUSES), x, z, facing(x, z), 0.62, lit ? 1 : 0, Math.floor(rand() * 5)));
+        if (rand() < 0.6) jobs.push(place('suburban', pick(['tree-small', 'tree-large']), x + (rand() - 0.5) * 0.7, z + (rand() - 0.5) * 0.7, rand() * 6, 0.9));
+      }
+    } else if (kind === 'industrial') {
+      jobs.push(place('roads', 'tile-low', x, z));
+      if (center) jobs.push(place('industrial', pick(['water-tower', 'chimney-large', 'detail-tank-large']), x, z, rand() * 6, 0.55));
+      else if (rand() < 0.2) {
+        jobs.push(place('industrial', pick(['shipping-container-a', 'shipping-container-b', 'shipping-container-c']), x - 0.15, z, facing(x, z), 0.5));
+        jobs.push(place('industrial', pick(['shipping-container-a', 'shipping-container-c']), x + 0.2, z + 0.1, facing(x, z), 0.5));
+      } else jobs.push(place('industrial', pick(INDUSTRIAL), x, z, facing(x, z), 0.46, lit ? 1 : 0, 2 + Math.floor(rand() * 3)));
+    } else {
+      // Park: trees and a pond.
+      for (let k = 0; k < 3; k++) jobs.push(place('suburban', pick(['tree-large', 'tree-small']), x + (rand() - 0.5) * 0.8, z + (rand() - 0.5) * 0.8, rand() * 6, 1 + rand() * 0.4));
+    }
+  }
+}
+const pond = new THREE.Mesh(new THREE.CircleGeometry(0.9, 40), new THREE.MeshStandardMaterial({ color: PALETTE.water, roughness: 0.15, metalness: 0.1 }));
+pond.rotation.x = -Math.PI / 2;
+pond.position.set(6, 0.005, 6);
+pond.receiveShadow = true;
+scene.add(pond);
+
+// Scattered trees outside the grid so the city sits in a landscape.
+for (let k = 0; k < 140; k++) {
+  const a = rand() * Math.PI * 2, r = 12.8 + rand() * 9;
+  jobs.push(place('suburban', pick(['tree-large', 'tree-small']), Math.cos(a) * r, Math.sin(a) * r, rand() * 6, 1 + rand() * 0.6));
+}
+
+// ---------- lights that come on at night ----------
+// Light pools are additive ground decals instead of real lights, so fifty lamps cost almost nothing.
+function radial(color) {
+  const c = document.createElement('canvas');
+  c.width = c.height = 128;
+  const g = c.getContext('2d');
+  const grad = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+  grad.addColorStop(0, color);
+  grad.addColorStop(1, 'rgba(0,0,0,0)');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 128, 128);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+const poolTex = radial('rgba(255,196,107,1)');
+const poolMat = new THREE.MeshBasicMaterial({ map: poolTex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0 });
+const bulbMat = new THREE.MeshBasicMaterial({ color: PALETTE.lamp });
+// Additive glows: hidden while ambient occlusion reads the scene, or they shade it like solid quads.
+const glows = [];
+const glowMat = new THREE.SpriteMaterial({ map: radial('rgba(255,210,140,1)'), blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: 0 });
+
+// ---------- traffic ----------
+const CARS = ['sedan', 'taxi', 'suv', 'van', 'hatchback-sports', 'sedan', 'taxi', 'delivery', 'police', 'truck', 'garbage-truck', 'ambulance'];
+const CAR_SCALE = 0.12;
+const cars = [];
+const headMat = new THREE.SpriteMaterial({ map: radial('rgba(255,241,208,1)'), blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: 0 });
+const tailMat = new THREE.SpriteMaterial({ map: radial('rgba(255,59,42,1)'), blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: 0 });
+const beamMat = new THREE.MeshBasicMaterial({ map: radial('rgba(255,236,190,0.9)'), blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: 0 });
+
+async function addCar(axis, line, dir, offset, speed) {
+  const name = pick(CARS);
+  const gltf = await model('cars', name);
+  const o = gltf.scene.clone(true);
+  o.traverse((n) => { if (n.isMesh) { n.material = materialFor('cars', n.material, 0); n.castShadow = true; } });
+  o.scale.setScalar(CAR_SCALE);
+  // Lights are children in model space (the car is 2.5 long, +Z forward).
+  for (const sx of [-0.45, 0.45]) {
+    const h = new THREE.Sprite(headMat); h.position.set(sx, 0.55, 1.35); h.scale.setScalar(0.9); o.add(h);
+    const t = new THREE.Sprite(tailMat); t.position.set(sx, 0.6, -1.35); t.scale.setScalar(0.7); o.add(t);
+  }
+  const beam = new THREE.Mesh(new THREE.PlaneGeometry(2.2, 3.4), beamMat);
+  beam.rotation.x = -Math.PI / 2; beam.position.set(0, 0.05, 3.0); o.add(beam);
+  o.children.filter((c) => c.isSprite || c === beam).forEach((c) => glows.push(c));
+  scene.add(o);
+  cars.push({ o, axis, line, dir, s: offset, speed });
+}
+// Right-hand traffic: lanes 0.17 from the centre line.
+for (const r of ROADS.slice(1, 4)) {
+  for (const dir of [1, -1]) {
+    for (let k = 0; k < 3; k++) {
+      jobs.push(addCar('x', r - 0.17 * dir, dir, rand() * 24 - 12, 0.9 + rand() * 0.5));
+      jobs.push(addCar('z', r + 0.17 * dir, dir, rand() * 24 - 12, 0.9 + rand() * 0.5));
+    }
+  }
+}
+
+// ---------- pedestrians ----------
+const PEOPLE = 'abcdef'.split('').flatMap((c) => [`character-female-${c}`, `character-male-${c}`]);
+const people = [];
+async function addPerson(axis, line, dir, offset) {
+  const gltf = await model('mini-characters', pick(PEOPLE));
+  const o = SkeletonUtils.clone(gltf.scene);
+  o.traverse((n) => { if (n.isMesh) { n.material = materialFor('mini-characters', n.material, 0); n.castShadow = true; } });
+  o.scale.setScalar(0.17);
+  const mixer = new THREE.AnimationMixer(o);
+  const walk = gltf.animations.find((a) => a.name === 'walk');
+  mixer.clipAction(walk).play();
+  mixer.setTime(rand() * 2);
+  scene.add(o);
+  people.push({ o, mixer, axis, line, dir, s: offset, speed: 0.22 + rand() * 0.08 });
+}
+for (const r of ROADS.slice(1, 4)) {
+  for (const side of [-1, 1]) {
+    for (let k = 0; k < 3; k++) {
+      jobs.push(addPerson('x', r + 0.4 * side, pick([1, -1]), rand() * 20 - 10));
+      jobs.push(addPerson('z', r + 0.4 * side, pick([1, -1]), rand() * 20 - 10));
+    }
+  }
+}
+
+// The Felix tower: the tallest building downtown, a cyan crown and the cat on its roof.
+const CYAN = new THREE.Color().setHSL(192 / 360, 0.9, 0.46);
+const tower = await place('commercial', 'building-skyscraper-e', -2, 2, Math.PI / 4, 0.82, 0.3, 4);
+const top = 4.08 * 0.82;
+const crownMat = new THREE.MeshStandardMaterial({ color: 0x1b2430, emissive: CYAN, emissiveIntensity: 1.2, roughness: 0.4 });
+const crown = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.07, 1.04), crownMat);
+crown.position.set(-2, top - 0.05, 2); crown.rotation.y = Math.PI / 4;
+const logoTex = await new THREE.TextureLoader().loadAsync('../docs/brand/felix-metro-mark.png');
+logoTex.colorSpace = THREE.SRGBColorSpace; logoTex.anisotropy = 8;
+const signMat = new THREE.MeshStandardMaterial({ map: logoTex, emissiveMap: logoTex, emissive: 0xffffff, emissiveIntensity: 0.15, alphaTest: 0.4, side: THREE.DoubleSide, roughness: 0.6 });
+const sign = new THREE.Mesh(new THREE.PlaneGeometry(0.95, 0.95), signMat);
+sign.position.set(-2, top + 0.55, 2); sign.rotation.y = Math.PI / 4; sign.castShadow = true;
+const mast = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.12, 0.05), new THREE.MeshStandardMaterial({ color: 0x3d434c }));
+mast.position.set(-2, top + 0.06, 2);
+scene.add(crown, sign, mast);
+
+await Promise.all(jobs);
+
+// Bulbs, glows and pools hang off the lamp models' arms.
+for (const lamp of lamps) {
+  const arm = new THREE.Vector3(0, 0.58, -0.17).applyEuler(lamp.rotation).add(lamp.position);
+  const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.025, 8, 6), bulbMat);
+  bulb.position.copy(arm);
+  const glow = new THREE.Sprite(glowMat); glow.position.copy(arm); glow.scale.setScalar(0.45);
+  const pool = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 1.5), poolMat);
+  pool.rotation.x = -Math.PI / 2; pool.position.set(arm.x, 0.03, arm.z);
+  scene.add(bulb, glow, pool);
+  glows.push(glow, pool);
+}
+
+// ---------- time of day ----------
+const C = (h) => new THREE.Color(h);
+// Keyframes of the sky through a day: [hour, sky/fog, sun colour, sun intensity, hemi sky, hemi ground, hemi intensity, exposure].
+const SKY = [
+  [0, C(0x0b1630), C(0x6f86c9), 0.22, C(0x2c3a66), C(0x0e1018), 0.3, 1.0],
+  [5, C(0x1a2648), C(0x7f8fd0), 0.3, C(0x3b4c80), C(0x14161f), 0.4, 1.0],
+  [6.5, C(0xf0a27a), C(0xffb070), 1.6, C(0xffd2b0), C(0x5a4a4a), 0.7, 1.0],
+  [9, C(0xb8d8ee), C(0xfff2dc), 2.8, C(0xd8ecff), C(0x5a6b4a), 0.85, 1.0],
+  [16, C(0xb4d2ea), C(0xffeccc), 2.7, C(0xd6e8ff), C(0x5a6b4a), 0.85, 1.0],
+  [17.6, C(0xf2b080), C(0xffb060), 2.2, C(0xffd6b0), C(0x5a4a40), 0.65, 1.0],
+  [18.8, C(0xe0805a), C(0xff7a40), 1.2, C(0xc89a9a), C(0x3a3040), 0.45, 1.0],
+  [19.6, C(0x4a4a80), C(0xff6a50), 0.35, C(0x6a6aa0), C(0x1e1c2a), 0.35, 1.0],
+  [20.5, C(0x141c3a), C(0x7d8ccc), 0.25, C(0x2c3a66), C(0x0e1018), 0.3, 1.0],
+  [24, C(0x0b1630), C(0x6f86c9), 0.22, C(0x2c3a66), C(0x0e1018), 0.3, 1.0],
+];
+const smooth = (t) => t * t * (3 - 2 * t);
+function sky(hour) {
+  let i = 0;
+  while (i < SKY.length - 2 && hour >= SKY[i + 1][0]) i++;
+  const a = SKY[i], b = SKY[i + 1];
+  const t = smooth(THREE.MathUtils.clamp((hour - a[0]) / (b[0] - a[0]), 0, 1));
+  const mix = (k) => a[k].clone().lerp(b[k], t);
+  const num = (k) => a[k] + (b[k] - a[k]) * t;
+  return { sky: mix(1), sun: mix(2), sunI: num(3), hs: mix(4), hg: mix(5), hI: num(6), exp: num(7) };
+}
+// How dark it is, 0 at noon to 1 at night; drives windows, lamps and headlights.
+const night = (h) => {
+  const d = Math.min(Math.abs(h - 13), 24 - Math.abs(h - 13)); // hours from 13:00
+  return smooth(THREE.MathUtils.clamp((d - 4.8) / 2.0, 0, 1));
+};
+
+function setTime(hour) {
+  const s = sky(hour);
+  scene.background = s.sky;
+  scene.fog.color.copy(s.sky);
+  // The sun travels east to west; at night the same light is the moon, high and cool.
+  const n = night(hour);
+  const dayAngle = ((hour - 6) / 12) * Math.PI;
+  const elev = n > 0.85 ? 0.9 : Math.max(0.12, Math.sin(dayAngle)) ;
+  const az = n > 0.85 ? 2.2 : dayAngle;
+  // West is +x, so the evening sun comes from the camera's side and lights the faces in view.
+  sun.position.set(-Math.cos(az) * 20, elev * 22 + 3, 6 + Math.sin(az) * 3);
+  sun.color.copy(s.sun);
+  sun.intensity = s.sunI;
+  hemi.color.copy(s.hs);
+  hemi.groundColor.copy(s.hg);
+  hemi.intensity = s.hI;
+  renderer.toneMappingExposure = s.exp;
+  scene.environmentIntensity = 0.06 + 0.5 * (1 - n);
+  ground.material.color.set(PALETTE.grass).lerp(new THREE.Color(0x1d2a2a), n * 0.6);
+  for (const m of litMaterials()) m.emissiveIntensity = n * 1.6 * m.userData.lit;
+  const lampOn = smooth(THREE.MathUtils.clamp((n - 0.25) / 0.4, 0, 1));
+  poolMat.opacity = lampOn * 0.55;
+  glowMat.opacity = lampOn * 0.9;
+  bulbMat.color.set(lampOn > 0.05 ? PALETTE.lamp : 0x8a90a0);
+  headMat.opacity = lampOn;
+  tailMat.opacity = lampOn * 0.8;
+  beamMat.opacity = lampOn * 0.35;
+  bloom.strength = 0.1 + n * 0.6;
+  crownMat.emissiveIntensity = 0.5 + n * 2.5;
+  signMat.emissiveIntensity = 0.12 + n * 0.3;
+  const hh = Math.floor(hour) % 24, mm = Math.floor((hour % 1) * 60);
+  document.getElementById('clock').textContent = `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+  document.getElementById('track').style.setProperty('--p', `${(hour / 24) * 100}%`);
+}
+
+// ---------- post processing ----------
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+if (tier === 'high') {
+  const ao = new GTAOPass(scene, camera, innerWidth, innerHeight);
+  ao.updateGtaoMaterial({ radius: 0.35, distanceExponent: 1.5, thickness: 1.0, scale: 1.0 });
+  ao.blendIntensity = 0.85;
+  const render = ao.render.bind(ao);
+  ao.render = (...args) => {
+    const shown = glows.map((g) => g.visible);
+    glows.forEach((g) => (g.visible = false));
+    render(...args);
+    glows.forEach((g, i) => (g.visible = shown[i]));
+  };
+  composer.addPass(ao);
+}
+const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.4, 0.45, 1.0);
+composer.addPass(bloom);
+
+// Tilt-shift: blur grows with distance from a horizontal band, so the city reads as a model.
+const TiltShift = {
+  uniforms: { tDiffuse: { value: null }, resolution: { value: new THREE.Vector2(innerWidth, innerHeight) }, focus: { value: 0.46 }, band: { value: 0.16 }, amount: { value: tier === 'low' ? 0 : 7.0 } },
+  vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+  fragmentShader: `
+    uniform sampler2D tDiffuse; uniform vec2 resolution; uniform float focus, band, amount; varying vec2 vUv;
+    void main() {
+      float d = max(abs(vUv.y - focus) - band, 0.0);
+      float r = amount * smoothstep(0.0, 0.35, d);
+      if (r < 0.01) { gl_FragColor = texture2D(tDiffuse, vUv); return; }
+      vec4 sum = vec4(0.0); float w = 0.0;
+      for (int i = 0; i < 12; i++) {
+        float a = float(i) * 2.39996;
+        float rr = sqrt(float(i) / 12.0) * r;
+        vec2 o = vec2(cos(a), sin(a)) * rr / resolution;
+        sum += texture2D(tDiffuse, vUv + o); w += 1.0;
+      }
+      gl_FragColor = sum / w;
+    }`,
+};
+const tilt = new ShaderPass(TiltShift);
+composer.addPass(tilt);
+composer.addPass(new OutputPass());
+
+// Grade after tone mapping: a little saturation and a soft vignette.
+const Grade = {
+  uniforms: { tDiffuse: { value: null }, saturation: { value: 1.12 }, vignette: { value: 0.28 } },
+  vertexShader: TiltShift.vertexShader,
+  fragmentShader: `
+    uniform sampler2D tDiffuse; uniform float saturation, vignette; varying vec2 vUv;
+    void main() {
+      vec4 c = texture2D(tDiffuse, vUv);
+      float l = dot(c.rgb, vec3(0.2126, 0.7152, 0.0722));
+      c.rgb = mix(vec3(l), c.rgb, saturation);
+      float v = smoothstep(0.85, 0.25, distance(vUv, vec2(0.5)));
+      c.rgb *= mix(1.0 - vignette, 1.0, v);
+      gl_FragColor = c;
+    }`,
+};
+composer.addPass(new ShaderPass(Grade));
+
+// ---------- loop ----------
+const slider = document.getElementById('hour');
+let hour = frozenHour ?? parseFloat(slider.value);
+slider.value = hour;
+slider.addEventListener('input', () => { hour = parseFloat(slider.value); setTime(hour); });
+setTime(hour);
+
+const EXTENT = 11;
+function move(list, dt, carLike) {
+  for (const a of list) {
+    a.s += a.dir * a.speed * dt;
+    if (a.s > EXTENT) a.s -= 2 * EXTENT;
+    if (a.s < -EXTENT) a.s += 2 * EXTENT;
+    if (a.axis === 'x') { a.o.position.set(a.s, 0, a.line); a.o.rotation.y = a.dir > 0 ? Math.PI / 2 : -Math.PI / 2; }
+    else { a.o.position.set(a.line, 0, a.s); a.o.rotation.y = a.dir > 0 ? 0 : Math.PI; }
+    if (carLike) a.o.position.y = 0.036;
+    // Fade out at the edge of the map instead of popping.
+    a.o.visible = Math.abs(a.s) < EXTENT - 0.5;
+  }
+}
+const clock = new THREE.Clock();
+function frame() {
+  const dt = still ? 0 : Math.min(clock.getDelta(), 0.05);
+  move(cars, dt, true);
+  move(people, dt, false);
+  for (const p of people) p.mixer.update(dt);
+  controls.update();
+  composer.render();
+  requestAnimationFrame(frame);
+}
+move(cars, 0, true); move(people, 0, false);
+frame();
+document.body.dataset.ready = '1';
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+  composer.setSize(innerWidth, innerHeight);
+  tilt.uniforms.resolution.value.set(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>

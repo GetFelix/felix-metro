@@ -7,9 +7,11 @@ A 3D city simulator that runs in the browser, built on
 is stored in durable Felix streams, so you can scrub back to any earlier moment
 and play forward from there.
 
-> **Status:** design stage. Nothing here runs yet. The plan is in
+> **Status:** design stage. The [style frame](prototype/style-frame.html) shows the look; nothing is simulated yet. The plan is in
 > [docs/design.md](docs/design.md) and the work is tracked in
 > [milestones](https://github.com/GetFelix/felix-metro/milestones).
+
+![Felix Metro style frame at golden hour](docs/screenshots/style-frame-17.8.jpg)
 
 ## What you will be able to do
 
@@ -62,6 +64,7 @@ there. [docs/design.md](docs/design.md) has the details.
 ## Documentation
 
 - [docs/design.md](docs/design.md): the design, data model and build order
+- [docs/art.md](docs/art.md): art direction, the asset packs and the style frame
 - [Felix docs](https://docs.getfelix.dev/)
 
 ## Contributing

@@ -1,0 +1,56 @@
+# Art direction
+
+Felix Metro is a model city on a table: low-poly, saturated, seen from above
+through a tilt-shift lens, with the time of day doing most of the mood. The
+reference is [prototype/style-frame.html](../prototype/style-frame.html).
+
+| Noon | Golden hour | Night |
+|---|---|---|
+| ![Noon](screenshots/style-frame-12.jpg) | ![Golden hour](screenshots/style-frame-17.8.jpg) | ![Night](screenshots/style-frame-21.jpg) |
+
+## Assets
+
+Six Kenney packs, all CC0 and one family. They share Kenney's gradient-swatch
+palette and proportions, so they sit together without restyling by hand.
+
+| Pack | Used for | Notes |
+|---|---|---|
+| City Kit (Roads) | Roads, crossings, pavement lots, street lights, traffic lights | Tiles are 1 × 1 units; the grid is built on them. `road-straight` runs along X |
+| City Kit (Commercial) | Downtown and commercial lots, towers | 14 buildings, 5 towers, awnings and parasols |
+| City Kit (Suburban) | Houses, trees, fences, driveways | Also the source of every tree |
+| City Kit (Industrial) | Factories, tanks, chimneys, containers, water tower | |
+| Car Kit | Traffic | Sedan, taxi, SUV, van, delivery, police, ambulance, trucks; scaled to 0.12 |
+| Mini Characters | Pedestrians | Rigged, with `walk`, `idle`, `sit` and more; scaled to 0.17 |
+
+Considered and left out:
+
+- **Nature Kit**: an older, flat-coloured style that does not match the city kits. Trees come from the suburban pack.
+- **Anything not Kenney**: mixing families is how low-poly scenes end up looking like asset flips.
+
+Gaps for later milestones: no buses or trams, no parks furniture beyond parasols,
+no construction states for "building goes up". Kenney's Roads kit has
+construction cones and barriers, which may be enough for M4.
+
+## Rules
+
+- **Colour comes from recoloured colormaps.** Every model of a pack samples one 512 × 512 `colormap.png`. The default has white walls and green roofs; a building's look is a variant of that texture with its wall swatches (bright, unsaturated) and roof swatches (green) tinted from the palette lists in the style frame. Windows, trims and roads keep Kenney's colours.
+- **Lit windows come from the same texture.** The colormap's light-blue swatches are windows; a mask of them is the emissive map, scaled by how dark it is. Towers use a lower level because their glass is one large swatch.
+- **Light pools are decals.** Street lights and headlights are additive sprites and ground decals, not real lights, so hundreds cost almost nothing. They are hidden from the ambient occlusion pass.
+- **Time of day is one function.** Sky, fog, sun, hemisphere light, exposure, window light, lamps and headlights all come from the hour. The sun sets in the west (+x), on the camera's side, so evening light falls on the faces in view.
+- **Post processing**, in order: ambient occlusion (high tier only), bloom with a threshold of 1 so only lights glow, tilt-shift blur outside a horizontal band, tone mapping, then a small saturation lift and vignette.
+- **Brand**: Inter and JetBrains Mono, cyan `hsl(192, 90%, 46%)` for Felix accents, amber for light, and coral to violet for the timeline. The Felix tower downtown carries the mark.
+
+## Using the style frame
+
+Serve the repository root (`python3 -m http.server`) and open
+`/prototype/style-frame.html`. Parameters:
+
+| Parameter | Effect |
+|---|---|
+| `?t=17.8` | Freeze the clock at that hour |
+| `?still` | Freeze cars and people, for screenshots |
+| `?tier=low\|medium\|high` | Quality tier. Low drops shadows, ambient occlusion and tilt-shift |
+| `?ui=0` | Hide the overlay |
+
+The screenshots above are `?t=12&still`, `?t=17.8&still` and `?t=21&still` at
+1600 × 900.
