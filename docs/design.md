@@ -83,7 +83,9 @@ not needed at the target scale and is left out.
 
 ## Time
 
-- **The sim steps at 4 Hz**, and each tick is 15 seconds of city time, so a city day is 5,760 ticks and 24 minutes of real time at normal speed. Speed is a setting of the sim, not of the viewer.
+- **Each tick is 15 seconds of city time**, so a city day is 5,760 ticks. At normal speed the sim steps at 4 Hz and a day takes 24 real minutes: short enough that a few minutes of watching shows rush hour and nightfall.
+- **Speed changes the tick rate, not the tick.** Pause, 1×, 2× and 4× step at 0, 4, 8 and 16 Hz. A tick always covers the same city time, so the tick number stays a linear clock and seeking and interpolation never need to know the speed. The log costs the same per city day at any speed; only its rate per real second changes.
+- **Speed belongs to the city, not the viewer.** It is set on the sim, written in every tick header, and changed with a `speed` event, so a seek can turn wall time into ticks across speed changes. A viewer's playback speed while scrubbing is separate and local.
 - **The tick number is the city's clock.** Every record carries it. "The city at 08:15 on day 3" is a tick number, and the city at a tick is every district rewound to that tick.
 - **Offsets are per district.** Districts are aligned by tick, never by offset.
 
@@ -104,6 +106,7 @@ writes decisions instead, and the client works out positions:
 | `built` / `demolished` | lot, building kind, rotation | A building changed |
 | `road` | segment, change | A road was added, removed or closed |
 | `command` | principal hash, command id, result | A builder's command was applied or refused |
+| `speed` | ticks per second | The city's speed changed; 0 is paused |
 
 A trip is about 60 bytes. A resident makes five or six trips a city day, so a
 city of 20,000 residents writes about 5 KB/s of events at normal speed.
@@ -111,7 +114,7 @@ city of 20,000 residents writes about 5 KB/s of events at normal speed.
 ### Tick records
 
 Each district commits one record per tick: a header (epoch, city, district,
-tick number, flags, the offset of the district's latest keyframe) followed by
+tick number, speed, flags, the offset of the district's latest keyframe) followed by
 that tick's events. A tick with no events is still committed, so every tick has
 a record in every district. Seeking depends on that.
 
@@ -141,7 +144,7 @@ refused at the broker instead of writing a second history.
 
 To draw tick `T`:
 
-1. For each district, find a record at or before `T`. The sim's ticks are regular, so the client estimates the offset from the district's current tick and offset, reads one record, and corrects; with `offset_for_time` in the gateway this becomes one lookup by the record's append time.
+1. For each district, find a record at or before `T`. Every tick has one record, so the client estimates the offset from the district's current tick and offset, reads one record, and corrects; with `offset_for_time` in the gateway this becomes one lookup by the record's append time.
 2. That record's header names the district's latest keyframe offset. Read the keyframe.
 3. Read from the keyframe to `T` with a bounded `read` and apply the events.
 4. Draw. Cars in the middle of a trip are placed by interpolating their route at `T`.
@@ -221,6 +224,5 @@ anything is built inside it.
 
 **Open questions**
 
-- [ ] Is 4 Hz with 15-second ticks right, or should cars move at a finer step and the day run longer?
 - [ ] One keyframe per city hour, or adaptive (more often when a lot changed)?
 - [ ] Should forks be visible to everyone, or private to the person who made them?

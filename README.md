@@ -35,8 +35,9 @@ and play forward from there.
 
 ## How it works
 
-A simulation process steps every district of a city at 4 Hz, where each tick is
-15 seconds of city time. Each tick it commits one record per district with that
+A simulation process steps every district of a city in ticks of 15 seconds of
+city time, four a second at normal speed, so a city day takes 24 minutes. It can
+be paused or run at 2× and 4×. Each tick it commits one record per district with that
 tick's events, such as a resident leaving home on a route or a building going
 up. It does not write positions. The browser moves cars along their routes
 itself. Every city hour each district also commits a keyframe, its full state.
