@@ -290,11 +290,12 @@ for (let x = -N; x <= N; x++) {
     if (rx || rz) {
       // road-straight runs along X as modelled.
       jobs.push(place('roads', 'road-straight', x, z, rx ? Math.PI / 2 : 0));
-      // A lamp on every other road tile, on alternating sides.
+      // A lamp on every other road tile, on alternating sides. The model's arm
+      // points along -Z, so each lamp turns its arm toward the road's centre.
       if ((x + z) % 2 === 0 && dist < 11.5) {
         const side = ((rx ? z : x) % 4 === 2) ? 1 : -1;
         const lx = rx ? x + 0.44 * side : x, lz = rz ? z + 0.44 * side : z;
-        jobs.push(place('roads', 'light-square', lx, lz, rx ? (side > 0 ? -Math.PI / 2 : Math.PI / 2) : (side > 0 ? Math.PI : 0)).then((o) => lamps.push(o)));
+        jobs.push(place('roads', 'light-square', lx, lz, rx ? (side > 0 ? Math.PI / 2 : -Math.PI / 2) : (side > 0 ? 0 : Math.PI)).then((o) => lamps.push(o)));
       }
       continue;
     }
