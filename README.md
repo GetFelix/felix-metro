@@ -13,7 +13,7 @@ and play forward from there.
 
 | Day | Night |
 |---|---|
-| ![Felix Metro style frame at noon](docs/screenshots/style-frame-12.jpg) | ![Felix Metro style frame at night](docs/screenshots/style-frame-21.jpg) |
+| ![Felix Metro style frame at noon](docs/screenshots/style-frame-day.jpg) | ![Felix Metro style frame at night](docs/screenshots/style-frame-night.jpg) |
 
 ## What you will be able to do
 
