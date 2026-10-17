@@ -37,7 +37,8 @@ construction cones and barriers, which may be enough for M4.
 - **Lit windows come from the same texture.** The colormap's light-blue swatches are windows; a mask of them is the emissive map, scaled by how dark it is. Towers use a lower level because their glass is one large swatch.
 - **Light pools are decals.** Street lights and headlights are additive sprites and ground decals, not real lights, so hundreds cost almost nothing. They are hidden from the ambient occlusion pass.
 - **Time of day is one function.** Sky, fog, sun, hemisphere light, exposure, window light, lamps and headlights all come from the hour. The sun sets in the west (+x), on the camera's side, so evening light falls on the faces in view.
-- **Post processing**, in order: ambient occlusion (high tier only), bloom with a threshold of 1 so only lights glow, tilt-shift blur outside a horizontal band, tone mapping, then a small saturation lift and vignette.
+- **Post processing**, in order: ambient occlusion (high tier only), bloom with a threshold of 1 so only lights glow, tilt-shift blur, tone mapping, then a small saturation lift and vignette. The blur is by depth, like a miniature photo: it grows with distance from the focus plane through the orbit target, so a tall building at that depth stays sharp to its roof.
+- **Buildings fit their lot.** Some Kenney buildings are wider than a tile, so each is scaled down to fit 0.9 of its lot and none overlap.
 - **Brand**: Inter and JetBrains Mono, cyan `hsl(192, 90%, 46%)` for Felix accents, amber for light, and coral to violet for the timeline. The Felix tower downtown carries the mark.
 
 ## Using the style frame

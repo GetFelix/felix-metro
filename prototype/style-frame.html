@@ -223,6 +223,7 @@ function materialFor(pack, src, lit, v = -1) {
 
 const litMaterials = () => [...packMaterials.values()].filter((m) => m.isMaterial && m.userData.lit);
 
+const LOT = 0.9;
 async function place(pack, name, x, z, rotY = 0, scale = 1, lit = 0, v = -1) {
   const gltf = await model(pack, name);
   const o = gltf.scene.clone(true);
@@ -236,6 +237,12 @@ async function place(pack, name, x, z, rotY = 0, scale = 1, lit = 0, v = -1) {
   o.position.set(x, 0, z);
   o.rotation.y = rotY;
   o.scale.setScalar(scale);
+  // Some Kenney buildings are wider than a tile; shrink those to fit their lot.
+  if (['commercial', 'suburban', 'industrial'].includes(pack)) {
+    const size = new THREE.Box3().setFromObject(o).getSize(new THREE.Vector3());
+    const widest = Math.max(size.x, size.z);
+    if (widest > LOT) o.scale.multiplyScalar(LOT / widest);
+  }
   scene.add(o);
   return o;
 }
@@ -421,16 +428,18 @@ for (const r of ROADS.slice(1, 4)) {
 
 // The Felix tower: the tallest building downtown, a cyan crown and the cat on its roof.
 const CYAN = new THREE.Color().setHSL(192 / 360, 0.9, 0.46);
-const tower = await place('commercial', 'building-skyscraper-e', -2, 2, Math.PI / 4, 0.82, 0.3, 4);
-const top = 4.08 * 0.82;
+const tower = await place('commercial', 'building-skyscraper-e', -2, 2, 0, 1, 0.3, 4);
+const towerBox = new THREE.Box3().setFromObject(tower);
+const towerSize = towerBox.getSize(new THREE.Vector3());
+const top = towerBox.max.y;
 const crownMat = new THREE.MeshStandardMaterial({ color: 0x1b2430, emissive: CYAN, emissiveIntensity: 1.2, roughness: 0.4 });
-const crown = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.07, 1.04), crownMat);
-crown.position.set(-2, top - 0.05, 2); crown.rotation.y = Math.PI / 4;
+const crown = new THREE.Mesh(new THREE.BoxGeometry(towerSize.x + 0.02, 0.07, towerSize.z + 0.02), crownMat);
+crown.position.set(-2, top - 0.05, 2);
 const logoTex = await new THREE.TextureLoader().loadAsync('../docs/brand/felix-metro-mark.png');
 logoTex.colorSpace = THREE.SRGBColorSpace; logoTex.anisotropy = 8;
 const signMat = new THREE.MeshStandardMaterial({ map: logoTex, emissiveMap: logoTex, emissive: 0xffffff, emissiveIntensity: 0.15, alphaTest: 0.4, side: THREE.DoubleSide, roughness: 0.6 });
-const sign = new THREE.Mesh(new THREE.PlaneGeometry(0.95, 0.95), signMat);
-sign.position.set(-2, top + 0.55, 2); sign.rotation.y = Math.PI / 4; sign.castShadow = true;
+const sign = new THREE.Mesh(new THREE.PlaneGeometry(0.8, 0.8), signMat);
+sign.position.set(-2, top + 0.48, 2); sign.rotation.y = Math.PI / 4; sign.castShadow = true;
 const mast = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.12, 0.05), new THREE.MeshStandardMaterial({ color: 0x3d434c }));
 mast.position.set(-2, top + 0.06, 2);
 scene.add(crown, sign, mast);
@@ -534,22 +543,35 @@ if (tier === 'high') {
 const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.4, 0.45, 1.0);
 composer.addPass(bloom);
 
-// Tilt-shift: blur grows with distance from a horizontal band, so the city reads as a model.
+// Tilt-shift as a miniature photo: blur grows with distance from the focus
+// plane through the orbit target, so anything at that depth, however tall, stays sharp.
+const depthRT = new THREE.WebGLRenderTarget(innerWidth, innerHeight);
+depthRT.depthTexture = new THREE.DepthTexture(innerWidth, innerHeight);
+const depthMat = new THREE.MeshBasicMaterial({ colorWrite: false });
 const TiltShift = {
-  uniforms: { tDiffuse: { value: null }, resolution: { value: new THREE.Vector2(innerWidth, innerHeight) }, focus: { value: 0.46 }, band: { value: 0.16 }, amount: { value: tier === 'low' ? 0 : 7.0 } },
+  uniforms: {
+    tDiffuse: { value: null }, tDepth: { value: depthRT.depthTexture },
+    resolution: { value: new THREE.Vector2(innerWidth, innerHeight) },
+    cameraNear: { value: camera.near }, cameraFar: { value: camera.far },
+    focus: { value: 19 }, band: { value: 2.2 }, range: { value: 9.0 }, amount: { value: tier === 'low' ? 0 : 7.0 },
+  },
   vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
   fragmentShader: `
-    uniform sampler2D tDiffuse; uniform vec2 resolution; uniform float focus, band, amount; varying vec2 vUv;
+    #include <packing>
+    uniform sampler2D tDiffuse, tDepth; uniform vec2 resolution;
+    uniform float cameraNear, cameraFar, focus, band, range, amount; varying vec2 vUv;
+    float dist(vec2 uv) { return -perspectiveDepthToViewZ(texture2D(tDepth, uv).x, cameraNear, cameraFar); }
     void main() {
-      float d = max(abs(vUv.y - focus) - band, 0.0);
-      float r = amount * smoothstep(0.0, 0.35, d);
+      float r = amount * smoothstep(0.0, range, abs(dist(vUv) - focus) - band);
       if (r < 0.01) { gl_FragColor = texture2D(tDiffuse, vUv); return; }
       vec4 sum = vec4(0.0); float w = 0.0;
       for (int i = 0; i < 12; i++) {
         float a = float(i) * 2.39996;
-        float rr = sqrt(float(i) / 12.0) * r;
-        vec2 o = vec2(cos(a), sin(a)) * rr / resolution;
-        sum += texture2D(tDiffuse, vUv + o); w += 1.0;
+        vec2 o = vec2(cos(a), sin(a)) * sqrt(float(i) / 12.0) * r / resolution;
+        // A sharp foreground pixel must not bleed into a blurred one behind it.
+        float rr = amount * smoothstep(0.0, range, abs(dist(vUv + o) - focus) - band);
+        float k = clamp(rr / max(r, 0.001), 0.25, 1.0);
+        sum += texture2D(tDiffuse, vUv + o) * k; w += k;
       }
       gl_FragColor = sum / w;
     }`,
@@ -602,6 +624,17 @@ function frame() {
   move(people, dt, false);
   for (const p of people) p.mixer.update(dt);
   controls.update();
+  if (tier !== 'low') {
+    const shown = glows.map((g) => g.visible);
+    glows.forEach((g) => (g.visible = false));
+    scene.overrideMaterial = depthMat;
+    renderer.setRenderTarget(depthRT);
+    renderer.render(scene, camera);
+    renderer.setRenderTarget(null);
+    scene.overrideMaterial = null;
+    glows.forEach((g, i) => (g.visible = shown[i]));
+    tilt.uniforms.focus.value = camera.position.distanceTo(controls.target);
+  }
   composer.render();
   requestAnimationFrame(frame);
 }
@@ -615,6 +648,7 @@ addEventListener('resize', () => {
   renderer.setSize(innerWidth, innerHeight);
   composer.setSize(innerWidth, innerHeight);
   tilt.uniforms.resolution.value.set(innerWidth, innerHeight);
+  depthRT.setSize(innerWidth, innerHeight);
 });
 </script>
 </body>
