@@ -6,7 +6,7 @@ reference is [prototype/style-frame.html](../prototype/style-frame.html).
 
 | Noon | Golden hour | Night |
 |---|---|---|
-| ![Noon](screenshots/style-frame-day.jpg) | ![Golden hour](screenshots/style-frame-golden-hour.jpg) | ![Night](screenshots/style-frame-night.jpg) |
+| ![Noon](screenshots/style-frame-day.jpg?v=2) | ![Golden hour](screenshots/style-frame-golden-hour.jpg?v=2) | ![Night](screenshots/style-frame-night.jpg?v=2) |
 
 ## Assets
 
