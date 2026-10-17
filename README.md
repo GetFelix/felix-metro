@@ -11,7 +11,9 @@ and play forward from there.
 > [docs/design.md](docs/design.md) and the work is tracked in
 > [milestones](https://github.com/GetFelix/felix-metro/milestones).
 
-![Felix Metro style frame at golden hour](docs/screenshots/style-frame-17.8.jpg)
+| Day | Night |
+|---|---|
+| ![Felix Metro style frame at noon](docs/screenshots/style-frame-12.jpg) | ![Felix Metro style frame at night](docs/screenshots/style-frame-21.jpg) |
 
 ## What you will be able to do
 
