@@ -77,7 +77,7 @@ const PALETTE = {
   grassFar: 0x4d8a4a,
   water: 0x3f8fb0,
   lamp: 0xffc46b,
-  window: new THREE.Color(1.0, 0.72, 0.38),
+  window: new THREE.Color(1.0, 0.66, 0.32),
   headlight: 0xfff1d0,
   taillight: 0xff3b2a,
 };
@@ -211,7 +211,8 @@ function materialFor(pack, src, lit, v = -1) {
     map.anisotropy = 8;
     const m = new THREE.MeshStandardMaterial({ map, roughness: 0.82, metalness: 0.0, envMapIntensity: 0.45 });
     if (lit > 0) {
-      if (!packMaterials.has(`${pack}:mask`)) packMaterials.set(`${pack}:mask`, windowMask(map));
+      // From the original colormap: a recoloured wall can look like glass.
+      if (!packMaterials.has(`${pack}:mask`)) packMaterials.set(`${pack}:mask`, windowMask(src.map));
       m.emissiveMap = packMaterials.get(`${pack}:mask`);
       m.emissive = PALETTE.window.clone();
       m.userData.lit = lit;
@@ -508,7 +509,7 @@ function setTime(hour) {
   renderer.toneMappingExposure = s.exp;
   scene.environmentIntensity = 0.06 + 0.5 * (1 - n);
   ground.material.color.set(PALETTE.grass).lerp(new THREE.Color(0x1d2a2a), n * 0.6);
-  for (const m of litMaterials()) m.emissiveIntensity = n * 1.6 * m.userData.lit;
+  for (const m of litMaterials()) m.emissiveIntensity = n * 0.85 * m.userData.lit;
   const lampOn = smooth(THREE.MathUtils.clamp((n - 0.25) / 0.4, 0, 1));
   poolMat.opacity = lampOn * 0.55;
   glowMat.opacity = lampOn * 0.9;
@@ -516,7 +517,7 @@ function setTime(hour) {
   headMat.opacity = lampOn;
   tailMat.opacity = lampOn * 0.8;
   beamMat.opacity = lampOn * 0.35;
-  bloom.strength = 0.1 + n * 0.6;
+  bloom.strength = 0.1 + n * 0.35;
   crownMat.emissiveIntensity = 0.5 + n * 2.5;
   signMat.emissiveIntensity = 0.12 + n * 0.3;
   const hh = Math.floor(hour) % 24, mm = Math.floor((hour % 1) * 60);
