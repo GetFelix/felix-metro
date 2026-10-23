@@ -80,6 +80,16 @@ arithmetic throughout, as in felix-arena, so the two builds agree exactly.
 
 Seeds are parts of 1 to 32 characters of `a-z`, `0-9` and `-`, joined by `~` for forks. Each lot's building kind is an index into a table in `core` that names a Kenney pack and model. Street, business and resident names come from built-in lists. `City::hash` is an FNV-1a hash of the whole layout, so the sim and the browser can check they generated the same city. `cargo run -p felix-metro-core --example map -- harbor 2` prints a city as ASCII.
 
+### Residents, schedules and routes
+
+`core` also draws the people. A city has two residents for each suburban lot with a door, and resident `i` is fixed by the seed and `i`: an archetype (office worker, shift worker, shopkeeper, student, retiree or night worker), a home, and a workplace that is the nearest of three random picks from the places that suit the archetype. Times are jittered per resident, and people leave early enough by a rough travel estimate to arrive at their usual time.
+
+A day is a cycle of blocks, each a lot and the tick of the day they leave it. The last block's trip returns to the first, so the day closes. A night worker's day starts at work, because they are still there at midnight. A trip leaves at its scheduled tick, or on arrival if the last one ran late.
+
+A route is an A* search over the road graph. Costs are integer milliseconds of travel, a door sits partway along its segment so the search starts and ends from both ends of it, and the heuristic is the fewest tiles between nodes at the fastest road speed. The sim passes in last tick's vehicle count for each segment. A segment holds three cars a tile before it slows, then runs at that share of its speed down to a fifth, and the trip drives it at that speed, so the route chosen is the route taken. A route of 4 tiles or less is walked at 0.3 tiles a second.
+
+A trip is its legs, each with a speed percentage, and a depart tick; every leg's end tick follows from them. `position_at(tick)` interpolates in integers, so it never moves backwards along the route and gives the same answer natively and in WebAssembly.
+
 ### Districts are shards
 
 A city is a grid of districts, and each district is one shard of the city's

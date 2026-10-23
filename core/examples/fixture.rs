@@ -5,7 +5,7 @@
 use std::fmt::Write;
 
 use felix_metro_core::{
-    City,
+    City, day_hash,
     record::{
         BuildingDiff, Command, CommandRecord, Counts, Doing, Event, Header, Keyframe, Leg,
         RegistryRecord, ResidentState, RoadDiff, TickRecord, Vehicle, decode_json,
@@ -234,9 +234,19 @@ fn main() {
             )
         })
         .collect();
+    let days: Vec<String> = [("harbor", 2, 0), ("harbor", 2, 41), ("meadow", 2, 7), ("harbor", 4, 100)]
+        .iter()
+        .map(|&(seed, d, index)| {
+            format!(
+                "    {{\"seed\": \"{seed}\", \"districts\": {d}, \"index\": {index}, \"hash\": \"{:016x}\"}}",
+                day_hash(seed, d, index).unwrap()
+            )
+        })
+        .collect();
     println!(
-        "{{\n  \"cities\": [\n{}\n  ],\n  \"records\": [\n{}\n  ]\n}}",
+        "{{\n  \"cities\": [\n{}\n  ],\n  \"days\": [\n{}\n  ],\n  \"records\": [\n{}\n  ]\n}}",
         cities.join(",\n"),
+        days.join(",\n"),
         recs.join(",\n")
     );
 }

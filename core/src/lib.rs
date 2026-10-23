@@ -8,7 +8,10 @@ pub mod city;
 pub mod kinds;
 pub mod names;
 pub mod record;
+pub mod resident;
 mod rng;
+pub mod route;
+pub mod schedule;
 #[cfg(target_arch = "wasm32")]
 pub mod wasm;
 
@@ -17,3 +20,6 @@ pub use city::{
 };
 pub use kinds::{BuildingKind, KINDS, KindInfo};
 pub use names::resident_name;
+pub use resident::{Places, Resident, day_hash};
+pub use route::{Congestion, Mode, Position, Trip, route};
+pub use schedule::{Activity, Archetype, Block, Schedule, TICKS_PER_DAY, TICKS_PER_HOUR};

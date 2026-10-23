@@ -1,11 +1,13 @@
 import { readFileSync } from 'node:fs';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { decodeRecord, initSync } from './core/felix_metro_core.js';
+import { decodeRecord, hash as cityHash, initSync, residentDayHash } from './core/felix_metro_core.js';
 
 const built = (name: string) => readFileSync(new URL(`./core/${name}`, import.meta.url));
 
 /** What the native build wrote: each record's bytes, what it decodes to, and a hash of that JSON. */
 const fixture = JSON.parse(built('fixture.json').toString()) as {
+  cities: { seed: string; districts: number; hash: string }[];
+  days: { seed: string; districts: number; index: number; hash: string }[];
   records: { name: string; record: string; json: unknown; hash: string }[];
 };
 const bytes = (hex: string) => Uint8Array.from(hex.match(/../g)!, (byte) => parseInt(byte, 16));
@@ -21,6 +23,26 @@ function fnv1a(text: string): string {
 
 beforeAll(() => {
   initSync({ module: built('felix_metro_core_bg.wasm') });
+});
+
+describe('cities and residents in WebAssembly', () => {
+  it('generates every native city to the same hash', () => {
+    expect(fixture.cities.length).toBeGreaterThan(0);
+    for (const { seed, districts, hash } of fixture.cities) {
+      expect(cityHash(seed, districts)).toBe(hash);
+    }
+  });
+
+  it('walks and drives every native resident’s day to the same hash', () => {
+    expect(fixture.days.length).toBeGreaterThan(0);
+    for (const { seed, districts, index, hash } of fixture.days) {
+      expect(residentDayHash(seed, districts, index)).toBe(hash);
+    }
+  });
+
+  it('refuses a resident the city does not have', () => {
+    expect(() => residentDayHash('harbor', 2, 4_000_000_000)).toThrow('no such resident');
+  });
 });
 
 describe('records in WebAssembly', () => {
