@@ -1,32 +1,74 @@
 use std::collections::HashSet;
 
 use super::*;
+use crate::names::resident_name;
 
-fn is_road(v: u16, size: u16) -> bool {
-    v.is_multiple_of(ROAD_SPACING) && v < size
+fn city_of(seed: &str, d: u16) -> City {
+    City::generate(seed, d).unwrap()
+}
+
+fn seeds() -> Vec<String> {
+    (0..50).map(|i| format!("seed-{i}")).collect()
+}
+
+fn is_middle(lot: &Lot) -> bool {
+    (lot.x - 1) % ROAD_SPACING == 1 && (lot.z - 1) % ROAD_SPACING == 1
 }
 
 #[test]
 fn harbor_hash_is_pinned() {
-    assert_eq!(
-        City::generate("harbor", 2).hash(),
-        9_440_593_595_394_363_990
-    );
+    assert_eq!(city_of("harbor", 2).hash(), 7_315_211_005_218_244_252);
 }
 
 #[test]
 fn generation_is_deterministic() {
-    let a = City::generate("harbor", 2);
-    let b = City::generate("harbor", 2);
+    let a = city_of("harbor", 2);
+    let b = city_of("harbor", 2);
     assert_eq!(a.hash(), b.hash());
     assert_eq!(a.to_json(), b.to_json());
-    assert_ne!(a.hash(), City::generate("meadow", 2).hash());
+    assert_ne!(a.hash(), city_of("meadow", 2).hash());
+}
+
+#[test]
+fn seeds_are_restricted() {
+    for ok in [
+        "harbor",
+        "a",
+        "x-1",
+        "harbor~bridge-closed",
+        &"a".repeat(32),
+    ] {
+        assert!(City::generate(ok, 1).is_ok(), "{ok}");
+    }
+    for bad in [
+        "",
+        "Harbor",
+        "a b",
+        "a_b",
+        "~",
+        "a~",
+        "~a",
+        "a~~b",
+        "q\"",
+        &"a".repeat(33),
+    ] {
+        assert_eq!(
+            City::generate(bad, 1).err(),
+            Some(GenerateError::Seed),
+            "{bad}"
+        );
+    }
+    assert_eq!(City::generate("a", 0).err(), Some(GenerateError::Districts));
+    assert_eq!(
+        City::generate("a", 17).err(),
+        Some(GenerateError::Districts)
+    );
 }
 
 #[test]
 fn districts_are_twelve_tiles_square() {
     for d in [1, 2, 4] {
-        let city = City::generate("size", d);
+        let city = city_of("size", d);
         assert_eq!(city.districts.len(), usize::from(d * d));
         assert_eq!(city.tiles(), 12 * d + 1);
         for lot in &city.lots {
@@ -37,28 +79,33 @@ fn districts_are_twelve_tiles_square() {
 }
 
 #[test]
-fn every_lot_sits_in_a_block_ringed_by_roads_and_faces_one() {
-    for seed in ["harbor", "a", "b", "c", "d"] {
-        let city = City::generate(seed, 2);
-        let size = city.tiles();
-        for lot in &city.lots {
-            let (ix, iz) = ((lot.x - 1) % ROAD_SPACING, (lot.z - 1) % ROAD_SPACING);
-            assert!(ix < 3 && iz < 3, "lot {} is on a road", lot.id);
-            let (west, east) = (is_road(lot.x - 1, size), is_road(lot.x + 1, size));
-            let (north, south) = (is_road(lot.z - 1, size), is_road(lot.z + 1, size));
-            assert!(
-                west || east || north || south || (ix == 1 && iz == 1),
-                "lot {} touches no road",
-                lot.id
-            );
-            if !(ix == 1 && iz == 1) {
-                let faced = match lot.facing {
-                    0 => south,
-                    1 => east,
-                    2 => north,
-                    _ => west,
+fn doors_open_onto_the_road_the_lot_faces() {
+    for d in [2, 4] {
+        for seed in seeds().iter().map(String::as_str).chain(["harbor"]) {
+            let city = city_of(seed, d);
+            for lot in &city.lots {
+                if is_middle(lot) {
+                    assert_eq!(lot.door(), None);
+                    assert_eq!(lot.facing, 0);
+                    assert_eq!(lot.name, None);
+                    assert!((38..42).contains(&lot.kind.0), "lot {}", lot.id);
+                    continue;
+                }
+                let door = lot.door().expect("a rim lot has a door");
+                let seg = &city.segments[door.segment as usize];
+                let (a, b) = (city.nodes[seg.a as usize], city.nodes[seg.b as usize]);
+                let (lo, hi) = (a.min(b), a.max(b));
+                let (x, z) = (lot.x, lot.z);
+                // The segment runs along the road beside the lot, on the side it faces.
+                let (along, at, from, line) = match lot.facing {
+                    0 => (lo.1 == hi.1, lo.1 == z + 1, lo.0, x),
+                    2 => (lo.1 == hi.1, lo.1 + 1 == z, lo.0, x),
+                    1 => (lo.0 == hi.0, lo.0 == x + 1, lo.1, z),
+                    _ => (lo.0 == hi.0, lo.0 + 1 == x, lo.1, z),
                 };
-                assert!(faced, "lot {} faces away from the road", lot.id);
+                assert!(along && at, "lot {} door is on the wrong road", lot.id);
+                assert!(line > from && line < from + seg.length);
+                assert_eq!(door.offset, line - from);
             }
         }
     }
@@ -66,94 +113,154 @@ fn every_lot_sits_in_a_block_ringed_by_roads_and_faces_one() {
 
 #[test]
 fn road_graph_is_connected_across_districts() {
-    let city = City::generate("harbor", 3);
-    let mut seen = HashSet::from([0u32]);
-    let mut todo = vec![0u32];
-    while let Some(n) = todo.pop() {
-        for &(next, seg) in &city.adjacency[n as usize] {
-            let s = &city.segments[seg as usize];
-            assert!(s.a == n || s.b == n);
-            if seen.insert(next) {
-                todo.push(next);
+    let mut cities = vec![city_of("harbor", 3), city_of("meadow", 3)];
+    cities.extend(seeds().iter().map(|s| city_of(s, 2)));
+    for city in cities {
+        let mut seen = HashSet::from([0u32]);
+        let mut todo = vec![0u32];
+        while let Some(n) = todo.pop() {
+            for &(next, seg) in &city.adjacency[n as usize] {
+                let s = &city.segments[seg as usize];
+                assert!(s.a == n || s.b == n);
+                if seen.insert(next) {
+                    todo.push(next);
+                }
             }
         }
+        assert_eq!(seen.len(), city.nodes.len());
+        assert!(
+            city.segments
+                .iter()
+                .any(|s| s.class == SegmentClass::Avenue)
+        );
+        assert!(
+            city.segments
+                .iter()
+                .any(|s| s.class == SegmentClass::Street)
+        );
+        assert!(city.segments.iter().all(|s| s.length == 4 && s.speed > 0));
     }
-    assert_eq!(seen.len(), city.nodes.len());
-    assert!(
-        city.segments
-            .iter()
-            .any(|s| s.class == SegmentClass::Avenue)
-    );
-    assert!(
-        city.segments
-            .iter()
-            .any(|s| s.class == SegmentClass::Street)
-    );
-    assert!(city.segments.iter().all(|s| s.length == 4 && s.speed > 0));
+}
+
+#[test]
+fn the_edge_road_beside_the_water_is_left_out() {
+    let dry = City::generate("harbor", 2).unwrap();
+    let wide = build("harbor", 2, Some(false)).unwrap();
+    // One line of 7 intersections and 6 segments is gone.
+    assert_eq!(wide.nodes.len() - dry.nodes.len(), 7);
+    assert_eq!(wide.segments.len() - dry.segments.len(), 6 + 7);
 }
 
 #[test]
 fn each_district_has_one_park_block() {
-    let city = City::generate("harbor", 2);
-    for dist in &city.districts {
-        let parks: HashSet<(u16, u16)> = city
-            .lots
-            .iter()
-            .filter(|l| l.district == dist.id && l.zone == Zone::Park)
-            .map(|l| ((l.x - 1) / ROAD_SPACING, (l.z - 1) / ROAD_SPACING))
-            .collect();
-        assert_eq!(parks.len(), 1, "district {}", dist.id);
-        let lots = city
-            .lots
-            .iter()
-            .filter(|l| l.district == dist.id && l.zone == Zone::Park)
-            .count();
-        assert_eq!(lots, 9);
+    for d in [2, 4] {
+        for seed in seeds().iter().map(String::as_str).chain(["harbor"]) {
+            let city = city_of(seed, d);
+            for dist in &city.districts {
+                let park: Vec<_> = city
+                    .lots
+                    .iter()
+                    .filter(|l| l.district == dist.id && l.zone == Zone::Park)
+                    .collect();
+                let blocks: HashSet<_> = park
+                    .iter()
+                    .map(|l| ((l.x - 1) / ROAD_SPACING, (l.z - 1) / ROAD_SPACING))
+                    .collect();
+                assert_eq!(
+                    (park.len(), blocks.len()),
+                    (9, 1),
+                    "{seed} district {}",
+                    dist.id
+                );
+            }
+        }
     }
 }
 
 #[test]
 fn one_tower_downtown() {
-    for seed in ["harbor", "x", "y", "z"] {
-        for d in [1, 2, 3] {
-            let city = City::generate(seed, d);
+    for d in [2, 4] {
+        for seed in seeds().iter().map(String::as_str).chain(["harbor"]) {
+            let city = city_of(seed, d);
             let towers: Vec<_> = city
                 .lots
                 .iter()
                 .filter(|l| l.kind == BuildingKind::FELIX_TOWER)
                 .collect();
-            assert_eq!(towers.len(), 1);
+            assert_eq!(towers.len(), 1, "{seed}");
             assert_eq!(towers[0].zone, Zone::Downtown);
+            assert!(!is_middle(towers[0]));
             assert_eq!(towers[0].name.as_deref(), Some("Felix Tower"));
         }
     }
 }
 
 #[test]
-fn harbor_has_water_and_no_lot_on_it() {
-    let city = City::generate("harbor", 2);
-    assert!(city.shore.is_some());
-    assert!(!city.water.is_empty());
-    let water: HashSet<_> = city.water.iter().copied().collect();
-    assert!(city.lots.iter().all(|l| !water.contains(&(l.x, l.z))));
-    // 4 blocks of 9 tiles along one edge of a 6-block side, plus nothing else.
-    assert_eq!(water.len(), 6 * 9);
-    assert_eq!(city.lots.len() + water.len(), 36 * 9);
+fn shorelines_leave_no_lot_on_water() {
+    for d in [2, 4] {
+        let mut wet = 0;
+        for seed in seeds().iter().map(String::as_str).chain(["harbor"]) {
+            let city = city_of(seed, d);
+            if city.shore.is_none() {
+                assert!(city.water.is_empty());
+                continue;
+            }
+            wet += 1;
+            let water: HashSet<_> = city.water.iter().copied().collect();
+            assert!(city.lots.iter().all(|l| !water.contains(&(l.x, l.z))));
+            let blocks = usize::from(d * 3);
+            assert_eq!(city.lots.len(), 9 * blocks * (blocks - 1));
+            assert_eq!(water.len(), 9 * blocks + usize::from(city.tiles()));
+        }
+        assert!(wet > 3 && wet < 51, "{wet} wet seeds");
+    }
+    assert!(city_of("harbor", 2).shore.is_some());
 }
 
 #[test]
-fn some_seeds_are_dry() {
-    let wet = (0..40)
-        .filter(|i| City::generate(&format!("seed-{i}"), 2).shore.is_some())
-        .count();
-    assert!((1..40).contains(&wet));
+fn the_shoreline_changes_only_the_wet_lots() {
+    let mut checked = 0;
+    for d in [2, 4] {
+        for seed in seeds() {
+            let wet = city_of(&seed, d);
+            if wet.shore.is_none() {
+                continue;
+            }
+            checked += 1;
+            let dry = build(&seed, d, Some(false)).unwrap();
+            assert_eq!(dry.shore, None);
+            let kept: std::collections::HashMap<_, _> =
+                wet.lots.iter().map(|l| ((l.x, l.z), l)).collect();
+            let water: HashSet<_> = wet.water.iter().copied().collect();
+            for lot in &dry.lots {
+                match kept.get(&(lot.x, lot.z)) {
+                    Some(w) => {
+                        assert_eq!(
+                            (w.zone, w.kind, w.facing, &w.name, w.district),
+                            (lot.zone, lot.kind, lot.facing, &lot.name, lot.district)
+                        );
+                        assert_eq!(w.door().map(|d| d.offset), lot.door().map(|d| d.offset));
+                    }
+                    None => assert!(water.contains(&(lot.x, lot.z))),
+                }
+            }
+            for (a, b) in wet.districts.iter().zip(&dry.districts) {
+                assert_eq!(a.park, b.park);
+            }
+            assert_eq!(wet.streets, dry.streets);
+        }
+    }
+    assert!(checked > 3);
 }
 
 #[test]
 fn kinds_match_their_zone_and_names() {
-    let city = City::generate("harbor", 2);
+    let city = city_of("harbor", 2);
     for lot in &city.lots {
         let info = lot.kind.info();
+        if is_middle(lot) {
+            continue;
+        }
         match lot.zone {
             Zone::Suburban => assert_eq!(info.pack, "suburban"),
             Zone::Industrial => assert_eq!(info.pack, "industrial"),
@@ -177,5 +284,3 @@ fn resident_names_are_stable_and_varied() {
     assert!(names.len() > 100);
     assert!(resident_name("harbor", 0).is_ascii());
 }
-
-use crate::names::resident_name;

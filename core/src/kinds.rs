@@ -24,12 +24,13 @@ impl BuildingKind {
     pub const SKYSCRAPER_COUNT: usize = 4;
     pub const HOUSE_FIRST: u8 = 19;
     pub const HOUSE_COUNT: usize = 10;
+    /// Factories, then chimneys and tanks.
     pub const FACTORY_FIRST: u8 = 29;
-    pub const FACTORY_COUNT: usize = 6;
-    pub const LANDMARK_FIRST: u8 = 35;
-    pub const LANDMARK_COUNT: usize = 3;
+    pub const FACTORY_COUNT: usize = 9;
     pub const TREE_FIRST: u8 = 38;
     pub const TREE_COUNT: usize = 2;
+    /// Trees, then the plaza props, for the middle of a block.
+    pub const FILLER_COUNT: usize = 4;
     /// The Felix tower: `building-skyscraper-e`.
     pub const FELIX_TOWER: BuildingKind = BuildingKind(18);
 
@@ -38,7 +39,7 @@ impl BuildingKind {
     }
 }
 
-pub const KINDS: [KindInfo; 40] = [
+pub const KINDS: [KindInfo; 42] = [
     k("commercial", "building-a"),
     k("commercial", "building-b"),
     k("commercial", "building-c"),
@@ -79,4 +80,6 @@ pub const KINDS: [KindInfo; 40] = [
     k("industrial", "detail-tank-large"),
     k("suburban", "tree-large"),
     k("suburban", "tree-small"),
+    k("commercial", "detail-parasol-a"),
+    k("suburban", "planter"),
 ];

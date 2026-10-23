@@ -8,7 +8,7 @@ fn main() {
     let rows: Vec<String> = cases
         .iter()
         .map(|&(seed, d)| {
-            let city = City::generate(seed, d);
+            let city = City::generate(seed, d).unwrap();
             format!(
                 "  {{\"seed\": \"{seed}\", \"districts\": {d}, \"lots\": {}, \"segments\": {}, \"shore\": {}, \"hash\": \"{:016x}\"}}",
                 city.lots.len(),
