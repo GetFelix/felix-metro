@@ -47,7 +47,14 @@ function sharedAssets(): Plugin {
 
 export default defineConfig({
   plugins: [sharedAssets()],
-  build: { rollupOptions: { input: { main: fileURLToPath(new URL('index.html', import.meta.url)), models: fileURLToPath(new URL('models.html', import.meta.url)) } } },
+  build: {
+    rollupOptions: {
+      input: {
+        main: fileURLToPath(new URL('index.html', import.meta.url)),
+        models: fileURLToPath(new URL('models.html', import.meta.url)),
+      },
+    },
+  },
   server: { fs: { allow: ['..'] } },
   test: { environment: 'node' },
 });

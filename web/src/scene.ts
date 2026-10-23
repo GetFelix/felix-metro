@@ -1,18 +1,7 @@
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import type { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
-import {
-  BULB_OFF,
-  CYAN,
-  FOG,
-  GROUND_NIGHT,
-  HEMI,
-  PALETTE,
-  SIGN_EMISSIVE,
-  SKY,
-  SUN_WHITE,
-  TOWER,
-} from './palette';
+import { BULB_OFF, CYAN, FOG, GROUND_NIGHT, HEMI, PALETTE, SIGN_EMISSIVE, SKY, SUN_WHITE, TOWER } from './palette';
 import type { Pack } from './assets';
 import { cloneModel, facing as facingOf, fitToLot, loadModel } from './models';
 import { createMaterials } from './materials';

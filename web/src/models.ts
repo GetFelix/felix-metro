@@ -37,12 +37,7 @@ export function fitToLot(pack: Pack, o: THREE.Object3D) {
 }
 
 // A lot's front turns toward a neighbouring road. Kenney fronts face +Z.
-export function facing(
-  x: number,
-  z: number,
-  isRoad: (v: number) => boolean,
-  pick: <T>(a: readonly T[]) => T,
-): number {
+export function facing(x: number, z: number, isRoad: (v: number) => boolean, pick: <T>(a: readonly T[]) => T): number {
   const options: number[] = [];
   if (isRoad(x + 1)) options.push(Math.PI / 2);
   if (isRoad(x - 1)) options.push(-Math.PI / 2);
