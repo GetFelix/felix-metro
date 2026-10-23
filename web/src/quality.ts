@@ -103,13 +103,13 @@ export function createQuality(opts: QualityOptions): Quality {
   let count = 0;
   let skipped = 0;
   let elapsed = 0;
-  let window = FIRST_WINDOW_MS;
+  let windowMs = FIRST_WINDOW_MS;
 
   function restart(ms: number) {
     count = 0;
     skipped = 0;
     elapsed = 0;
-    window = ms;
+    windowMs = ms;
   }
 
   return {
@@ -132,7 +132,7 @@ export function createQuality(opts: QualityOptions): Quality {
       elapsed += frameMs;
       if (skipped < SETTLE_FRAMES) skipped++;
       else if (count < samples.length) samples[count++] = frameMs;
-      if (elapsed < window || count < MIN_SAMPLES) return;
+      if (elapsed < windowMs || count < MIN_SAMPLES) return;
       const next = decideTier(tier, samples.subarray(0, count), forced);
       if (next === tier) {
         done = true;
