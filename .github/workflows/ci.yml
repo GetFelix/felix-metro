@@ -55,7 +55,7 @@ jobs:
             [[ $up -eq 1 ]] || { echo "nothing is serving on port $port" >&2; exit 1; }
           done
           failed=0
-          for t in 12 17.8 21; do
+          for t in 6.8 12 17.8 18.7 21; do
             FRAME_T=$t npm run frame -- http://127.0.0.1:4173/ http://127.0.0.1:4174/prototype/style-frame.html "frames/t-$t" || failed=1
           done
           exit $failed
