@@ -1,6 +1,4 @@
 import * as THREE from 'three';
-import { GLTFLoader, type GLTF } from 'three/addons/loaders/GLTFLoader.js';
-import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import type { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import {
@@ -10,13 +8,14 @@ import {
   GROUND_NIGHT,
   HEMI,
   PALETTE,
-  ROOFS,
   SIGN_EMISSIVE,
   SKY,
   SUN_WHITE,
   TOWER,
-  WALLS,
 } from './palette';
+import type { Pack } from './assets';
+import { cloneModel, facing as facingOf, fitToLot, loadModel } from './models';
+import { createMaterials } from './materials';
 import type { Tier } from './params';
 
 // Seeded so the frame is identical on every load.
@@ -55,74 +54,6 @@ function radial(color: string) {
   g.fillRect(0, 0, 128, 128);
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
-  return t;
-}
-
-// Pixels of a copy of the colormap, to be rewritten and turned back into a texture.
-function colormapCopy(tex: THREE.Texture) {
-  const img = tex.image;
-  const c = document.createElement('canvas');
-  c.width = img.width;
-  c.height = img.height;
-  const g = c.getContext('2d')!;
-  g.drawImage(img, 0, 0);
-  return { c, g, d: g.getImageData(0, 0, c.width, c.height) };
-}
-
-// Windows are the light-blue swatches of Kenney's colormap. A copy of the colormap with only those swatches kept
-// becomes the emissive map, so lit windows come from the texture the models already use.
-function windowMask(tex: THREE.Texture) {
-  const { c, g, d } = colormapCopy(tex);
-  for (let i = 0; i < d.data.length; i += 4) {
-    const [r, gg, b] = [d.data[i]!, d.data[i + 1]!, d.data[i + 2]!];
-    const isWindow = b > 170 && b > r + 25 && b >= gg && gg > 150;
-    const v = isWindow ? 255 : 0;
-    d.data[i] = v;
-    d.data[i + 1] = v;
-    d.data[i + 2] = v;
-    d.data[i + 3] = 255;
-  }
-  g.putImageData(d, 0, 0);
-  const m = new THREE.CanvasTexture(c);
-  m.flipY = tex.flipY;
-  m.colorSpace = THREE.SRGBColorSpace;
-  m.magFilter = THREE.NearestFilter;
-  return m;
-}
-
-const variants = new Map<string, THREE.CanvasTexture>();
-function variantMap(tex: THREE.Texture, v: number) {
-  const key = `${tex.uuid}:${v}`;
-  if (variants.has(key)) return variants.get(key)!;
-  const { c, g, d } = colormapCopy(tex);
-  const wall = new THREE.Color(WALLS[v % WALLS.length]!);
-  const roof = new THREE.Color(ROOFS[(v * 3) % ROOFS.length]!);
-  for (let i = 0; i < d.data.length; i += 4) {
-    const r = d.data[i]!,
-      gg = d.data[i + 1]!,
-      b = d.data[i + 2]!;
-    const mx = Math.max(r, gg, b),
-      mn = Math.min(r, gg, b);
-    let tint: THREE.Color | null = null,
-      k = mx / 255;
-    if (mx > 200 && mx - mn < 18) tint = wall;
-    else if (gg > r + 40 && gg > b + 10) {
-      tint = roof;
-      k = 0.55 + 0.6 * (gg / 255);
-    }
-    if (tint) {
-      d.data[i] = Math.min(255, tint.r * 255 * k);
-      d.data[i + 1] = Math.min(255, tint.g * 255 * k);
-      d.data[i + 2] = Math.min(255, tint.b * 255 * k);
-    }
-  }
-  g.putImageData(d, 0, 0);
-  const t = new THREE.CanvasTexture(c);
-  t.flipY = tex.flipY;
-  t.colorSpace = THREE.SRGBColorSpace;
-  t.magFilter = THREE.NearestFilter;
-  t.anisotropy = 8;
-  variants.set(key, t);
   return t;
 }
 
@@ -191,19 +122,6 @@ const CARS = [
 ];
 const CAR_SCALE = 0.12;
 const PEOPLE = 'abcdef'.split('').flatMap((c) => [`character-female-${c}`, `character-male-${c}`]);
-const LOT = 0.9;
-
-// Facing: a lot's front turns toward the nearest road. Kenney fronts face +Z.
-function facing(x: number, z: number) {
-  const options: number[] = [];
-  if (isRoad(x + 1)) options.push(Math.PI / 2);
-  if (isRoad(x - 1)) options.push(-Math.PI / 2);
-  if (isRoad(z + 1)) options.push(0);
-  if (isRoad(z - 1)) options.push(Math.PI);
-  return options.length ? pick(options) : pick([0, Math.PI / 2, Math.PI, -Math.PI / 2]);
-}
-
-type Pack = 'roads' | 'commercial' | 'suburban' | 'industrial' | 'cars' | 'mini-characters';
 
 export async function createCity(renderer: THREE.WebGLRenderer, tier: Tier) {
   const scene = new THREE.Scene();
@@ -233,37 +151,8 @@ export async function createCity(renderer: THREE.WebGLRenderer, tier: Tier) {
   scene.add(ground);
 
   // ---------- assets ----------
-  const loader = new GLTFLoader();
-  const cache = new Map<string, Promise<GLTF>>();
-  const packMaterials = new Map<string, THREE.MeshStandardMaterial>();
-  const masks = new Map<string, THREE.CanvasTexture>();
-  function model(pack: Pack, name: string) {
-    const key = `${pack}/${name}`;
-    if (!cache.has(key)) cache.set(key, loader.loadAsync(`assets/models/${pack}/${name}.glb`));
-    return cache.get(key)!;
-  }
-
-  // One material per pack, colour variant and light level, shared by every model using it.
-  function materialFor(pack: Pack, src: THREE.MeshStandardMaterial, lit: number, v = -1) {
-    const key = `${pack}:${lit}:${v}`;
-    if (!packMaterials.has(key)) {
-      const map = v >= 0 ? variantMap(src.map!, v) : src.map!;
-      map.magFilter = THREE.NearestFilter;
-      map.anisotropy = 8;
-      const m = new THREE.MeshStandardMaterial({ map, roughness: 0.82, metalness: 0.0, envMapIntensity: 0.45 });
-      if (lit > 0) {
-        // From the original colormap: a recoloured wall can look like glass.
-        if (!masks.has(pack)) masks.set(pack, windowMask(src.map!));
-        m.emissiveMap = masks.get(pack)!;
-        m.emissive = PALETTE.window.clone();
-        m.userData.lit = lit;
-      }
-      packMaterials.set(key, m);
-    }
-    return packMaterials.get(key)!;
-  }
-
-  const litMaterials = () => [...packMaterials.values()].filter((m) => m.userData.lit);
+  const materials = createMaterials();
+  const facing = (x: number, z: number) => facingOf(x, z, isRoad, pick);
 
   function meshes(o: THREE.Object3D, apply: (m: THREE.Mesh) => void) {
     o.traverse((n) => {
@@ -272,22 +161,16 @@ export async function createCity(renderer: THREE.WebGLRenderer, tier: Tier) {
   }
 
   async function place(pack: Pack, name: string, x: number, z: number, rotY = 0, scale = 1, lit = 0, v = -1) {
-    const gltf = await model(pack, name);
-    const o = gltf.scene.clone(true);
+    const o = cloneModel(await loadModel(pack, name));
     meshes(o, (n) => {
-      n.material = materialFor(pack, n.userData.src || n.material, lit, v);
+      n.material = materials.materialFor(pack, n.material as THREE.MeshStandardMaterial, lit, v);
       n.castShadow = true;
       n.receiveShadow = true;
     });
     o.position.set(x, 0, z);
     o.rotation.y = rotY;
     o.scale.setScalar(scale);
-    // Some Kenney buildings are wider than a tile; shrink those to fit their lot.
-    if (['commercial', 'suburban', 'industrial'].includes(pack)) {
-      const size = new THREE.Box3().setFromObject(o).getSize(new THREE.Vector3());
-      const widest = Math.max(size.x, size.z);
-      if (widest > LOT) o.scale.multiplyScalar(LOT / widest);
-    }
+    fitToLot(pack, o);
     scene.add(o);
     return o;
   }
@@ -480,10 +363,9 @@ export async function createCity(renderer: THREE.WebGLRenderer, tier: Tier) {
 
   async function addCar(axis: 'x' | 'z', line: number, dir: number, offset: number, speed: number) {
     const name = pick(CARS);
-    const gltf = await model('cars', name);
-    const o = gltf.scene.clone(true);
+    const o = cloneModel(await loadModel('cars', name));
     meshes(o, (n) => {
-      n.material = materialFor('cars', n.material as THREE.MeshStandardMaterial, 0);
+      n.material = materials.materialFor('cars', n.material as THREE.MeshStandardMaterial, 0);
       n.castShadow = true;
     });
     o.scale.setScalar(CAR_SCALE);
@@ -523,10 +405,10 @@ export async function createCity(renderer: THREE.WebGLRenderer, tier: Tier) {
     const name = pick(PEOPLE);
     const phase = rand() * 2;
     const speed = 0.22 + rand() * 0.08;
-    const gltf = await model('mini-characters', name);
-    const o = SkeletonUtils.clone(gltf.scene);
+    const gltf = await loadModel('mini-characters', name);
+    const o = cloneModel(gltf);
     meshes(o, (n) => {
-      n.material = materialFor('mini-characters', n.material as THREE.MeshStandardMaterial, 0);
+      n.material = materials.materialFor('mini-characters', n.material as THREE.MeshStandardMaterial, 0);
       n.castShadow = true;
     });
     o.scale.setScalar(0.17);
@@ -621,7 +503,7 @@ export async function createCity(renderer: THREE.WebGLRenderer, tier: Tier) {
     (ground.material as THREE.MeshStandardMaterial).color
       .set(PALETTE.grass)
       .lerp(new THREE.Color(GROUND_NIGHT), n * 0.6);
-    for (const m of litMaterials()) m.emissiveIntensity = n * 0.85 * m.userData.lit;
+    for (const m of materials.lit()) m.emissiveIntensity = n * 0.85 * m.userData.lit;
     const lampOn = smooth(THREE.MathUtils.clamp((n - 0.25) / 0.4, 0, 1));
     poolMat.opacity = lampOn * 0.55;
     glowMat.opacity = lampOn * 0.9;

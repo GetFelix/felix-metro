@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "frame": "node scripts/compare-frame.mjs"
+    "frame": "node scripts/compare-frame.mjs",
+    "models": "node scripts/check-models.mjs"
   },
   "dependencies": {
     "three": "0.170.0"
