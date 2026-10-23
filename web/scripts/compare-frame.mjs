@@ -21,6 +21,11 @@ async function shoot(url, file) {
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e)));
   page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
+  // Models finish loading in request order, so the seeded random numbers drawn after a load go to the same models.
+  let loads = Promise.resolve();
+  await page.route('**/*.glb', (route) => {
+    loads = loads.then(async () => route.fulfill({ response: await route.fetch() }));
+  });
   await page.goto(url, { waitUntil: 'load', timeout: 120_000 });
   await page.waitForFunction(() => window.__ready === true, null, { timeout: 180_000 });
   await page.evaluate(() => document.fonts.ready.then(() => true));
