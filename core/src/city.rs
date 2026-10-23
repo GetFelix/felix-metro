@@ -1,24 +1,34 @@
-//! A city grown from a seed: districts, lots, the road graph and names.
+//! A city grown from a seed: arterials, blocks, zones, lots, the road graph
+//! and names.
 //!
-//! The layout follows the style frame. A district is 12 by 12 tiles with a
-//! road on every fourth tile, which leaves 3 by 3 blocks of 3 by 3 lots, and
-//! one block in each district is a park. Roads also close the far edge of the
-//! city, so a city of `d` districts a side is `12 * d + 1` tiles across.
-//! Coordinates are tiles, `x` east and `z` south, from the north-west corner.
+//! Arterials cross the whole city at irregular spacing and local streets
+//! split the blocks between them; land value then sets the zones and heights.
+//! A district is 12 by 12 tiles and only shards the city, roads ignore it.
+//! The road along each far edge makes a city of `d` districts a side
+//! `12 * d + 1` tiles across. Coordinates are tiles, `x` east and `z` south,
+//! from the north-west corner. See `docs/design.md`, "City layout".
 
 use std::fmt::Write;
 
 use crate::{
     kinds::BuildingKind,
-    names::{business_name, street_names},
+    names::street_names,
     rng::{FNV_OFFSET, Rng, fnv1a},
 };
+use lots::{pick_parks, plan_lots, tower_tile};
+use noise::{below, mix};
+use roads::{
+    EAST, NORTH, SOUTH, WEST, build_graph, idx, is_road, keep_largest, lay_out, neighbours,
+};
+use zoning::Site;
+
+mod lots;
+mod noise;
+mod roads;
+mod zoning;
 
 /// Tiles along a district's side.
 pub const DISTRICT_TILES: u16 = 12;
-/// Tiles between two roads, the road included.
-pub const ROAD_SPACING: u16 = 4;
-const BLOCKS_PER_SIDE: u16 = 3;
 const MAX_DISTRICTS: u16 = 16;
 
 /// Why a city could not be generated.
@@ -45,7 +55,7 @@ impl std::error::Error for GenerateError {}
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Door {
     pub segment: u32,
-    /// Tiles from the segment's first intersection, 1 to 3.
+    /// Tiles from the segment's first node, 0 up to its length.
     pub offset: u16,
 }
 
@@ -72,7 +82,7 @@ impl Zone {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SegmentClass {
-    /// A road on a district boundary.
+    /// An arterial, a road that crosses the whole city.
     Avenue,
     Street,
 }
@@ -93,8 +103,8 @@ pub struct District {
     /// Grid position in districts.
     pub x: u16,
     pub z: u16,
-    /// The park block, as 0 to 2 within the district.
-    pub park: (u8, u8),
+    /// The north-west tile of the district's park block, if it has one.
+    pub park: Option<(u16, u16)>,
 }
 
 #[derive(Clone, Debug)]
@@ -112,8 +122,8 @@ pub struct Lot {
 }
 
 impl Lot {
-    /// Where the lot meets the road, or `None` for the middle lot of a
-    /// block, which is filler and has no road beside it.
+    /// Where the lot meets the road, or `None` for filler: a tile inside a
+    /// block with no road beside it, left as trees or a plaza prop.
     pub fn door(&self) -> Option<Door> {
         self.door
     }
@@ -150,8 +160,66 @@ pub struct City {
     pub streets: Vec<String>,
     /// The edge with water along it: 0 north, 1 east, 2 south, 3 west.
     pub shore: Option<u8>,
-    /// Water tiles; no lot is built on them.
+    /// Water tiles; no lot or road is built on them.
     pub water: Vec<(u16, u16)>,
+    /// Every road tile, row by row, with the piece it needs.
+    pub roads: Vec<RoadTile>,
+    /// The main centre, then the secondary ones.
+    pub centres: Vec<(u16, u16)>,
+}
+
+/// The kind of road piece a tile needs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RoadPiece {
+    Straight,
+    Corner,
+    /// Three ways.
+    T,
+    Cross,
+    /// A dead end.
+    End,
+}
+
+/// A road tile and the piece to draw on it.
+///
+/// `mask` has one bit per road neighbour: 1 north, 2 east, 4 south, 8 west.
+/// `rot` is the quarter turns clockwise from the piece's base orientation to
+/// `mask`; the bases are straight east and west, corner east and south, T
+/// east, south and west, end south, cross all four.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RoadTile {
+    pub x: u16,
+    pub z: u16,
+    pub piece: RoadPiece,
+    pub rot: u8,
+    pub mask: u8,
+    /// On an interior arterial.
+    pub avenue: bool,
+}
+
+fn road_tile(mask: &[u8], n: i32, x: i32, z: i32) -> RoadTile {
+    let m = neighbours(mask, n, x, z);
+    let (piece, base) = match m.count_ones() {
+        4 => (RoadPiece::Cross, m),
+        3 => (RoadPiece::T, EAST | SOUTH | WEST),
+        2 if m == NORTH | SOUTH || m == EAST | WEST => (RoadPiece::Straight, EAST | WEST),
+        2 => (RoadPiece::Corner, EAST | SOUTH),
+        _ => (RoadPiece::End, SOUTH),
+    };
+    let turn = |m: u8| ((m << 1) | (m >> 3)) & 15;
+    let (mut rot, mut b) = (0u8, base);
+    while b != m && rot < 3 {
+        b = turn(b);
+        rot += 1;
+    }
+    RoadTile {
+        x: x as u16,
+        z: z as u16,
+        piece,
+        rot,
+        mask: m,
+        avenue: mask[idx(n, x, z)] & roads::ARTERIAL != 0,
+    }
 }
 
 impl City {
@@ -184,7 +252,11 @@ impl City {
             h.num(u64::from(x) << 16 | u64::from(z));
         }
         for dist in &self.districts {
-            h.num(u64::from(dist.id) << 16 | u64::from(dist.park.0) << 8 | u64::from(dist.park.1));
+            h.num(u64::from(dist.id));
+            h.num(
+                dist.park
+                    .map_or(u64::MAX, |(x, z)| u64::from(x) << 16 | u64::from(z)),
+            );
         }
         for lot in &self.lots {
             h.num(u64::from(lot.id) << 32 | u64::from(lot.x) << 16 | u64::from(lot.z));
@@ -206,6 +278,18 @@ impl City {
         }
         for street in &self.streets {
             h.text(street);
+        }
+        for r in &self.roads {
+            h.num(
+                u64::from(r.x) << 32
+                    | u64::from(r.z) << 16
+                    | u64::from(r.mask) << 8
+                    | u64::from(r.rot),
+            );
+            h.num(u64::from(r.piece as u8) << 1 | u64::from(r.avenue));
+        }
+        for &(x, z) in &self.centres {
+            h.num(u64::from(x) << 16 | u64::from(z));
         }
         h.0
     }
@@ -268,6 +352,26 @@ impl City {
                 g.street
             );
         }
+        s.push_str(
+            "],\"roadColumns\":[\"x\",\"z\",\"piece\",\"rot\",\"mask\",\"avenue\"],\"roads\":[",
+        );
+        for (n, r) in self.roads.iter().enumerate() {
+            let _ = write!(
+                s,
+                "{}[{},{},{},{},{},{}]",
+                if n > 0 { "," } else { "" },
+                r.x,
+                r.z,
+                r.piece as u8,
+                r.rot,
+                r.mask,
+                u8::from(r.avenue)
+            );
+        }
+        s.push_str("],\"centres\":[");
+        for (n, (x, z)) in self.centres.iter().enumerate() {
+            let _ = write!(s, "{}[{x},{z}]", if n > 0 { "," } else { "" });
+        }
         s.push_str("],\"streets\":[");
         for (n, name) in self.streets.iter().enumerate() {
             let _ = write!(s, "{}\"{name}\"", if n > 0 { "," } else { "" });
@@ -278,7 +382,7 @@ impl City {
 }
 
 /// `wet` overrides the seed's own choice of whether it has a shoreline; the
-/// edge it would use is drawn either way.
+/// edge it would use is reserved either way.
 pub(crate) fn build(
     seed: &str,
     districts_per_side: u16,
@@ -290,237 +394,128 @@ pub(crate) fn build(
     if districts_per_side == 0 || districts_per_side > MAX_DISTRICTS {
         return Err(GenerateError::Districts);
     }
-    let d = districts_per_side;
-    let blocks = d * BLOCKS_PER_SIDE;
-    let lines = blocks + 1;
-    let mut rng = Rng::new(seed);
+    let d = i32::from(districts_per_side);
+    let n = DISTRICT_TILES as i32 * d + 1;
+    let seed_hash = fnv1a(FNV_OFFSET, seed.as_bytes());
 
-    let seed_is_wet = rng.below(3) == 0;
-    let edge = rng.below(4) as u8;
-    let shore = wet
-        .unwrap_or(seed == "harbor" || seed_is_wet)
-        .then_some(edge);
-    let on_edge_row = |bx: u16, bz: u16| match edge {
-        0 => bz == 0,
-        1 => bx == blocks - 1,
-        2 => bz == blocks - 1,
-        _ => bx == 0,
-    };
-    let is_water_block = |bx: u16, bz: u16| shore.is_some() && on_edge_row(bx, bz);
+    let has_water = seed == "harbor" || below(mix(seed_hash, noise::SHORE, &[0]), 3) == 0;
+    let edge = below(mix(seed_hash, noise::SHORE, &[1]), 4) as u8;
+    let shore = wet.unwrap_or(has_water).then_some(edge);
 
-    // The road line along the water has the map edge on its other side and
-    // serves no lot, so it is left out.
-    let (i0, i1, j0, j1) = match shore {
-        Some(0) => (0, lines, 1, lines),
-        Some(1) => (0, lines - 1, 0, lines),
-        Some(2) => (0, lines, 0, lines - 1),
-        Some(3) => (1, lines, 0, lines),
-        _ => (0, lines, 0, lines),
-    };
-    let (cols, rows) = (i1 - i0, j1 - j0);
-    let node = |i: u16, j: u16| u32::from((j - j0) * cols + (i - i0));
-    let h_count = u32::from(rows) * u32::from(cols - 1);
-    let h_id = |i: u16, j: u16| u32::from((j - j0) * (cols - 1) + (i - i0));
-    let v_id = |i: u16, j: u16| h_count + u32::from((i - i0) * (rows - 1) + (j - j0));
+    let site = Site::new(seed_hash, n, has_water, edge);
+    let layout = lay_out(&site);
+    let block_zones: Vec<Zone> = layout.blocks.iter().map(|&b| site.block_zone(b)).collect();
+    let tower = tower_tile(&site, &layout.mask);
+    let park_blocks = pick_parks(&site, &layout.blocks, &block_zones, tower, d);
+    let mut is_park = vec![false; layout.blocks.len()];
+    for &b in park_blocks.iter().flatten() {
+        is_park[b] = true;
+    }
+    let planned = plan_lots(&site, &layout, &block_zones, &is_park, tower);
 
-    // Distances are measured from the city centre in half tiles so lot
-    // centres stay whole numbers.
-    let centre = i32::from(DISTRICT_TILES * d);
-    let dist2 = |tx: u16, tz: u16, size: u16| {
-        let dx = i32::from(tx * 2 + size) - centre;
-        let dz = i32::from(tz * 2 + size) - centre;
-        dx * dx + dz * dz
-    };
-
-    // The tower stands on the lot nearest the centre that is not a block's
-    // middle. That lot is never wet, so the shoreline cannot move it.
-    let mut tower = (i32::MAX, 0, 0, 0, 0);
-    for bz in 0..blocks {
-        for bx in 0..blocks {
-            for iz in 0..BLOCKS_PER_SIDE {
-                for ix in 0..BLOCKS_PER_SIDE {
-                    if ix == 1 && iz == 1 {
-                        continue;
-                    }
-                    let (x, z) = (bx * ROAD_SPACING + 1 + ix, bz * ROAD_SPACING + 1 + iz);
-                    let d2 = dist2(x, z, 1);
-                    if d2 < tower.0 {
-                        tower = (d2, bx, bz, x, z);
-                    }
+    // The layout above ignores the shoreline. Water is a mask over it: the
+    // shore tiles go under, roads left cut off go with them, and so does any
+    // lot whose road did.
+    let tiles = (n * n) as usize;
+    let mut flooded = vec![false; tiles];
+    let mut mask = layout.mask.clone();
+    if shore.is_some() {
+        for z in 0..n {
+            for x in 0..n {
+                if site.is_shore_water(x, z) {
+                    flooded[idx(n, x, z)] = true;
+                    mask[idx(n, x, z)] = 0;
                 }
             }
         }
-    }
-    let (_, tower_bx, tower_bz, tower_x, tower_z) = tower;
-
-    // Parks avoid the row along the shoreline edge whether or not the seed
-    // is wet, so a dry city and its wet twin keep the same parks.
-    let mut districts = Vec::new();
-    for dz in 0..d {
-        for dx in 0..d {
-            let mut candidates = Vec::new();
-            for lz in 0..BLOCKS_PER_SIDE {
-                for lx in 0..BLOCKS_PER_SIDE {
-                    let (bx, bz) = (dx * BLOCKS_PER_SIDE + lx, dz * BLOCKS_PER_SIDE + lz);
-                    if !on_edge_row(bx, bz) && (bx, bz) != (tower_bx, tower_bz) {
-                        candidates.push((lx as u8, lz as u8));
-                    }
-                }
-            }
-            let park = candidates[rng.below(candidates.len())];
-            districts.push(District {
-                id: dz * d + dx,
-                x: dx,
-                z: dz,
-                park,
-            });
+        for i in keep_largest(&mut mask, n) {
+            flooded[i] = true;
         }
     }
+    let graph = build_graph(&mask, &site);
 
-    // Water lots draw the same values as dry ones and throw them away.
     let mut lots = Vec::new();
-    let mut water = Vec::new();
-    for bz in 0..blocks {
-        for bx in 0..blocks {
-            let district =
-                &districts[usize::from((bz / BLOCKS_PER_SIDE) * d + bx / BLOCKS_PER_SIDE)];
-            let is_park =
-                district.park == ((bx % BLOCKS_PER_SIDE) as u8, (bz % BLOCKS_PER_SIDE) as u8);
-            let roll = rng.below(3);
-            let permille =
-                dist2(bx * ROAD_SPACING + 1, bz * ROAD_SPACING + 1, 3) * 1000 / (centre * centre);
-            let zone = if is_park {
-                Zone::Park
-            } else if permille < 100 {
-                Zone::Downtown
-            } else if permille < 350 {
-                Zone::Commercial
-            } else if roll == 0 {
-                Zone::Industrial
-            } else {
-                Zone::Suburban
-            };
-            for iz in 0..BLOCKS_PER_SIDE {
-                for ix in 0..BLOCKS_PER_SIDE {
-                    let (x, z) = (bx * ROAD_SPACING + 1 + ix, bz * ROAD_SPACING + 1 + iz);
-                    let middle = ix == 1 && iz == 1;
-                    let is_tower = (x, z) == (tower_x, tower_z);
-                    let kind = if is_tower {
-                        BuildingKind::FELIX_TOWER
-                    } else if middle {
-                        filler_kind(&mut rng, zone)
-                    } else {
-                        pick_kind(&mut rng, zone)
-                    };
-                    let facing = if middle {
-                        0
-                    } else {
-                        facing_of(&mut rng, ix, iz)
-                    };
-                    let name = if is_tower {
-                        Some("Felix Tower".to_string())
-                    } else if middle {
-                        None
-                    } else {
-                        business_name(&mut rng, zone)
-                    };
-                    if is_water_block(bx, bz) {
-                        water.push((x, z));
-                        continue;
-                    }
-                    let door = (!middle).then(|| match facing {
-                        0 => Door {
-                            segment: h_id(bx, bz + 1),
-                            offset: ix + 1,
-                        },
-                        1 => Door {
-                            segment: v_id(bx + 1, bz),
-                            offset: iz + 1,
-                        },
-                        2 => Door {
-                            segment: h_id(bx, bz),
-                            offset: ix + 1,
-                        },
-                        _ => Door {
-                            segment: v_id(bx, bz),
-                            offset: iz + 1,
-                        },
-                    });
-                    lots.push(Lot {
-                        id: lots.len() as u32,
-                        x,
-                        z,
-                        district: district.id,
-                        zone,
-                        kind,
-                        facing,
-                        name,
-                        door,
-                    });
+    for p in planned {
+        let door = match p.door {
+            Some((rx, rz)) => match graph.door_at(n, rx, rz) {
+                Some((segment, offset)) if is_road(&mask, n, rx, rz) => {
+                    Some(Door { segment, offset })
                 }
+                _ => {
+                    flooded[idx(n, p.x, p.z)] = true;
+                    continue;
+                }
+            },
+            None => None,
+        };
+        if flooded[idx(n, p.x, p.z)] {
+            continue;
+        }
+        lots.push(Lot {
+            id: lots.len() as u32,
+            x: p.x as u16,
+            z: p.z as u16,
+            district: ((p.z / 12).min(d - 1) * d + (p.x / 12).min(d - 1)) as u16,
+            zone: p.zone,
+            kind: p.kind,
+            facing: p.facing,
+            name: p.name,
+            door,
+        });
+    }
+
+    let districts = (0..d)
+        .flat_map(|dz| (0..d).map(move |dx| (dx, dz)))
+        .zip(&park_blocks)
+        .map(|((dx, dz), park)| District {
+            id: (dz * d + dx) as u16,
+            x: dx as u16,
+            z: dz as u16,
+            park: park.map(|b| {
+                let r = layout.blocks[b];
+                (r.x0 as u16, r.z0 as u16)
+            }),
+        })
+        .collect();
+
+    let mut water = Vec::new();
+    for z in 0..n {
+        for x in 0..n {
+            if flooded[idx(n, x, z)] {
+                water.push((x as u16, z as u16));
             }
         }
     }
-    // The skipped road line is water too.
-    let size = DISTRICT_TILES * d + 1;
-    match shore {
-        Some(0) => water.extend((0..size).map(|x| (x, 0))),
-        Some(1) => water.extend((0..size).map(|z| (size - 1, z))),
-        Some(2) => water.extend((0..size).map(|x| (x, size - 1))),
-        Some(3) => water.extend((0..size).map(|z| (0, z))),
-        _ => {}
-    }
-
-    let streets = street_names(&mut rng, usize::from(lines) * 2);
-    let mut nodes = Vec::new();
-    for j in j0..j1 {
-        for i in i0..i1 {
-            nodes.push((i * ROAD_SPACING, j * ROAD_SPACING));
+    let mut roads = Vec::new();
+    for z in 0..n {
+        for x in 0..n {
+            if is_road(&mask, n, x, z) {
+                roads.push(road_tile(&mask, n, x, z));
+            }
         }
     }
-    let mut segments = Vec::new();
-    let mut adjacency = vec![Vec::new(); nodes.len()];
-    let mut link = |a: u32, b: u32, line: u16, street: u16| {
-        let class = if line.is_multiple_of(BLOCKS_PER_SIDE) {
-            SegmentClass::Avenue
-        } else {
-            SegmentClass::Street
-        };
-        let id = segments.len() as u32;
-        segments.push(Segment {
-            id,
-            a,
-            b,
-            class,
-            length: ROAD_SPACING,
-            speed: class.speed(),
-            street,
-        });
-        adjacency[a as usize].push((b, id));
-        adjacency[b as usize].push((a, id));
-    };
-    for j in j0..j1 {
-        for i in i0..i1 - 1 {
-            link(node(i, j), node(i + 1, j), j, lines + j);
-        }
-    }
-    for i in i0..i1 {
-        for j in j0..j1 - 1 {
-            link(node(i, j), node(i, j + 1), i, i);
-        }
-    }
+    let streets = street_names(
+        &mut Rng::from_state(mix(seed_hash, noise::STREETS, &[])),
+        graph.street_count,
+    );
 
     Ok(City {
         seed: seed.to_string(),
         districts_per_side,
         districts,
         lots,
-        nodes,
-        segments,
-        adjacency,
+        nodes: graph.nodes,
+        segments: graph.segments,
+        adjacency: graph.adjacency,
         streets,
         shore,
         water,
+        roads,
+        centres: site
+            .centres
+            .iter()
+            .map(|&(x, z, _)| (x as u16, z as u16))
+            .collect(),
     })
 }
 
@@ -545,53 +540,6 @@ impl Hasher {
     fn text(&mut self, v: &str) {
         self.0 = fnv1a(fnv1a(self.0, v.as_bytes()), &[0]);
     }
-}
-
-fn pick_kind(rng: &mut Rng, zone: Zone) -> BuildingKind {
-    let (first, count) = match zone {
-        Zone::Downtown if rng.below(2) == 0 => (
-            BuildingKind::SKYSCRAPER_FIRST,
-            BuildingKind::SKYSCRAPER_COUNT,
-        ),
-        Zone::Downtown | Zone::Commercial => (
-            BuildingKind::COMMERCIAL_FIRST,
-            BuildingKind::COMMERCIAL_COUNT,
-        ),
-        Zone::Suburban => (BuildingKind::HOUSE_FIRST, BuildingKind::HOUSE_COUNT),
-        Zone::Industrial => (BuildingKind::FACTORY_FIRST, BuildingKind::FACTORY_COUNT),
-        Zone::Park => (BuildingKind::TREE_FIRST, BuildingKind::TREE_COUNT),
-    };
-    BuildingKind(first + rng.below(count) as u8)
-}
-
-/// What fills the middle of a block: trees in a park, otherwise trees or a
-/// small plaza prop. Nobody lives or works there.
-fn filler_kind(rng: &mut Rng, zone: Zone) -> BuildingKind {
-    let count = if zone == Zone::Park {
-        BuildingKind::TREE_COUNT
-    } else {
-        BuildingKind::FILLER_COUNT
-    };
-    BuildingKind(BuildingKind::TREE_FIRST + rng.below(count) as u8)
-}
-
-/// The quarter turn that points a lot's front at a neighbouring road. A
-/// corner lot has two to pick from. Only called for lots on a block's rim.
-fn facing_of(rng: &mut Rng, ix: u16, iz: u16) -> u8 {
-    let mut options = Vec::with_capacity(4);
-    if iz == 2 {
-        options.push(0);
-    }
-    if ix == 2 {
-        options.push(1);
-    }
-    if iz == 0 {
-        options.push(2);
-    }
-    if ix == 0 {
-        options.push(3);
-    }
-    options[rng.below(options.len())]
 }
 
 #[cfg(test)]

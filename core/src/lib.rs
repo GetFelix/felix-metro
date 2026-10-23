@@ -12,6 +12,8 @@ mod rng;
 #[cfg(target_arch = "wasm32")]
 pub mod wasm;
 
-pub use city::{City, District, Door, GenerateError, Lot, Segment, SegmentClass, Zone};
+pub use city::{
+    City, District, Door, GenerateError, Lot, RoadPiece, RoadTile, Segment, SegmentClass, Zone,
+};
 pub use kinds::{BuildingKind, KINDS, KindInfo};
 pub use names::resident_name;

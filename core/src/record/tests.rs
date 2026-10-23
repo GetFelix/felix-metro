@@ -552,7 +552,8 @@ fn walk(city: &City, len: usize) -> Vec<Leg> {
     while legs.len() < len {
         let next = &city.adjacency[node];
         let (to, segment) = next[rng.below(next.len())];
-        if legs.last().is_some_and(|l| l.segment == segment) {
+        // A dead end has one way out, which is the way back.
+        if next.len() > 1 && legs.last().is_some_and(|l| l.segment == segment) {
             continue;
         }
         legs.push(Leg {
