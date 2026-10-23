@@ -11,10 +11,12 @@ export interface Params {
   tier: Tier | null;
   ui: boolean;
   hud: boolean;
+  /** Busy-wait this many ms every frame, to exercise the automatic step-down. Zero for none. */
+  slow: number;
 }
 
 // ?t=18.5 freezes the clock at that hour, ?still freezes motion, ?tier=low|medium|high forces a tier, ?ui=0 hides the
-// overlay, ?hud shows frame statistics.
+// overlay, ?hud shows frame statistics, ?slow=40 adds 40 ms to every frame.
 export function parseParams(search: string): Params {
   const params = new URLSearchParams(search);
   const tier = params.get('tier');
@@ -24,5 +26,6 @@ export function parseParams(search: string): Params {
     tier: isTier(tier) ? tier : null,
     ui: params.get('ui') !== '0',
     hud: params.has('hud'),
+    slow: Math.max(0, parseFloat(params.get('slow') ?? '') || 0),
   };
 }

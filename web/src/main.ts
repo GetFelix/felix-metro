@@ -11,11 +11,16 @@ declare global {
   interface Window {
     /** True once the first frame is drawn with every model loaded. */
     __ready?: boolean;
+    /** Tier history and GPU memory per tier, for the CI step-down check. Only set under ?slow or ?hud. */
+    __quality?: {
+      history: readonly Tier[];
+      memory: { tier: Tier; textures: number; geometries: number }[];
+    };
   }
 }
 
 async function main() {
-  const { frozenHour, still, tier: urlTier, ui, hud: showHud } = parseParams(location.search);
+  const { frozenHour, still, tier: urlTier, ui, hud: showHud, slow } = parseParams(location.search);
   if (!ui) document.querySelectorAll('.chip').forEach((e) => e.classList.add('hidden'));
 
   let post: ReturnType<typeof createPost> | null = null;
@@ -48,6 +53,12 @@ async function main() {
   post = createPost(renderer, scene, camera, passesFor(quality.tier), glows);
   setTime(hour, post.bloom);
 
+  addEventListener('visibilitychange', () => quality.restartWindow());
+
+  // Memory is read once per tier, after that tier has rendered, so freed passes show up as lower counts.
+  const memory: NonNullable<Window['__quality']>['memory'] = [];
+  if (slow || showHud) window.__quality = { history: quality.history, memory };
+
   const clock = new THREE.Clock();
   let last = performance.now();
   function frame() {
@@ -56,12 +67,17 @@ async function main() {
     last = now;
     quality.tick(frameMs);
     hud?.frame(frameMs);
+    if (slow) for (const end = performance.now() + slow; performance.now() < end; );
     const dt = still ? 0 : Math.min(clock.getDelta(), 0.05);
     move(cars, dt, true);
     move(people, dt, false);
     for (const p of people) p.mixer.update(dt);
     controls.update();
     post!.render(controls.target);
+    if (window.__quality && memory[memory.length - 1]?.tier !== quality.tier) {
+      const { textures, geometries } = renderer.info.memory;
+      memory.push({ tier: quality.tier, textures, geometries });
+    }
     requestAnimationFrame(frame);
   }
   move(cars, 0, true);

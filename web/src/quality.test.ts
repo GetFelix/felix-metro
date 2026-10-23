@@ -7,6 +7,7 @@ import {
   SETTLE_FRAMES,
   createQuality,
   decideTier,
+  displayInterval,
   median,
   settingsFor,
   stepDown,
@@ -58,6 +59,23 @@ describe('decideTier', () => {
     expect(stepDown('high')).toBe('medium');
     expect(stepDown('medium')).toBe('low');
     expect(stepDown('low')).toBe('low');
+  });
+});
+
+describe('refresh rate', () => {
+  it('does not step down a steady 30 Hz display', () => {
+    expect(decideTier('high', frames(33.3), false)).toBe('high');
+  });
+
+  it('steps down a 60 Hz display that mostly runs at 30 ms', () => {
+    const mixed = [...frames(16.7, 10), ...frames(30, 50)];
+    expect(displayInterval(mixed)).toBeCloseTo(16.7);
+    expect(decideTier('high', mixed, false)).toBe('medium');
+  });
+
+  it('keeps the 22 ms floor on a fast display', () => {
+    const near = [...frames(8.3, 10), ...frames(21, 50)];
+    expect(decideTier('high', near, false)).toBe('high');
   });
 });
 
@@ -138,6 +156,33 @@ describe('createQuality', () => {
     const { q, changes } = make(null, true);
     run(q, 80, 1000);
     expect([q.tier, q.mode, changes]).toEqual(['high', 'still', []]);
+  });
+
+  it('ignores frames while the page is hidden', () => {
+    let hidden = true;
+    const changes: Tier[] = [];
+    const q = createQuality({ url: null, still: false, hidden: () => hidden, onChange: (t) => changes.push(t) });
+    run(q, 500, 200);
+    expect(changes).toEqual([]);
+    hidden = false;
+    run(q, 10, 1000);
+    expect(changes).toEqual([]);
+    expect(q.tier).toBe('high');
+  });
+
+  it('restartWindow drops what was collected', () => {
+    const { q, changes } = make(null);
+    run(q, 40, 60);
+    q.restartWindow();
+    run(q, 40, 60);
+    expect(changes).toEqual([]);
+  });
+
+  it('records each tier it runs', () => {
+    const { q } = make(null);
+    run(q, 40, 85);
+    q.setTier('low');
+    expect(q.history).toEqual(['high', 'medium', 'low']);
   });
 
   it('setTier switches, tells the page, and ends the automatic choice', () => {

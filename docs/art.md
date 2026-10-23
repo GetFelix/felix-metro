@@ -66,22 +66,31 @@ The screenshots above are `?t=12&still`, `?t=17.8&still` and `?t=21&still` at
 Each tier drops effects in the order that costs the least in looks, so the
 picture degrades before the frame rate does.
 
-| Tier | Ambient occlusion | Tilt-shift | Shadows | Pixel ratio | Pedestrian rigs |
+| Tier | Ambient occlusion | Tilt-shift | Shadows | Pixel ratio | Pedestrian rigs\* |
 |---|---|---|---|---|---|
 | high | yes | yes | 4096 map | up to 2 | yes |
 | medium | no | yes | 2048 map | up to 2 | no |
 | low | no | no | no | 1 | no |
 
-`web/src/quality.ts` chooses the tier. It starts on high and measures frame
-times for the first 3 seconds after the city is ready, ignoring the first 10
-frames. If the median is over 22 ms it steps down one tier, rebuilds the post
-chain and judges another 1.5 seconds. It repeats until the median is under the
-limit or it reaches low, and it never steps up. A frozen scene (`?still`) has
-no meaningful frame times and never chooses on its own.
+\* The `rigs` flag is set only on high. Rigged pedestrians arrive with #6; until then nothing reads it.
 
-A tier from `?tier=` or from a saved choice (`setTier()` stores it in
-`localStorage`) is used as it is and turns the automatic choice off.
+`web/src/quality.ts` chooses the tier. It starts on high and measures frame
+times for the first 3 seconds after the city is ready, ignoring the first 5
+frames and any time the tab is hidden. It steps down one tier when the median
+is over 22 ms, or over 1.3 times the display's frame interval if that is
+longer. The interval is estimated from the fastest tenth of frames and held
+between 4 and 33.4 ms, so a steady 30 Hz display is not treated as slow.
+After a step it rebuilds the post chain and judges another 1.5 seconds,
+repeating until a window passes or it reaches low. It never steps up. A frozen
+scene (`?still`) has no meaningful frame times, so it never chooses on its own
+and ignores a saved tier.
+
+A tier from `?tier=` or from a saved choice is used as it is and turns the
+automatic choice off. The settings sheet, coming with the UI shell, saves a
+choice through `setTier()`. Automatic choices are not saved: a slow first load
+should not pin a device to low for good.
 
 `?hud` shows the median and 95th percentile frame time over the last 120
 frames, draw calls and triangles for the last frame, and the tier with whether
-it was chosen automatically or forced.
+it was chosen automatically, forced, or fixed because the scene is frozen.
+`?slow=40` adds 40 ms to every frame so CI can exercise the step-down.
