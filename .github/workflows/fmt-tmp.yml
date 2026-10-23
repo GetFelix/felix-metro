@@ -1,0 +1,20 @@
+name: fmt-tmp
+on:
+  push:
+    branches: [quality]
+permissions:
+  contents: write
+jobs:
+  fmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: cd web && npm ci && npx prettier --write .
+      - run: |
+          git config user.email gabrielloewen@outlook.com
+          git config user.name "Gabriel Loewen"
+          git add -A
+          git diff --cached --quiet || { git commit -m "style(web): prettier" && git push; }
