@@ -10,6 +10,7 @@ const [appUrl, frameUrl, out] = process.argv.slice(2);
 if (!out) throw new Error('usage: compare-frame.mjs <app url> <style frame url> <out dir>');
 const T = process.env.FRAME_T ?? '12';
 const [W, H] = [1920, 1080];
+const FRAMES = 8;
 mkdirSync(out, { recursive: true });
 
 const browser = await chromium.launch({
@@ -50,18 +51,20 @@ async function shoot(url, file) {
       },
     );
   }
+  await page.addInitScript((frames) => {
+    const raf = window.requestAnimationFrame.bind(window);
+    let n = 0;
+    window.requestAnimationFrame = (cb) => {
+      if (++n <= frames) return raf(cb);
+      window.__stopped = true;
+      return 0;
+    };
+  }, FRAMES);
   await page.goto(url, { waitUntil: 'load', timeout: 120_000 });
   await page.waitForFunction(() => window.__ready === true, null, { timeout: 180_000 });
   await page.evaluate(() => document.fonts.ready.then(() => true));
-  // A frozen moment draws the same every frame; a few frames let shadow maps settle.
-  await page.evaluate(
-    () =>
-      new Promise((resolve) => {
-        let n = 0;
-        const frame = () => (++n >= 4 ? resolve() : requestAnimationFrame(frame));
-        requestAnimationFrame(frame);
-      }),
-  );
+  // Ambient occlusion varies from frame to frame, so each page stops after the same number of frames.
+  await page.waitForFunction(() => window.__stopped === true, null, { timeout: 60_000 });
   await page.screenshot({ path: join(out, file), timeout: 120_000 });
   await page.close();
   if (errors.length) throw new Error(`${url}:\n${errors.join('\n')}`);
