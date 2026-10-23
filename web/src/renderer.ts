@@ -7,6 +7,24 @@ import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import type { Tier } from './params';
 
+// GTAOPass builds its noise texture from Math.random; seeding it keeps the ambient occlusion the same on every load.
+function withSeededRandom<T>(make: () => T): T {
+  const original = Math.random;
+  let a = 1;
+  Math.random = () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  try {
+    return make();
+  } finally {
+    Math.random = original;
+  }
+}
+
 export function createRenderer(tier: Tier) {
   const renderer = new THREE.WebGLRenderer({
     antialias: true,
@@ -34,7 +52,7 @@ export function createPost(
   const composer = new EffectComposer(renderer);
   composer.addPass(new RenderPass(scene, camera));
   if (tier === 'high') {
-    const ao = new GTAOPass(scene, camera, innerWidth, innerHeight);
+    const ao = withSeededRandom(() => new GTAOPass(scene, camera, innerWidth, innerHeight));
     ao.updateGtaoMaterial({ radius: 0.35, distanceExponent: 1.5, thickness: 1.0, scale: 1.0 });
     ao.blendIntensity = 0.85;
     const render = ao.render.bind(ao);

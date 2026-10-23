@@ -20,6 +20,24 @@ const browser = await chromium.launch({
 // The style frame draws each pedestrian's pose and speed after its model loads, so the numbers go to whichever person's
 // model arrives first and the poses differ from run to run. The app draws them before the load; this makes the style
 // frame do the same, in the same order.
+// The same seeding as web/src/renderer.ts, for the style frame's ambient occlusion noise.
+function seeded(make) {
+  const original = Math.random;
+  let a = 1;
+  Math.random = () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  try {
+    return make();
+  } finally {
+    Math.random = original;
+  }
+}
+
 function drawPeopleEarly(html) {
   const from = "const gltf = await model('mini-characters', pick(PEOPLE));";
   const to =
@@ -29,6 +47,10 @@ function drawPeopleEarly(html) {
     [from, to],
     ['mixer.setTime(rand() * 2);', 'mixer.setTime(phase);'],
     ['speed: 0.22 + rand() * 0.08', 'speed'],
+    [
+      'const ao = new GTAOPass(scene, camera, innerWidth, innerHeight);',
+      `const ao = (${seeded.toString()})(() => new GTAOPass(scene, camera, innerWidth, innerHeight));`,
+    ],
   ];
   for (const [a, b] of swaps) {
     if (html.split(a).length !== 2) throw new Error(`the style frame no longer contains: ${a}`);
