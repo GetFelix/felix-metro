@@ -16,16 +16,40 @@ const browser = await chromium.launch({
   args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'],
 });
 
+// The style frame draws each pedestrian's pose and speed after its model loads, so the numbers go to whichever person's
+// model arrives first and the poses differ from run to run. The app draws them before the load; this makes the style
+// frame do the same, in the same order.
+function drawPeopleEarly(html) {
+  const from = "const gltf = await model('mini-characters', pick(PEOPLE));";
+  const to =
+    "const name = pick(PEOPLE); const phase = rand() * 2, speed = 0.22 + rand() * 0.08;" +
+    " const gltf = await model('mini-characters', name);";
+  const swaps = [
+    [from, to],
+    ['mixer.setTime(rand() * 2);', 'mixer.setTime(phase);'],
+    ['speed: 0.22 + rand() * 0.08', 'speed'],
+  ];
+  for (const [a, b] of swaps) {
+    if (html.split(a).length !== 2) throw new Error(`the style frame no longer contains: ${a}`);
+    html = html.replace(a, b);
+  }
+  return html;
+}
+
 async function shoot(url, file) {
   const page = await browser.newPage({ viewport: { width: W, height: H }, deviceScaleFactor: 1 });
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e)));
   page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
-  // Models finish loading in request order, so the seeded random numbers drawn after a load go to the same models.
-  let loads = Promise.resolve();
-  await page.route('**/*.glb', (route) => {
-    loads = loads.then(async () => route.fulfill({ response: await route.fetch() }));
-  });
+  if (url.endsWith('.html') && url.includes('style-frame')) {
+    await page.route(
+      (u) => u.pathname.endsWith('style-frame.html'),
+      async (route) => {
+        const res = await route.fetch();
+        await route.fulfill({ response: res, body: drawPeopleEarly(await res.text()) });
+      },
+    );
+  }
   await page.goto(url, { waitUntil: 'load', timeout: 120_000 });
   await page.waitForFunction(() => window.__ready === true, null, { timeout: 180_000 });
   await page.evaluate(() => document.fonts.ready.then(() => true));

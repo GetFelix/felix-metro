@@ -506,7 +506,11 @@ export async function createCity(renderer: THREE.WebGLRenderer, tier: Tier) {
   // ---------- pedestrians ----------
   const people: Walker[] = [];
   async function addPerson(axis: 'x' | 'z', line: number, dir: number, offset: number) {
-    const gltf = await model('mini-characters', pick(PEOPLE));
+    // Drawn before the load so the pose and speed don't depend on which model arrives first.
+    const name = pick(PEOPLE);
+    const phase = rand() * 2;
+    const speed = 0.22 + rand() * 0.08;
+    const gltf = await model('mini-characters', name);
     const o = SkeletonUtils.clone(gltf.scene);
     meshes(o, (n) => {
       n.material = materialFor('mini-characters', n.material as THREE.MeshStandardMaterial, 0);
@@ -516,9 +520,9 @@ export async function createCity(renderer: THREE.WebGLRenderer, tier: Tier) {
     const mixer = new THREE.AnimationMixer(o);
     const walk = gltf.animations.find((a) => a.name === 'walk')!;
     mixer.clipAction(walk).play();
-    mixer.setTime(rand() * 2);
+    mixer.setTime(phase);
     scene.add(o);
-    people.push({ o, mixer, axis, line, dir, s: offset, speed: 0.22 + rand() * 0.08 });
+    people.push({ o, mixer, axis, line, dir, s: offset, speed });
   }
   for (const r of ROADS.slice(1, 4)) {
     for (const side of [-1, 1]) {
