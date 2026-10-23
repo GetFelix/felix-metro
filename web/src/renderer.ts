@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { Tier } from './params';
+import { settingsFor } from './quality';
 
 export function createRenderer(tier: Tier) {
   const renderer = new THREE.WebGLRenderer({
@@ -7,9 +8,9 @@ export function createRenderer(tier: Tier) {
     powerPreference: 'high-performance',
     preserveDrawingBuffer: true,
   });
-  renderer.setPixelRatio(Math.min(devicePixelRatio, tier === 'low' ? 1 : 2));
+  renderer.setPixelRatio(Math.min(devicePixelRatio, settingsFor(tier).pixelRatioCap));
   renderer.setSize(innerWidth, innerHeight);
-  renderer.shadowMap.enabled = tier !== 'low';
+  renderer.shadowMap.enabled = settingsFor(tier).shadows;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.0;

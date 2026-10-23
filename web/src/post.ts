@@ -9,6 +9,9 @@ import { passesFor, without, type PassName } from './passes';
 
 export { passesFor, without, type PassName };
 
+const VERTEX =
+  'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }';
+
 // GTAOPass builds its noise texture from Math.random; seeding it keeps the ambient occlusion the same on every load.
 function withSeededRandom<T>(make: () => T): T {
   const original = Math.random;
@@ -27,7 +30,8 @@ function withSeededRandom<T>(make: () => T): T {
   }
 }
 
-// Builds the composer from an ordered pass list; see passes.ts for what each tier runs.
+// Builds the composer from an ordered pass list; see passes.ts for what each tier runs. Only the listed passes are
+// built, and dispose() frees everything this created so a tier change can rebuild the chain.
 export function createPost(
   renderer: THREE.WebGLRenderer,
   scene: THREE.Scene,
@@ -37,11 +41,20 @@ export function createPost(
 ) {
   const composer = new EffectComposer(renderer);
   const has = (n: PassName) => passes.includes(n);
-  const hide = () => {
-    const shown = glows.map((g) => g.visible);
-    glows.forEach((g) => (g.visible = false));
-    return () => glows.forEach((g, i) => (g.visible = shown[i]!));
+
+  // Runs every frame, so the visibility buffer and the restore function are made once.
+  const shown = new Uint8Array(glows.length);
+  const restore = () => {
+    for (let i = 0; i < glows.length; i++) glows[i]!.visible = shown[i] === 1;
   };
+  const hide = () => {
+    for (let i = 0; i < glows.length; i++) {
+      shown[i] = glows[i]!.visible ? 1 : 0;
+      glows[i]!.visible = false;
+    }
+    return restore;
+  };
+
   if (has('render')) composer.addPass(new RenderPass(scene, camera));
   if (has('ao')) {
     const ao = withSeededRandom(() => new GTAOPass(scene, camera, innerWidth, innerHeight));
@@ -55,29 +68,36 @@ export function createPost(
     };
     composer.addPass(ao);
   }
-  const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.4, 0.45, 1.0);
-  if (has('bloom')) composer.addPass(bloom);
+  let bloom: UnrealBloomPass | null = null;
+  if (has('bloom')) {
+    bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.4, 0.45, 1.0);
+    composer.addPass(bloom);
+  }
 
   // Tilt-shift as a miniature photo: blur grows with distance from the focus plane through the orbit target, so
   // anything at that depth, however tall, stays sharp.
-  const depthRT = new THREE.WebGLRenderTarget(innerWidth, innerHeight);
-  depthRT.depthTexture = new THREE.DepthTexture(innerWidth, innerHeight);
-  const depthMat = new THREE.MeshBasicMaterial({ colorWrite: false });
-  const TiltShift = {
-    uniforms: {
-      tDiffuse: { value: null },
-      tDepth: { value: depthRT.depthTexture },
-      resolution: { value: new THREE.Vector2(innerWidth, innerHeight) },
-      cameraNear: { value: camera.near },
-      cameraFar: { value: camera.far },
-      focus: { value: 19 },
-      band: { value: 2.2 },
-      range: { value: 9.0 },
-      amount: { value: 7.0 },
-    },
-    vertexShader:
-      'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
-    fragmentShader: `
+  let tilt: ShaderPass | null = null;
+  let depthRT: THREE.WebGLRenderTarget | null = null;
+  let depthMat: THREE.MeshBasicMaterial | null = null;
+  if (has('tilt-shift')) {
+    const rt = new THREE.WebGLRenderTarget(innerWidth, innerHeight);
+    rt.depthTexture = new THREE.DepthTexture(innerWidth, innerHeight);
+    depthRT = rt;
+    depthMat = new THREE.MeshBasicMaterial({ colorWrite: false });
+    tilt = new ShaderPass({
+      uniforms: {
+        tDiffuse: { value: null },
+        tDepth: { value: rt.depthTexture },
+        resolution: { value: new THREE.Vector2(innerWidth, innerHeight) },
+        cameraNear: { value: camera.near },
+        cameraFar: { value: camera.far },
+        focus: { value: 19 },
+        band: { value: 2.2 },
+        range: { value: 9.0 },
+        amount: { value: 7.0 },
+      },
+      vertexShader: VERTEX,
+      fragmentShader: `
     #include <packing>
     uniform sampler2D tDiffuse, tDepth; uniform vec2 resolution;
     uniform float cameraNear, cameraFar, focus, band, range, amount; varying vec2 vUv;
@@ -96,16 +116,18 @@ export function createPost(
       }
       gl_FragColor = sum / w;
     }`,
-  };
-  const tilt = new ShaderPass(TiltShift);
-  if (has('tilt-shift')) composer.addPass(tilt);
+    });
+    composer.addPass(tilt);
+  }
   if (has('output')) composer.addPass(new OutputPass());
 
   // Grade after tone mapping: a little saturation and a soft vignette.
-  const Grade = {
-    uniforms: { tDiffuse: { value: null }, saturation: { value: 1.12 }, vignette: { value: 0.28 } },
-    vertexShader: TiltShift.vertexShader,
-    fragmentShader: `
+  if (has('grade')) {
+    composer.addPass(
+      new ShaderPass({
+        uniforms: { tDiffuse: { value: null }, saturation: { value: 1.12 }, vignette: { value: 0.28 } },
+        vertexShader: VERTEX,
+        fragmentShader: `
     uniform sampler2D tDiffuse; uniform float saturation, vignette; varying vec2 vUv;
     void main() {
       vec4 c = texture2D(tDiffuse, vUv);
@@ -115,19 +137,20 @@ export function createPost(
       c.rgb *= mix(1.0 - vignette, 1.0, v);
       gl_FragColor = c;
     }`,
-  };
-  if (has('grade')) composer.addPass(new ShaderPass(Grade));
+      }),
+    );
+  }
 
   function resize() {
     renderer.setSize(innerWidth, innerHeight);
     composer.setSize(innerWidth, innerHeight);
-    tilt.uniforms.resolution!.value.set(innerWidth, innerHeight);
-    depthRT.setSize(innerWidth, innerHeight);
+    tilt?.uniforms.resolution!.value.set(innerWidth, innerHeight);
+    depthRT?.setSize(innerWidth, innerHeight);
   }
 
   // The focus follows the orbit target every frame; the depth pre-pass runs only when tilt-shift does.
   function render(target: THREE.Vector3) {
-    if (has('tilt-shift')) {
+    if (tilt && depthRT && depthMat) {
       const show = hide();
       scene.overrideMaterial = depthMat;
       renderer.setRenderTarget(depthRT);
@@ -140,5 +163,13 @@ export function createPost(
     composer.render();
   }
 
-  return { bloom, render, resize };
+  function dispose() {
+    for (const pass of composer.passes) pass.dispose();
+    composer.dispose();
+    depthRT?.depthTexture?.dispose();
+    depthRT?.dispose();
+    depthMat?.dispose();
+  }
+
+  return { bloom, render, resize, dispose };
 }
