@@ -27,6 +27,20 @@ pub fn resident_name(seed: &str, index: u32) -> String {
     crate::resident_name(seed, index)
 }
 
+/// [`crate::day_hash`] as 16 hex digits. Throws when the seed is not allowed or
+/// the city has no such resident.
+#[wasm_bindgen(js_name = residentDayHash)]
+pub fn resident_day_hash(
+    seed: &str,
+    districts_per_side: u16,
+    index: u32,
+) -> Result<String, JsError> {
+    city(seed, districts_per_side)?;
+    crate::day_hash(seed, districts_per_side, index)
+        .map(|h| format!("{h:016x}"))
+        .ok_or_else(|| JsError::new("no such resident"))
+}
+
 /// Any record as one JSON string (see [`crate::record::Record::to_json`]); the
 /// `kind` field says which. Throws when the bytes are not exactly one record.
 #[wasm_bindgen(js_name = decodeRecord)]
