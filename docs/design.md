@@ -67,6 +67,10 @@ simulate; it uses `core` to decode records, rebuild the road graph from the
 seed and keyframes, and move a car along its route between events. Integer
 arithmetic throughout, as in felix-arena, so the two builds agree exactly.
 
+### City layout
+
+`City::generate(seed, districts_per_side)` builds the same city on every platform from integer arithmetic and a seeded generator. A district is 12 by 12 tiles with a road on every fourth tile, which leaves 3 by 3 blocks of 3 by 3 lots. Roads also close the far edge, so the city is `12 * d + 1` tiles across. Roads on district boundaries are avenues and the rest are streets; every segment joins two neighbouring intersections, including across district edges. One block in each district is a park. The Felix tower stands on the dry lot nearest the city centre, downtown blocks surround it, and commercial, suburban and industrial blocks follow outwards. A lot faces the road beside it; the middle lot of a block has none beside it and gets a random facing. Some seeds, `harbor` among them, put water along one edge: the outermost row of blocks has no lots. Each lot's building kind is an index into a table in `core` that names a Kenney pack and model. Street, business and resident names come from built-in lists. `City::hash` is an FNV-1a hash of the whole layout, so the sim and the browser can check they generated the same city.
+
 ### Districts are shards
 
 A city is a grid of districts, and each district is one shard of the city's

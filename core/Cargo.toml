@@ -1,0 +1,18 @@
+[package]
+name = "felix-metro-core"
+description = "City generation and the rules shared by the sim and the browser"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["rlib", "cdylib"]
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "=0.2.129"
+
+[lints]
+workspace = true
