@@ -62,7 +62,7 @@ impl Site {
             zs,
             centres: Vec::new(),
             industry_edge: 0,
-            industry_depth: (n / 5).max(5),
+            industry_depth: ((n - 1) * 9 / 32).max(6),
             industry_span: (0, n),
         };
         site.pick_centres();
@@ -78,17 +78,14 @@ impl Site {
             .flat_map(|&x| self.zs.iter().map(move |&z| (x, z)))
             .filter(|&(x, z)| edge_distance(self.edge, n, x, z) > CLEAR_OF_SHORE)
             .collect();
-        let spread = (n / 3).max(1);
+        let spread = (n / 8).max(1);
         let target = (
             n / 2 + below(mix(self.seed, noise::CENTRE, &[0]), spread) - spread / 2,
             n / 2 + below(mix(self.seed, noise::CENTRE, &[1]), spread) - spread / 2,
         );
-        let main = crossings
-            .iter()
-            .copied()
-            .min_by_key(|&(x, z)| (octagon(x - target.0, z - target.1), x, z))
-            .unwrap_or(target);
-        self.centres.push((main.0, main.1, 255));
+        // Downtown is a value peak, not a junction, so the main centre sits
+        // where the hash puts it and stays near the middle of the map.
+        self.centres.push((target.0, target.1, 255));
         let want = 1 + below(mix(self.seed, noise::CENTRE, &[2]), 2);
         for s in 0..want {
             let apart: Vec<_> = crossings
@@ -97,7 +94,7 @@ impl Site {
                 .filter(|&(x, z)| {
                     self.centres
                         .iter()
-                        .all(|&(cx, cz, _)| octagon(x - cx, z - cz) >= n / 4)
+                        .all(|&(cx, cz, _)| octagon(x - cx, z - cz) >= n / 3)
                 })
                 .collect();
             if apart.is_empty() {
@@ -105,19 +102,38 @@ impl Site {
             }
             let h = mix(self.seed, noise::CENTRE, &[10 + s]);
             let (x, z) = apart[below(h, apart.len() as i32) as usize];
-            self.centres.push((x, z, 215));
+            self.centres.push((x, z, 200));
         }
     }
 
     fn pick_industry(&mut self) {
         let h = mix(self.seed, noise::SECTOR, &[0]);
-        self.industry_edge = if below(sub(h, 1), 2) == 0 {
-            self.edge
+        // Any edge but the one nearest the main centre, which would crowd
+        // the industry against downtown.
+        let (cx, cz, _) = self.centres[0];
+        let mut edges = [0u8, 1, 2, 3];
+        edges.sort_by_key(|&e| (edge_distance(e, self.n, cx, cz), e));
+        self.industry_edge = edges[1 + below(sub(h, 1), 3) as usize];
+        // Of a few candidate stretches, the one whose middle is furthest from
+        // the main centre, so downtown does not sit on the industry.
+        // Land behind the water is narrower, so that stretch runs longer.
+        let width = self.n / 2
+            + 1
+            + if self.beside_water(self.industry_edge) {
+                self.n / 16
+            } else {
+                0
+            };
+        let along = if self.industry_edge.is_multiple_of(2) {
+            self.centres[0].0
         } else {
-            ((i32::from(self.edge) + 1 + below(sub(h, 2), 3)) % 4) as u8
+            self.centres[0].1
         };
-        let lo = below(sub(h, 3), (self.n / 3).max(1));
-        self.industry_span = (lo, lo + self.n / 2 + 2);
+        let lo = (0..3)
+            .map(|i| below(sub(h, 3 + i), (self.n / 3).max(1)))
+            .max_by_key(|&lo| ((lo + width / 2 - along).abs(), -lo))
+            .unwrap_or(0);
+        self.industry_span = (lo, lo + width);
     }
 
     /// How many tiles deep the water is at `t` along its edge, 3 to 6.
@@ -154,7 +170,7 @@ impl Site {
         let n = self.n;
         let mut v = 0;
         for (i, &(cx, cz, peak)) in self.centres.iter().enumerate() {
-            let fall = if i == 0 { 425 } else { 600 };
+            let fall = if i == 0 { 398 } else { 600 };
             v = v.max(peak - octagon(x - cx, z - cz) * fall / n);
         }
         v += match self.arterial_distance(x, z) {
@@ -163,10 +179,14 @@ impl Site {
             _ => 0,
         };
         if self.has_water {
-            v += (13 - edge_distance(self.edge, n, x, z)).max(0) * 2;
+            v += (13 - edge_distance(self.edge, n, x, z)).max(0);
         }
         v += (value_noise(self.seed, noise::VALUE_NOISE, x, z, 8) - 128) * 30 / 128;
         v.clamp(0, 255)
+    }
+
+    fn beside_water(&self, edge: u8) -> bool {
+        edge == self.edge && self.has_water
     }
 
     fn in_industry(&self, x: i32, z: i32) -> bool {
@@ -174,7 +194,7 @@ impl Site {
         let q = edge_distance(e, self.n, x, z);
         let t = if e.is_multiple_of(2) { x } else { z };
         let (lo, hi) = self.industry_span;
-        let (from, to) = if e == self.edge {
+        let (from, to) = if self.beside_water(e) {
             (6, 6 + self.industry_depth)
         } else {
             (0, self.industry_depth)
@@ -182,32 +202,32 @@ impl Site {
         (from..to).contains(&q) && (lo..hi).contains(&t)
     }
 
-    /// The zone of a block: that of its centre, except that a block whose
-    /// corners are worth more than industry allows is not industrial, so a
-    /// big block never reaches into the centre.
+    /// The zone of a block: that of its centre, except that an industrial
+    /// block with downtown land at a corner is downtown's, so a big block
+    /// never reaches into the centre.
     pub(super) fn block_zone(&self, r: Rect) -> Zone {
         let (cx, cz) = r.centre();
         let zone = self.zone(cx, cz);
         if zone != Zone::Industrial {
             return zone;
         }
-        [
+        let downtown = [
             (r.x0, r.z0),
             (r.x1 - 1, r.z0),
             (r.x0, r.z1 - 1),
             (r.x1 - 1, r.z1 - 1),
         ]
         .into_iter()
-        .max_by_key(|&(x, z)| (self.value(x, z), -x, -z))
-        .map_or(zone, |(x, z)| self.zone(x, z))
+        .any(|(x, z)| self.zone(x, z) == Zone::Downtown);
+        if downtown { Zone::Commercial } else { zone }
     }
 
     /// The zone of the land at a tile, never a park (parks are whole blocks).
     pub(super) fn zone(&self, x: i32, z: i32) -> Zone {
         let v = self.value(x, z);
-        if v >= 185 {
+        if v >= 205 {
             Zone::Downtown
-        } else if v < 140 && self.in_industry(x, z) {
+        } else if self.in_industry(x, z) {
             Zone::Industrial
         } else if v >= 115 {
             Zone::Commercial

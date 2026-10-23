@@ -30,6 +30,11 @@ const HOUSES_LARGE: [u8; 4] = [3, 1, 4, 5];
 const FACTORIES_SMALL: [u8; 4] = [2, 3, 0, 1];
 const FACTORIES_LARGE: [u8; 2] = [4, 5];
 
+/// Park blocks: the largest area tried first, the area they favour, and the
+/// percent of block tiles the parks may reach before districts start to skip.
+const PARK_AREA: i32 = 16;
+const PARK_IDEAL: i32 = 8;
+
 const DIRECTIONS: [(u8, u8, i32, i32); 4] = [
     // facing, neighbour bit, dx, dz: south, east, north, west.
     (0, SOUTH, 0, 1),
@@ -71,9 +76,10 @@ pub(super) fn tower_tile(site: &Site, mask: &[u8]) -> (i32, i32) {
     (x, z)
 }
 
-/// The park block of each district: a mid-value block of decent size that
-/// the water cannot take, not the tower's. Strictly, also not downtown or
-/// industrial and not huge. Returns the chosen block per district.
+/// The park block of each district: a mid-sized block that the water cannot
+/// take, not the tower's. Strictly, also not downtown or industrial. A
+/// district may go without when the city's parks already pass `PARK_SHARE`
+/// percent of its block tiles. Returns the chosen block per district.
 pub(super) fn pick_parks(
     site: &Site,
     blocks: &[Rect],
@@ -88,7 +94,7 @@ pub(super) fn pick_parks(
                 let (cx, cz) = b.centre();
                 (cx / 12).min(districts - 1) == dx && (cz / 12).min(districts - 1) == dz
             };
-            let usable = |i: usize, b: &Rect, strict: bool, clear: i32| {
+            let usable = |i: usize, b: &Rect, strict: bool, clear: i32, cap: i32| {
                 let corners = [
                     (b.x0, b.z0),
                     (b.x1 - 1, b.z0),
@@ -97,37 +103,34 @@ pub(super) fn pick_parks(
                 ];
                 let has_tower = (b.x0..b.x1).contains(&tower.0) && (b.z0..b.z1).contains(&tower.1);
                 in_district(b)
-                    && b.area() >= 6
+                    && (6..=cap).contains(&b.area())
                     && !has_tower
                     && corners
                         .iter()
                         .all(|&(x, z)| site.clear_of_shore(x, z, clear))
-                    && (!strict
-                        || (b.area() <= 30
-                            && !matches!(zones[i], Zone::Downtown | Zone::Industrial)))
+                    && (!strict || !matches!(zones[i], Zone::Downtown | Zone::Industrial))
             };
             let mut found = Vec::new();
-            'tiers: for clear in PARK_CLEARANCES {
-                for strict in [true, false] {
-                    found = blocks
-                        .iter()
-                        .enumerate()
-                        .filter(|&(i, b)| usable(i, b, strict, clear))
-                        .map(|(i, b)| (-b.area(), i))
-                        .collect();
-                    if !found.is_empty() {
-                        break 'tiers;
+            'tiers: for cap in [PARK_AREA, i32::MAX] {
+                for clear in PARK_CLEARANCES {
+                    for strict in [true, false] {
+                        found = blocks
+                            .iter()
+                            .enumerate()
+                            .filter(|&(i, b)| usable(i, b, strict, clear, cap))
+                            .map(|(i, b)| ((b.area() - PARK_IDEAL).abs(), i))
+                            .collect();
+                        if !found.is_empty() {
+                            break 'tiers;
+                        }
                     }
                 }
             }
             found.sort_unstable();
             found.truncate(found.len().div_ceil(2));
             let h = mix(site.seed, noise::PARK, &[dx, dz]);
-            out.push(if found.is_empty() {
-                None
-            } else {
-                Some(found[below(h, found.len() as i32) as usize].1)
-            });
+            let pick = (!found.is_empty()).then(|| found[below(h, found.len() as i32) as usize].1);
+            out.push(pick);
         }
     }
     out

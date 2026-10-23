@@ -83,48 +83,64 @@ struct Splitter<'a> {
     blocks: Vec<Rect>,
 }
 
-/// Block shape limits by zone: depth range, length range, the percent of
-/// splits that may be skipped when a block is only a little too big, and
-/// the percent that become dead-end stubs.
-fn limits(zone: Zone) -> (i32, i32, i32, i32, i32, i32) {
+/// Block shape limits by zone: block length range, and the percent of blocks
+/// that may keep a small unbuilt core, and the percent of splits that
+/// become dead-end stubs.
+fn limits(zone: Zone) -> (i32, i32, i32, i32) {
     match zone {
-        Zone::Downtown => (2, 3, 3, 5, 5, 0),
-        Zone::Commercial => (3, 3, 4, 6, 8, 0),
-        Zone::Industrial => (4, 6, 8, 12, 25, 0),
-        Zone::Suburban | Zone::Park => (3, 4, 6, 9, 12, 25),
+        Zone::Downtown => (3, 5, 8, 0),
+        Zone::Commercial => (4, 6, 12, 0),
+        Zone::Industrial => (8, 12, 15, 0),
+        Zone::Suburban | Zone::Park => (6, 9, 25, 25),
     }
 }
 
+/// Which sides of a block have a road along them.
+const BOUND_W: u8 = 1;
+const BOUND_E: u8 = 2;
+const BOUND_N: u8 = 4;
+const BOUND_S: u8 = 8;
+
 impl Splitter<'_> {
-    /// Splits the rectangle with a street until it fits the limits of its
-    /// zone. Each choice is keyed on the rectangle, so changing one block
-    /// leaves its neighbours alone.
-    fn split(&mut self, r: Rect) {
+    /// Splits the rectangle with a street until every tile has a road beside
+    /// it, bar a core of at most two tiles in some blocks. Each choice is
+    /// keyed on the rectangle, so changing one block leaves its neighbours
+    /// alone. A side on the map edge with no ring road has none.
+    fn split(&mut self, r: Rect, bound: u8) {
         let (w, h) = (r.x1 - r.x0, r.z1 - r.z0);
         if w <= 0 || h <= 0 {
             return;
         }
         let hash = mix(self.site.seed, noise::BLOCK, &[r.x0, r.z0, w, h]);
-        let (dmin, dmax, lmin, lmax, drop, stub) = limits(self.site.block_zone(r));
-        let depth_cap = dmin + below(sub(hash, 1), dmax - dmin + 1);
+        let (lmin, lmax, cores, stub) = limits(self.site.block_zone(r));
         let length_cap = lmin + below(sub(hash, 2), lmax - lmin + 1);
-        let x_cap = if w >= h { length_cap } else { depth_cap };
-        let z_cap = if h > w { length_cap } else { depth_cap };
+        let allowed = if below(sub(hash, 3), 100) < cores {
+            2
+        } else {
+            0
+        };
 
-        // Longer side first. A street may be skipped when the block is
-        // only a little over, which leaves a bigger block with a yard.
-        let mut axes = [(true, w, x_cap), (false, h, z_cap)];
-        if h > w {
-            axes.swap(0, 1);
-        }
-        let skip = below(sub(hash, 3), 100) < drop;
-        let Some(&(across_x, size, cap)) = axes
-            .iter()
-            .find(|&&(_, size, cap)| size > cap + 1 && !(skip && size <= cap + 2))
-        else {
+        let bounds = |lo: u8, hi: u8| i32::from(bound & lo != 0) + i32::from(bound & hi != 0);
+        let (ix, iz) = (
+            (w - bounds(BOUND_W, BOUND_E)).max(0),
+            (h - bounds(BOUND_N, BOUND_S)).max(0),
+        );
+        let too_long = w.max(h) > length_cap + 1;
+        let across_x = if ix * iz > allowed {
+            // Cut the deeper way, so the pieces get thin.
+            if ix != iz { ix > iz } else { w >= h }
+        } else if too_long {
+            w >= h
+        } else {
             self.blocks.push(r);
             return;
         };
+        let size = if across_x { w } else { h };
+        if size < 3 {
+            self.blocks.push(r);
+            return;
+        }
+        let cap = if ix * iz > allowed { 2 } else { length_cap };
 
         // One side gets about the capped size, so blocks come out near it
         // and the odd one is smaller or larger.
@@ -136,7 +152,13 @@ impl Splitter<'_> {
             first
         };
         let length = if across_x { h } else { w };
-        let is_stub = stub > 0 && length >= 8 && below(sub(hash, 5), 100) < stub;
+        let ends = if across_x {
+            BOUND_N | BOUND_S
+        } else {
+            BOUND_W | BOUND_E
+        };
+        let is_stub =
+            stub > 0 && length >= 8 && bound & ends == ends && below(sub(hash, 5), 100) < stub;
         // A stub starts at one side and stops short of the other, ending
         // in a dead end with a two tile gap before the far road.
         let from_far = below(sub(hash, 6), 2) == 1;
@@ -153,13 +175,15 @@ impl Splitter<'_> {
             };
             self.mask[idx(self.site.n, x, z)] |= ROAD;
         }
-        let (first, second) = if across_x {
+        let (first, second, lo_bit, hi_bit) = if across_x {
             (
                 Rect { x1: r.x0 + at, ..r },
                 Rect {
                     x0: r.x0 + at + 1,
                     ..r
                 },
+                BOUND_W,
+                BOUND_E,
             )
         } else {
             (
@@ -168,23 +192,37 @@ impl Splitter<'_> {
                     z0: r.z0 + at + 1,
                     ..r
                 },
+                BOUND_N,
+                BOUND_S,
             )
         };
-        self.split(first);
-        self.split(second);
+        self.split(first, bound | hi_bit);
+        self.split(second, bound | lo_bit);
     }
+}
+
+/// Which map edges carry a ring road: west, east, north, south. Some edges
+/// are left open so the outskirts end raggedly. At least one is always open.
+pub(super) fn ring_edges(seed: u64) -> [bool; 4] {
+    let mut ring = [0, 1, 2, 3].map(|e| below(mix(seed, noise::RING, &[e]), 100) >= 60);
+    if ring.iter().all(|&r| r) {
+        ring[below(mix(seed, noise::RING, &[4]), 4) as usize] = false;
+    }
+    ring
 }
 
 pub(super) fn lay_out(site: &Site) -> Layout {
     let n = site.n;
+    let ring = ring_edges(site.seed);
     let mut mask = vec![0u8; (n * n) as usize];
-    for (lines, vertical) in [(&site.xs, true), (&site.zs, false)] {
+    for (lines, vertical, first) in [(&site.xs, true, 0), (&site.zs, false, 2)] {
         for (i, &line) in lines.iter().enumerate() {
-            let flag = if i > 0 && i + 1 < lines.len() {
-                ROAD | ARTERIAL
-            } else {
-                ROAD
-            };
+            let last = i + 1 == lines.len();
+            let edge = i == 0 || last;
+            if edge && !ring[first + usize::from(last)] {
+                continue;
+            }
+            let flag = if edge { ROAD } else { ROAD | ARTERIAL };
             for k in 0..n {
                 let (x, z) = if vertical { (line, k) } else { (k, line) };
                 mask[idx(n, x, z)] |= flag;
@@ -196,14 +234,39 @@ pub(super) fn lay_out(site: &Site) -> Layout {
         mask,
         blocks: Vec::new(),
     };
-    for xw in site.xs.windows(2) {
-        for zw in site.zs.windows(2) {
-            splitter.split(Rect {
+    let (xl, zl) = (site.xs.len() - 1, site.zs.len() - 1);
+    for (i, xw) in site.xs.windows(2).enumerate() {
+        for (j, zw) in site.zs.windows(2).enumerate() {
+            // Sides without a ring road run to the map edge.
+            let open = |at: usize, end: usize, e: usize| at == end && !ring[e];
+            let mut bound = 0;
+            let mut r = Rect {
                 x0: xw[0] + 1,
                 z0: zw[0] + 1,
                 x1: xw[1],
                 z1: zw[1],
-            });
+            };
+            if open(i, 0, 0) {
+                r.x0 = 0;
+            } else {
+                bound |= BOUND_W;
+            }
+            if open(i + 1, xl, 1) {
+                r.x1 = n;
+            } else {
+                bound |= BOUND_E;
+            }
+            if open(j, 0, 2) {
+                r.z0 = 0;
+            } else {
+                bound |= BOUND_N;
+            }
+            if open(j + 1, zl, 3) {
+                r.z1 = n;
+            } else {
+                bound |= BOUND_S;
+            }
+            splitter.split(r, bound);
         }
     }
     let mut mask = splitter.mask;
