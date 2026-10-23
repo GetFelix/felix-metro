@@ -7,7 +7,12 @@ describe('parseParams', () => {
   });
 
   it('reads the frozen hour, still, tier and ui flags', () => {
-    expect(parseParams('?t=17.8&still&tier=low&ui=0')).toEqual({ frozenHour: 17.8, still: true, tier: 'low', ui: false });
+    expect(parseParams('?t=17.8&still&tier=low&ui=0')).toEqual({
+      frozenHour: 17.8,
+      still: true,
+      tier: 'low',
+      ui: false,
+    });
   });
 
   it('keeps the overlay for any ui value but 0', () => {

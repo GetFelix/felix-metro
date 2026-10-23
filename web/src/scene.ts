@@ -3,18 +3,7 @@ import { GLTFLoader, type GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import type { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
-import {
-  BULB_OFF,
-  CYAN,
-  FOG,
-  GROUND_NIGHT,
-  HEMI,
-  PALETTE,
-  ROOFS,
-  SKY,
-  TOWER,
-  WALLS,
-} from './palette';
+import { BULB_OFF, CYAN, FOG, GROUND_NIGHT, HEMI, PALETTE, ROOFS, SKY, TOWER, WALLS } from './palette';
 import type { Tier } from './params';
 
 // Seeded so the frame is identical on every load.
@@ -348,9 +337,7 @@ export async function createCity(renderer: THREE.WebGLRenderer, tier: Tier) {
           jobs.push(place('suburban', 'tree-large', x - 0.2, z - 0.15, rand() * 6, 1.2));
           jobs.push(place('suburban', 'tree-small', x + 0.25, z + 0.2, rand() * 6, 1.2));
         } else {
-          jobs.push(
-            place('suburban', pick(HOUSES), x, z, facing(x, z), 0.62, lit ? 1 : 0, Math.floor(rand() * 5)),
-          );
+          jobs.push(place('suburban', pick(HOUSES), x, z, facing(x, z), 0.62, lit ? 1 : 0, Math.floor(rand() * 5)));
           if (rand() < 0.6)
             jobs.push(
               place(
