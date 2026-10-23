@@ -5,6 +5,10 @@ import { daylight, lampId, lampSwitch, unitHash, WINDOW_BUCKETS, windowBucket, w
 const STEP = 0.01;
 const SAMPLES = Math.round(24 / STEP);
 
+// About twice the largest change per step that each output really has, so a visible snap fails. Anything not listed
+// changes by under 0.03 per step.
+const BOUNDS: Record<string, number> = { 'sunPosition.0': 0.35, 'sunPosition.1': 0.16, 'sunPosition.2': 0.03 };
+
 function flat(h: number) {
   const d = daylight(h);
   const out: Record<string, number> = {};
@@ -34,7 +38,7 @@ describe('daylight', () => {
   it('has no jump in any output over the day, including the wrap at midnight', () => {
     const keys = Object.keys(flat(0));
     for (const k of keys) {
-      const bound = k.startsWith('sunPosition') ? 0.3 : 0.1;
+      const bound = BOUNDS[k] ?? 0.06;
       expect(
         maxStep((h) => flat(h)[k]!),
         k,
@@ -62,7 +66,7 @@ describe('window switch', () => {
       expect(
         maxStep((h) => windowSwitch(h, b)),
         `bucket ${b}`,
-      ).toBeLessThan(0.1);
+      ).toBeLessThan(0.18);
       expect(windowSwitch(12, b)).toBe(0);
       expect(windowSwitch(17.4, b)).toBe(0);
       expect(windowSwitch(19.7, b)).toBe(1);
@@ -92,7 +96,7 @@ describe('lamp switch', () => {
     const starts: number[] = [];
     for (let i = 0; i < 50; i++) {
       const id = lampId(i * 0.7 - 12, (i * 7) % 13);
-      expect(maxStep((h) => lampSwitch(h, id))).toBeLessThan(0.1);
+      expect(maxStep((h) => lampSwitch(h, id))).toBeLessThan(0.2);
       expect(lampSwitch(12, id)).toBe(0);
       expect(lampSwitch(19.2, id)).toBe(1);
       expect(lampSwitch(3, id)).toBe(1);

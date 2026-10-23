@@ -71,8 +71,9 @@ export function daylight(hourIn: number) {
   const s = sky(hour);
   const n = night(hour);
   // The sun travels east to west; at night the same light is the moon, high and cool.
-  // The change over eases in with the darkness, so the shadows swing slowly instead of jumping.
-  const moon = n;
+  // The swap eases in over three hours, so the shadows swing slowly instead of jumping.
+  const d13 = Math.min(Math.abs(hour - 13), 24 - Math.abs(hour - 13));
+  const moon = smooth(clamp01((d13 - 4.8) / 3.2));
   const dayAngle = ((hour - 6) / 12) * Math.PI;
   const elev = THREE.MathUtils.lerp(Math.max(0.12, Math.sin(dayAngle)), 0.9, moon);
   const az = THREE.MathUtils.lerp(dayAngle, 2.2, moon);

@@ -533,8 +533,10 @@ function setTime(hour) {
   // The sun travels east to west; at night the same light is the moon, high and cool.
   const n = night(hour);
   const dayAngle = ((hour - 6) / 12) * Math.PI;
-  const elev = THREE.MathUtils.lerp(Math.max(0.12, Math.sin(dayAngle)), 0.9, n);
-  const az = THREE.MathUtils.lerp(dayAngle, 2.2, n);
+  const d13 = Math.min(Math.abs(hour - 13), 24 - Math.abs(hour - 13));
+  const moon = smooth(clamp01((d13 - 4.8) / 3.2));
+  const elev = THREE.MathUtils.lerp(Math.max(0.12, Math.sin(dayAngle)), 0.9, moon);
+  const az = THREE.MathUtils.lerp(dayAngle, 2.2, moon);
   // West is +x, so the evening sun comes from the camera's side and lights the faces in view.
   sun.position.set(-Math.cos(az) * 20, elev * 22 + 3, 6 + Math.sin(az) * 3);
   sun.color.copy(s.sun);
