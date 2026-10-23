@@ -32,6 +32,8 @@ pub struct Places {
     shops: Vec<u32>,
     parks: Vec<u32>,
     any: Vec<u32>,
+    /// The connected piece of road each lot's door is on, by lot id.
+    piece: Vec<u32>,
 }
 
 impl Places {
@@ -43,6 +45,7 @@ impl Places {
             shops: Vec::new(),
             parks: Vec::new(),
             any: Vec::new(),
+            piece: pieces(city),
         };
         for lot in city.lots.iter().filter(|l| l.door().is_some()) {
             p.any.push(lot.id);
@@ -66,6 +69,37 @@ impl Places {
     }
 }
 
+/// Which connected piece of the road graph each lot's door is on; `u32::MAX`
+/// for a lot with no door.
+fn pieces(city: &City) -> Vec<u32> {
+    let mut node_piece = vec![u32::MAX; city.nodes.len()];
+    let mut next = 0;
+    for start in 0..city.nodes.len() {
+        if node_piece[start] != u32::MAX {
+            continue;
+        }
+        node_piece[start] = next;
+        let mut stack = vec![start as u32];
+        while let Some(n) = stack.pop() {
+            for &(m, _) in &city.adjacency[n as usize] {
+                if node_piece[m as usize] == u32::MAX {
+                    node_piece[m as usize] = next;
+                    stack.push(m);
+                }
+            }
+        }
+        next += 1;
+    }
+    city.lots
+        .iter()
+        .map(|l| {
+            l.door().map_or(u32::MAX, |d| {
+                node_piece[city.segments[d.segment as usize].a as usize]
+            })
+        })
+        .collect()
+}
+
 #[derive(Clone, Debug)]
 pub struct Resident {
     pub id: u32,
@@ -77,24 +111,44 @@ pub struct Resident {
 
 fn tiles(city: &City, a: u32, b: u32) -> u32 {
     let (a, b) = (&city.lots[a as usize], &city.lots[b as usize]);
-    u32::from(a.x.abs_diff(b.x) + a.z.abs_diff(b.z))
+    u32::from(a.x.abs_diff(b.x)) + u32::from(a.z.abs_diff(b.z))
 }
 
-/// The closest of a few random picks from `from`, other than `not`; any door if
-/// `from` has nothing else.
-fn pick(city: &City, rng: &mut Rng, from: &[u32], fallback: &[u32], near: u32, not: &[u32]) -> u32 {
-    let pool = |list: &[u32]| list.iter().filter(|l| !not.contains(l)).count();
-    let list = if pool(from) > 0 { from } else { fallback };
-    let choices: Vec<u32> = list.iter().copied().filter(|l| !not.contains(l)).collect();
+/// The closest of a few random picks from `from`, other than `not` and on
+/// the road `near` is on; any such door if `from` has nothing else. `None` if
+/// no door qualifies.
+fn pick(
+    city: &City,
+    places: &Places,
+    rng: &mut Rng,
+    from: &[u32],
+    fallback: &[u32],
+    near: u32,
+    not: &[u32],
+) -> Option<u32> {
+    let piece = places.piece[near as usize];
+    let eligible = |list: &[u32]| -> Vec<u32> {
+        list.iter()
+            .copied()
+            .filter(|l| !not.contains(l) && places.piece[*l as usize] == piece)
+            .collect()
+    };
+    let mut choices = eligible(from);
+    if choices.is_empty() {
+        choices = eligible(fallback);
+    }
+    if choices.is_empty() {
+        return None;
+    }
     (0..CHOICES)
         .map(|_| choices[rng.below(choices.len())])
         .min_by_key(|&l| (tiles(city, near, l), l))
-        .expect("a city has doors")
 }
 
 impl Resident {
-    /// Resident `index` of a city, where `index < places.population()`.
-    pub fn new(city: &City, places: &Places, index: u32) -> Resident {
+    /// Resident `index` of a city, where `index < places.population()`, or
+    /// `None` if the roads leave them no workplace, shop or park to reach.
+    pub fn new(city: &City, places: &Places, index: u32) -> Option<Resident> {
         let mut rng = Rng::for_index(&format!("{}/resident", city.seed), index);
         let archetype = Archetype::from_roll(rng.below(100));
         let home = places.homes[(index / PER_HOME) as usize % places.homes.len()];
@@ -103,23 +157,33 @@ impl Resident {
             Archetype::Shopkeeper => &places.shops,
             _ => &places.offices,
         };
-        let work = pick(city, &mut rng, work_list, &places.any, home, &[home]);
+        let work = pick(
+            city,
+            places,
+            &mut rng,
+            work_list,
+            &places.any,
+            home,
+            &[home],
+        )?;
         let shop = pick(
             city,
+            places,
             &mut rng,
             &places.shops,
             &places.any,
             home,
             &[home, work],
-        );
+        )?;
         let park = pick(
             city,
+            places,
             &mut rng,
             &places.parks,
             &places.any,
             home,
             &[home, work, shop],
-        );
+        )?;
         let anchors = Anchors {
             home,
             work,
@@ -129,13 +193,13 @@ impl Resident {
         let schedule = Schedule::new(archetype, &mut rng, &anchors, |a, b| {
             tiles(city, a, b) * TICKS_PER_TILE + MARGIN
         });
-        Resident {
+        Some(Resident {
             id: index,
             archetype,
             home,
             vehicle: 1 + rng.below(usize::from(CAR_KINDS)) as u8,
             schedule,
-        }
+        })
     }
 
     pub fn name(&self, city: &City) -> String {
@@ -152,12 +216,20 @@ impl Resident {
     }
 
     /// Every trip of day `day`, in order. A trip leaves at its scheduled tick,
-    /// or when the resident arrives if the last one ran late.
-    pub fn day_trips(&self, city: &City, day: u32, cong: &Congestion) -> Option<Vec<Trip>> {
+    /// or when the resident arrives if the last one ran late. `free_at` is the
+    /// tick the previous day's last trip ended, so a late night carries over.
+    pub fn day_trips(
+        &self,
+        city: &City,
+        day: u32,
+        cong: &Congestion,
+        free_at: u32,
+    ) -> Option<Vec<Trip>> {
         let mut trips: Vec<Trip> = Vec::new();
         for block in 0..self.schedule.blocks.len() {
             let planned = self.schedule.leave_tick(block, day);
-            let depart = trips.last().map_or(planned, |t| planned.max(t.arrive()));
+            let busy_until = trips.last().map_or(free_at, Trip::arrive);
+            let depart = planned.max(busy_until);
             trips.push(self.trip(city, block, depart, cong)?);
         }
         Some(trips)
@@ -177,9 +249,9 @@ pub fn day_hash(seed: &str, districts_per_side: u16, index: u32) -> Option<u64> 
     if index >= places.population() {
         return None;
     }
-    let resident = Resident::new(&city, &places, index);
+    let resident = Resident::new(&city, &places, index)?;
     let mut h = fnv1a(FNV_OFFSET, &[resident.archetype as u8, resident.vehicle]);
-    for trip in resident.day_trips(&city, 0, &Congestion::FREE)? {
+    for trip in resident.day_trips(&city, 0, &Congestion::FREE, 0)? {
         h = fnv1a(h, &trip.depart.to_le_bytes());
         for leg in trip.legs() {
             h = fnv1a(h, &leg.segment.to_le_bytes());

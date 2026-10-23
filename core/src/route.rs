@@ -164,10 +164,17 @@ pub(crate) fn point(city: &City, segment: u32, offset: u32) -> (u32, u32) {
     (at(a.0, b.0), at(a.1, b.1))
 }
 
-fn leg_ms(city: &City, segment: u32, milli: u32, cong: &Congestion) -> u64 {
+/// Milliseconds to cover `milli` of a segment. Walking pace is the same on
+/// every road, so a walker's cheapest path is its shortest.
+fn leg_ms(city: &City, segment: u32, milli: u32, cong: &Congestion, mode: Mode) -> u64 {
     let seg = &city.segments[segment as usize];
-    let percent = cong.percent(segment, seg.length);
-    u64::from(milli) * 100_000 / (u64::from(seg.speed) * u64::from(percent))
+    match mode {
+        Mode::Walk => u64::from(milli) * 1000 / u64::from(WALK_SPEED),
+        Mode::Drive => {
+            let percent = cong.percent(segment, seg.length);
+            u64::from(milli) * 100_000 / (u64::from(seg.speed) * u64::from(percent))
+        }
+    }
 }
 
 fn leg_ticks(speed: u16, percent: u32, milli: u32) -> u32 {
@@ -188,6 +195,9 @@ fn manhattan(city: &City, a: u32, b: u32) -> u64 {
     u64::from(a.0.abs_diff(b.0) + a.1.abs_diff(b.1))
 }
 
+/// A segment and the thousandths of a tile covered along it, from and to.
+type Span = (u32, u32, u32);
+
 /// A path as the segments to take from a node and the node they start at.
 struct Path {
     first: u32,
@@ -195,16 +205,21 @@ struct Path {
     last: u32,
 }
 
-/// The cheapest path between two doors' segments, or `None` if they are not
-/// connected. `guide` turns on the A* heuristic; off it is plain Dijkstra,
-/// which the tests compare against.
+/// The cheapest path for `mode` between two doors' segments, or `None` if they
+/// are not connected. `guide` turns on the A* heuristic; off it is plain
+/// Dijkstra, which the tests compare against.
 fn search(
     city: &City,
     from: Door,
     to: Door,
     cong: &Congestion,
+    mode: Mode,
     guide: bool,
 ) -> Option<(u64, Path)> {
+    let ms_per_tile = match mode {
+        Mode::Walk => 1_000_000 / u64::from(WALK_SPEED),
+        Mode::Drive => FASTEST_MS_PER_TILE,
+    };
     let goals = ends(city, to);
     let extra = |n: u32| goals.iter().find(|g| g.0 == n).map(|g| g.1);
     let h = |n: u32| {
@@ -213,7 +228,7 @@ fn search(
         }
         goals
             .iter()
-            .map(|g| manhattan(city, n, g.0) * FASTEST_MS_PER_TILE)
+            .map(|g| manhattan(city, n, g.0) * ms_per_tile)
             .min()
             .unwrap_or(0)
     };
@@ -221,7 +236,7 @@ fn search(
     let mut prev: Vec<Option<(u32, u32)>> = vec![None; city.nodes.len()];
     let mut heap = BinaryHeap::new();
     for (node, milli) in ends(city, from) {
-        let cost = leg_ms(city, from.segment, milli, cong);
+        let cost = leg_ms(city, from.segment, milli, cong, mode);
         if cost < g[node as usize] {
             g[node as usize] = cost;
             heap.push(Reverse((cost + h(node), node)));
@@ -236,14 +251,15 @@ fn search(
             continue;
         }
         if let Some(milli) = extra(n) {
-            let total = g[n as usize] + leg_ms(city, to.segment, milli, cong);
+            let total = g[n as usize] + leg_ms(city, to.segment, milli, cong, mode);
             if total < best.0 {
                 best = (total, n);
             }
         }
         for &(m, segment) in &city.adjacency[n as usize] {
             let seg = &city.segments[segment as usize];
-            let cost = g[n as usize] + leg_ms(city, segment, u32::from(seg.length) * 1000, cong);
+            let cost =
+                g[n as usize] + leg_ms(city, segment, u32::from(seg.length) * 1000, cong, mode);
             if cost < g[m as usize] {
                 g[m as usize] = cost;
                 prev[m as usize] = Some((n, segment));
@@ -271,18 +287,19 @@ fn search(
     ))
 }
 
-/// A trip from one door to another departing at `depart`, or `None` if the
-/// roads do not connect them. A route no longer than [`WALK_MAX`] is walked.
-pub fn route(city: &City, from: Door, to: Door, depart: u32, cong: &Congestion) -> Option<Trip> {
-    let mut spans: Vec<(u32, u32, u32)> = Vec::new();
+/// The segments to follow for `mode`.
+/// Zero-length spans, from a door at a node, are dropped; one span is always kept.
+fn spans(city: &City, from: Door, to: Door, cong: &Congestion, mode: Mode) -> Option<Vec<Span>> {
+    let mut spans: Vec<Span> = Vec::new();
     if from.segment == to.segment {
+        // Same-segment trips go straight; going around a jam is never weighed.
         spans.push((
             from.segment,
             u32::from(from.offset) * 1000,
             u32::from(to.offset) * 1000,
         ));
     } else {
-        let (_, path) = search(city, from, to, cong, true)?;
+        let (_, path) = search(city, from, to, cong, mode, true)?;
         let seg_len = |s: u32| u32::from(city.segments[s as usize].length) * 1000;
         let leave = |s: u32, node: u32| {
             if city.segments[s as usize].a == node {
@@ -310,11 +327,24 @@ pub fn route(city: &City, from: Door, to: Door, depart: u32, cong: &Congestion) 
             u32::from(to.offset) * 1000,
         ));
     }
-    let length: u32 = spans.iter().map(|s| s.1.abs_diff(s.2)).sum();
-    let mode = if length <= WALK_MAX {
-        Mode::Walk
+    let first = spans[0];
+    spans.retain(|s| s.1 != s.2);
+    if spans.is_empty() {
+        spans.push(first);
+    }
+    Some(spans)
+}
+
+/// A trip from one door to another departing at `depart`, or `None` if the
+/// roads do not connect them. If the shortest way is no longer than
+/// [`WALK_MAX`] it is walked; otherwise the trip drives the cheapest route
+/// under `cong`.
+pub fn route(city: &City, from: Door, to: Door, depart: u32, cong: &Congestion) -> Option<Trip> {
+    let on_foot = spans(city, from, to, cong, Mode::Walk)?;
+    let (mode, spans) = if span_length(&on_foot) <= WALK_MAX {
+        (Mode::Walk, on_foot)
     } else {
-        Mode::Drive
+        (Mode::Drive, spans(city, from, to, cong, Mode::Drive)?)
     };
     let mut tick = depart;
     let legs = spans
@@ -336,4 +366,8 @@ pub fn route(city: &City, from: Door, to: Door, depart: u32, cong: &Congestion) 
         })
         .collect();
     Some(Trip { mode, depart, legs })
+}
+
+fn span_length(spans: &[Span]) -> u32 {
+    spans.iter().map(|s| s.1.abs_diff(s.2)).sum()
 }

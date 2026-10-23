@@ -78,15 +78,15 @@ fn legs_join_up_from_door_to_door() {
 fn the_guided_search_costs_what_plain_dijkstra_does() {
     for city in cities() {
         let jam: Vec<u16> = (0..city.segments.len())
-            .map(|i| (i % 7) as u16 * 3)
+            .map(|i| (i % 7) as u16 * 1000)
             .collect();
         for cong in [Congestion::FREE, Congestion::new(&jam)] {
             for (a, b) in pairs(&city, 40) {
                 if a.segment == b.segment {
                     continue;
                 }
-                let guided = search(&city, a, b, &cong, true).unwrap().0;
-                let plain = search(&city, a, b, &cong, false).unwrap().0;
+                let guided = search(&city, a, b, &cong, Mode::Drive, true).unwrap().0;
+                let plain = search(&city, a, b, &cong, Mode::Drive, false).unwrap().0;
                 assert_eq!(guided, plain, "{}", city.seed);
             }
         }
@@ -202,4 +202,40 @@ fn a_door_to_itself_is_a_one_leg_trip() {
     let trip = route(&city, d, d, 7, &Congestion::FREE).unwrap();
     assert_eq!(trip.legs.len(), 1);
     assert_eq!(trip.length(), 0);
+}
+
+#[test]
+fn trips_have_no_zero_length_legs() {
+    for city in cities() {
+        for (a, b) in pairs(&city, 60) {
+            let trip = route(&city, a, b, 0, &Congestion::FREE).unwrap();
+            assert!(
+                trip.legs.len() == 1 || trip.legs.iter().all(|l| l.from != l.to),
+                "{}",
+                city.seed
+            );
+        }
+    }
+}
+
+#[test]
+fn a_walked_trip_takes_the_shortest_way_whatever_the_traffic() {
+    let city = City::generate("harbor", 4).unwrap();
+    let (mut walks, mut multi) = (0, 0);
+    for (a, b) in pairs(&city, 300) {
+        let free = route(&city, a, b, 0, &Congestion::FREE).unwrap();
+        if free.mode != Mode::Walk {
+            continue;
+        }
+        walks += 1;
+        let mut counts = vec![0u16; city.segments.len()];
+        for l in &free.legs {
+            counts[l.segment as usize] = 3000;
+        }
+        let jam = route(&city, a, b, 0, &Congestion::new(&counts)).unwrap();
+        assert_eq!(jam.mode, Mode::Walk);
+        assert_eq!(free.legs(), jam.legs());
+        multi += usize::from(free.legs.len() > 1);
+    }
+    assert!(walks > 0 && multi > 0);
 }
