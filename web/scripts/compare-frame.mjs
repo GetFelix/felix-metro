@@ -92,10 +92,8 @@ async function shoot(url, file) {
   if (errors.length) throw new Error(`${url}:\n${errors.join('\n')}`);
 }
 
-await shoot(`${frameUrl}?t=${T}&still${process.env.FRAME_EXTRA ?? ''}`, 'style-frame.png');
-await shoot(`${appUrl}?t=${T}&still${process.env.FRAME_EXTRA ?? ''}`, 'app.png');
-await shoot(`${frameUrl}?t=${T}&still${process.env.FRAME_EXTRA ?? ''}`, 'style-frame-2.png');
-await shoot(`${appUrl}?t=${T}&still${process.env.FRAME_EXTRA ?? ''}`, 'app-2.png');
+await shoot(`${frameUrl}?t=${T}&still`, 'style-frame.png');
+await shoot(`${appUrl}?t=${T}&still`, 'app.png');
 await browser.close();
 
 const read = (f) => pngjs.PNG.sync.read(readFileSync(join(out, f)));
@@ -108,13 +106,6 @@ for (const [name, png] of [
   const values = new Set();
   for (let i = 0; i < png.data.length; i += 4 * 97) values.add(png.data.readUInt32BE(i));
   if (values.size < 1000) throw new Error(`the ${name} screenshot has only ${values.size} distinct colours`);
-}
-for (const [x, y] of [
-  ['style-frame.png', 'style-frame-2.png'],
-  ['app.png', 'app-2.png'],
-]) {
-  const [p, q] = [read(x), read(y)];
-  console.log(x, 'against itself:', pixelmatch(p.data, q.data, null, W, H, { threshold: 0.1 }), 'pixels differ');
 }
 const diff = new pngjs.PNG({ width: W, height: H });
 const differing = pixelmatch(a.data, b.data, diff.data, W, H, { threshold: 0.1 });
