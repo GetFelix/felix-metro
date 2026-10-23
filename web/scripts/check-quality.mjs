@@ -32,7 +32,8 @@ if (!high || !low) problems.push('no memory reading for high and low');
 else {
   if (low.textures > high.textures) problems.push(`textures grew from ${high.textures} to ${low.textures}`);
   // Geometries register when first drawn, so a car entering the view adds a few; a leaked pass would add far more.
-  if (low.geometries > high.geometries * 1.05) problems.push(`geometries grew from ${high.geometries} to ${low.geometries}`);
+  if (low.geometries > high.geometries * 1.05)
+    problems.push(`geometries grew from ${high.geometries} to ${low.geometries}`);
 }
 if (problems.length) {
   console.error(problems.join('\n'));
