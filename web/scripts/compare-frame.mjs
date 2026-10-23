@@ -61,10 +61,10 @@ async function shoot(url, file) {
     };
   }, FRAMES);
   await page.goto(url, { waitUntil: 'load', timeout: 120_000 });
-  await page.waitForFunction(() => window.__ready === true, null, { timeout: 180_000 });
+  await page.waitForFunction(() => window.__ready === true, null, { polling: 100, timeout: 180_000 });
   await page.evaluate(() => document.fonts.ready.then(() => true));
   // Ambient occlusion varies from frame to frame, so each page stops after the same number of frames.
-  await page.waitForFunction(() => window.__stopped === true, null, { timeout: 60_000 });
+  await page.waitForFunction(() => window.__stopped === true, null, { polling: 100, timeout: 60_000 });
   await page.screenshot({ path: join(out, file), timeout: 120_000 });
   await page.close();
   if (errors.length) throw new Error(`${url}:\n${errors.join('\n')}`);
