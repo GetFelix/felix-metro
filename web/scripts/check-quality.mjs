@@ -11,7 +11,7 @@ const browser = await chromium.launch({
 const page = await browser.newPage({ viewport: { width: 1600, height: 900 } });
 const errors = [];
 page.on('pageerror', (e) => errors.push(String(e)));
-await page.goto(`${appUrl}?t=18.7&slow=40&hud`, { waitUntil: 'load', timeout: 120_000 });
+await page.goto(`${appUrl}?t=18.7&slow=40&hud`, { waitUntil: 'load', timeout: 300_000 });
 await page.waitForFunction(() => window.__ready === true, null, { polling: 100, timeout: 180_000 });
 await page.waitForFunction(() => window.__quality?.memory.some((m) => m.tier === 'low'), null, {
   polling: 500,

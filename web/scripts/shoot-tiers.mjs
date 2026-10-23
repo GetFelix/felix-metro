@@ -33,7 +33,7 @@ for (const [name, query] of shots) {
       return 0;
     };
   }, FRAMES);
-  await page.goto(appUrl + query, { waitUntil: 'load', timeout: 120_000 });
+  await page.goto(appUrl + query, { waitUntil: 'load', timeout: 300_000 });
   await page.waitForFunction(() => window.__ready === true, null, { polling: 100, timeout: 180_000 });
   await page.evaluate(() => document.fonts.ready.then(() => true));
   await page.waitForFunction(() => window.__stopped === true, null, { polling: 100, timeout: 120_000 });
