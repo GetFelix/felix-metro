@@ -102,36 +102,116 @@ writes decisions instead, and the client works out positions:
 
 | Event | Fields | Meaning |
 |---|---|---|
-| `trip` | resident, vehicle, depart tick, route (road segment ids), speed profile | Leaves now along this route |
-| `replan` | resident, from segment, new route, tick | A jam or a closed road changed the route |
-| `arrived` | resident, place, tick | Reached a building |
+| `trip` | resident, vehicle kind, depart tick, route (segment ids with a speed each) | Leaves now along this route |
+| `replan` | resident, from segment, new route | A jam or a closed road changed the route |
+| `arrived` | resident, lot | Reached a building |
 | `activity` | resident, kind (sleep, work, shop, ...), until tick | What they are doing inside |
-| `left` / `entered` | resident, vehicle state | Crossed into another district |
+| `left` / `entered` | resident, other district, vehicle state with the route left | Crossed into another district |
 | `built` / `demolished` | lot, building kind, rotation | A building changed |
-| `road` | segment, change | A road was added, removed or closed |
-| `command` | principal hash, command id, result | A builder's command was applied or refused |
+| `road` | segment, change (closed, opened, added, removed) | A road changed |
+| `command` | principal hash, builder name, command id, result | A builder's command was applied or refused |
 | `speed` | ticks per second | The city's speed changed; 0 is paused |
 
-A trip is about 60 bytes. A resident makes five or six trips a city day, so a
-city of 20,000 residents writes about 5 KB/s of events at normal speed.
+A route is its segment ids from the road graph (`u32`) and one speed byte per
+segment, a percentage of the segment class's speed. A trip of 12 segments is 35
+bytes, so a resident making five or six trips a city day, in a city of 20,000
+residents, writes under 5 KB/s of events at normal speed.
+
+### Byte layouts
+
+Every record starts with a kind byte, and a layout change gets a new kind.
+Integers are little-endian. A varint is LEB128, and a delta is a zigzag varint of
+the difference from the previous id in the list, so lists need no order. A
+string is a length byte and UTF-8, cut at 255 bytes. `core/src/record.rs`
+encodes and decodes all of them, and decoding returns an error for truncated or
+trailing bytes, unknown kinds, tags and flag bits, and out-of-range values.
+
+| Kind | Record |
+|---|---|
+| 1 | Tick record, a district's commit for one tick |
+| 2 | Command, on `metro.commands.<city>` |
+| 3 | Registry entry, on `metro.cities` |
 
 ### Tick records
 
-Each district commits one record per tick: a header (epoch, city, district,
-tick number, speed, flags, the offset of the district's latest keyframe) followed by
-that tick's events. A tick with no events is still committed, so every tick has
-a record in every district. Seeking depends on that.
+Each district commits one record per tick. A tick with no events is still
+committed, so every tick has a record in every district. Seeking depends on
+that.
+
+| Offset | Size | Field |
+|---|---|---|
+| 0 | 1 | kind, 1 |
+| 1 | 4 | `epoch`, the sim's term; a new sim takes the last plus one |
+| 5 | 2 | `district` |
+| 7 | 4 | `tick` |
+| 11 | 1 | `speed`, ticks per second |
+| 12 | 1 | `flags`; bit 0 is a keyframe, other bits are refused |
+| 13 | 8 | `keyframe_offset`, the district's latest keyframe (a keyframe names itself) |
+| 21 | 8 | `wall_us`, microseconds since the Unix epoch at commit |
+| 29 | 2 | `events`, the number of events |
+| 31 | | the keyframe if bit 0 is set, then the events |
+
+An event is a tag byte and its fields. `resident` is a `u32`.
+
+| Tag | Event | Fields |
+|---|---|---|
+| 1 | `trip` | resident, vehicle `u8`, depart `u32`, route |
+| 2 | `replan` | resident, from segment `u32`, route |
+| 3 | `arrived` | resident, lot `u32` |
+| 4 | `activity` | resident, kind `u8`, until `u32` |
+| 5 | `left` | resident, district `u16`, vehicle state |
+| 6 | `entered` | resident, district `u16`, vehicle state |
+| 7 | `built` | lot `u32`, kind `u16`, rotation `u8` |
+| 8 | `demolished` | lot `u32`, kind `u16`, rotation `u8` |
+| 9 | `road` | segment `u32`, change `u8` |
+| 10 | `command` | principal `u64`, name, id `u32`, result `u8` |
+| 11 | `speed` | ticks per second `u8` |
+
+A route is a varint leg count, the segment ids (first as a delta from 0, then
+each from the one before), then one speed byte per leg. A vehicle state is kind
+`u8`, progress along its first leg in thousandths `u16`, and a route.
 
 ### Keyframes
 
 Every 240 ticks (one real minute, one city hour) each district commits a
-keyframe: its buildings, roads, and every resident in it with their current
-activity or trip. A keyframe can be drawn with nothing before it. Its commit
-also writes the stream state key `keyframe`, so the newest one is one
+keyframe: a tick record with flag bit 0 set, whose keyframe goes between the
+header and the events. A keyframe can be drawn with nothing before it. Its
+commit also writes the stream state key `keyframe`, so the newest one is one
 `state_get` away, with its offset as the value's version.
+
+| Part | Contents |
+|---|---|
+| buildings | varint count; per lot that differs from the generated city: lot delta, kind `u16` (65535 for none), rotation `u8` |
+| roads | varint count; per segment closed or added: segment delta, change `u8` |
+| residents | varint count; per resident in the district: id delta, then `0` kind `u8` and until varint (an activity), or `1` and a vehicle state (a trip in progress) |
+| counts | varints: home, at work, on the road, asleep |
+
+Because buildings and roads are diffs against the city the seed generates, the
+keyframe of a city nobody has built in carries none of them, and the cost is
+the residents.
 
 20,000 residents at about 16 bytes each is about 320 KB per city hour, about
 5 KB/s. Events and keyframes together come to about 10 KB/s, or under 1 GB a day.
+The counts are what the stats sparkline plots.
+
+### Commands and the registry
+
+A command record is the kind byte, a command id `u32`, the builder's display
+name, a tag and fields. The gateway stamps who sent it; the `command` event
+copies the principal hash and name into the district it touched.
+
+| Tag | Command | Fields |
+|---|---|---|
+| 1 | place road | node a `u32`, node b `u32` |
+| 2 | zone | lot `u32`, zone `u8` |
+| 3 | build | lot `u32`, kind `u16`, rotation `u8` |
+| 4 | demolish | lot `u32` |
+| 5 | speed | ticks per second `u8` |
+| 6 | fork | tick `u32`, name |
+
+A registry record is the kind byte, a tag and fields: `1` created (name, seed,
+districts `u16`, `wall_us` `u64`) or `2` forked (name, parent, tick `u32`,
+`wall_us` `u64`).
 
 ### Ticks are commits
 

@@ -16,12 +16,19 @@ jobs:
         working-directory: web
     steps:
       - uses: actions/checkout@v4
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen@0.2.129
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: web/package-lock.json
       - run: npm ci
+      # core/ in WebAssembly, and records from a native run for the tests to decode.
+      - run: npm run core
       - run: npm run format:check
       - run: npm run typecheck
       - run: npm test
@@ -36,12 +43,19 @@ jobs:
         working-directory: web
     steps:
       - uses: actions/checkout@v4
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen@0.2.129
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: web/package-lock.json
       - run: npm ci
+      # The type check behind the build reads the core test, so core/ is built here too.
+      - run: npm run core
       - run: npm run build
       - run: npx playwright install --with-deps chromium
       # The app and the style frame it was ported from, at the same frozen moments, in headless Chromium on SwiftShader.
