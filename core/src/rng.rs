@@ -13,6 +13,7 @@ pub(crate) fn fnv1a(mut hash: u64, bytes: &[u8]) -> u64 {
 pub(crate) struct Rng(u64);
 
 impl Rng {
+    #[cfg(test)]
     pub(crate) fn new(seed: &str) -> Self {
         Self(fnv1a(FNV_OFFSET, seed.as_bytes()))
     }
@@ -23,6 +24,11 @@ impl Rng {
             fnv1a(FNV_OFFSET, seed.as_bytes()),
             &index.to_le_bytes(),
         ))
+    }
+
+    /// A generator that starts from a ready-made 64-bit state.
+    pub(crate) fn from_state(state: u64) -> Self {
+        Self(state)
     }
 
     pub(crate) fn next_u64(&mut self) -> u64 {

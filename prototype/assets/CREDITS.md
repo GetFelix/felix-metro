@@ -4,7 +4,7 @@ Every asset here is CC0 (public domain). No credit is required; it is given anyw
 
 | Asset | Files | Source | Licence |
 |---|---|---|---|
-| City Kit (Roads) by Kenney | `models/roads/` | https://kenney.nl/assets/city-kit-roads | CC0 1.0, `models/roads/License.txt` |
+| City Kit (Roads) by Kenney | `models/roads/` (straight, intersection, crossroad, bend, bend-square, end) | https://kenney.nl/assets/city-kit-roads | CC0 1.0, `models/roads/License.txt` |
 | City Kit (Commercial) 2.1 by Kenney | `models/commercial/` | https://kenney.nl/assets/city-kit-commercial | CC0 1.0, `models/commercial/License.txt` |
 | City Kit (Suburban) 2.0 by Kenney | `models/suburban/` | https://kenney.nl/assets/city-kit-suburban | CC0 1.0, `models/suburban/License.txt` |
 | City Kit (Industrial) 2.0 by Kenney | `models/industrial/` | https://kenney.nl/assets/city-kit-industrial | CC0 1.0, `models/industrial/License.txt` |
