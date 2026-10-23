@@ -56,8 +56,6 @@ services:
       # Peers reach the internal listener here; with one node there are none.
       FELIX_NODE_ADVERTISE_ADDR: 127.0.0.1:5001
       FELIX_INTERNAL_ALLOW_UNAUTHENTICATED: "true"
-      # Where clients on the host reach it, under the name its certificate carries.
-      FELIX_CLIENT_ADVERTISE_ADDR: localhost:5000
       # One listener, so the one published UDP port is the only one clients use.
       FELIX_QUIC_LISTENERS: "1"
       # Acknowledge after the write, so a commit's answer carries its offset.
