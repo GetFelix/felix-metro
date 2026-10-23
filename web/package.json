@@ -1,0 +1,30 @@
+{
+  "name": "felix-metro-web",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "frame": "node scripts/compare-frame.mjs"
+  },
+  "dependencies": {
+    "three": "0.170.0"
+  },
+  "devDependencies": {
+    "@types/node": "22.9.0",
+    "@types/three": "0.170.0",
+    "pixelmatch": "6.0.0",
+    "playwright": "1.48.2",
+    "pngjs": "7.0.0",
+    "prettier": "3.3.3",
+    "typescript": "5.6.3",
+    "vite": "5.4.10",
+    "vitest": "2.1.4"
+  }
+}

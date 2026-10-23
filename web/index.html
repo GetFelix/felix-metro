@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Felix Metro</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --void: #0a0f15;
+    --panel: rgba(10, 15, 21, 0.72);
+    --line: rgba(255, 255, 255, 0.1);
+    --text: #e8eef3;
+    --muted: #93a3b1;
+    --cyan: hsl(192, 90%, 46%);
+    --amber: #ffbe3c;
+    --coral: #ff6038;
+    --violet: #965ce6;
+  }
+  html, body { margin: 0; height: 100%; background: var(--void); color: var(--text); font: 500 14px/1.4 Inter, system-ui, sans-serif; overflow: hidden; }
+  canvas { display: block; }
+  .chip { position: fixed; display: flex; align-items: center; gap: 10px; padding: 8px 14px 8px 8px; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
+  .brand { top: 16px; left: 16px; font-weight: 700; letter-spacing: 0.01em; }
+  .brand img { width: 34px; height: 34px; object-fit: contain; }
+  .brand small { display: block; font-weight: 500; color: var(--muted); font-size: 12px; }
+  .clock { top: 16px; right: 16px; padding: 8px 14px; font: 500 20px/1 "JetBrains Mono", monospace; }
+  .clock span { color: var(--muted); font: 500 12px Inter, sans-serif; margin-right: 6px; }
+  .timeline { left: 50%; bottom: 18px; transform: translateX(-50%); width: min(720px, calc(100vw - 32px)); box-sizing: border-box; padding: 12px 16px; flex-direction: column; align-items: stretch; gap: 6px; }
+  .track { position: relative; height: 22px; }
+  .track input { position: absolute; inset: 0; width: 100%; margin: 0; opacity: 0; cursor: pointer; }
+  .rail { position: absolute; left: 0; right: 0; top: 9px; height: 4px; border-radius: 2px; background: linear-gradient(90deg, var(--coral) var(--p), var(--violet) var(--p)); box-shadow: 0 0 12px rgba(150, 92, 230, 0.35); }
+  .knob { position: absolute; top: 3px; left: var(--p); width: 16px; height: 16px; margin-left: -8px; border-radius: 50%; background: var(--amber); box-shadow: 0 0 14px var(--amber); pointer-events: none; }
+  .ticks { display: flex; justify-content: space-between; color: var(--muted); font: 500 11px "JetBrains Mono", monospace; }
+  .hidden { display: none; }
+  @media (max-width: 600px) { .brand small { display: none; } .clock { font-size: 16px; } }
+</style>
+</head>
+<body>
+<div class="chip brand"><img src="brand/felix-metro-mark.png" alt=""><div>Felix Metro<small>style frame</small></div></div>
+<div class="chip clock"><span>Day 3</span><b id="clock">18:30</b></div>
+<div class="chip timeline" id="timeline">
+  <div class="track" id="track" style="--p: 77%"><div class="rail"></div><div class="knob"></div><input id="hour" type="range" min="0" max="24" step="0.05" value="18.5" aria-label="Time of day"></div>
+  <div class="ticks"><span>00:00</span><span>06:00</span><span>12:00</span><span>18:00</span><span>24:00</span></div>
+</div>
+<script type="module" src="/src/main.ts"></script>
+</body>
+</html>
