@@ -11,6 +11,7 @@ if (!out) throw new Error('usage: compare-frame.mjs <app url> <style frame url> 
 const T = process.env.FRAME_T ?? '12';
 const [W, H] = [1920, 1080];
 const FRAMES = 8;
+const MIN_COLOURS = 30;
 mkdirSync(out, { recursive: true });
 
 const browser = await chromium.launch({
@@ -98,14 +99,25 @@ await browser.close();
 
 const read = (f) => pngjs.PNG.sync.read(readFileSync(join(out, f)));
 const [a, b] = [read('style-frame.png'), read('app.png')];
-// A page that drew nothing would match another that drew nothing, so each must show a scene.
+// A page that drew nothing, or only sky and ground, would match another that did the same. The middle of the frame is
+// where the city is, so it must hold many distinct colours (4 bits a channel) that each cover a visible share of it.
 for (const [name, png] of [
   ['style frame', a],
   ['app', b],
 ]) {
-  const values = new Set();
-  for (let i = 0; i < png.data.length; i += 4 * 97) values.add(png.data.readUInt32BE(i));
-  if (values.size < 1000) throw new Error(`the ${name} screenshot has only ${values.size} distinct colours`);
+  const bins = new Map();
+  let total = 0;
+  for (let y = Math.floor(H * 0.3); y < Math.floor(H * 0.8); y++) {
+    for (let x = Math.floor(W * 0.2); x < Math.floor(W * 0.8); x++) {
+      const i = (y * W + x) * 4;
+      const key = ((png.data[i] >> 4) << 8) | ((png.data[i + 1] >> 4) << 4) | (png.data[i + 2] >> 4);
+      bins.set(key, (bins.get(key) ?? 0) + 1);
+      total++;
+    }
+  }
+  const colours = [...bins.values()].filter((n) => n >= total * 0.0005).length;
+  console.log(`${name}: ${colours} distinct colours in the middle of the frame`);
+  if (colours < MIN_COLOURS) throw new Error(`the ${name} screenshot shows only ${colours} colours in the middle`);
 }
 const diff = new pngjs.PNG({ width: W, height: H });
 const differing = pixelmatch(a.data, b.data, diff.data, W, H, { threshold: 0.1 });

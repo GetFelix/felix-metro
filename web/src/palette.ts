@@ -13,6 +13,8 @@ export const PALETTE = {
 export const FOG = 0x9fb7c8;
 export const HEMI = { sky: 0xcfe6ff, ground: 0x5a6b4a };
 export const GROUND_NIGHT = 0x1d2a2a;
+export const SUN_WHITE = 0xffffff;
+export const SIGN_EMISSIVE = 0xffffff;
 export const BULB_OFF = 0x8a90a0;
 export const TOWER = { crown: 0x1b2430, mast: 0x3d434c };
 

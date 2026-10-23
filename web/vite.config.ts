@@ -13,9 +13,11 @@ const TYPES: Record<string, string> = { '.glb': 'model/gltf-binary', '.png': 'im
 // Served from the repo in dev, copied into dist for build and preview.
 function sharedAssets(): Plugin {
   let outDir = '';
+  let command = '';
   return {
     name: 'shared-assets',
     configResolved(config) {
+      command = config.command;
       outDir = resolve(config.root, config.build.outDir);
     },
     configureServer(server) {
@@ -29,6 +31,7 @@ function sharedAssets(): Plugin {
       });
     },
     closeBundle() {
+      if (command !== 'build') return;
       for (const [name, dir] of Object.entries(SHARED)) cpSync(dir, join(outDir, name), { recursive: true });
     },
   };

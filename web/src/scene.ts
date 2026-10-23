@@ -3,7 +3,20 @@ import { GLTFLoader, type GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import type { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
-import { BULB_OFF, CYAN, FOG, GROUND_NIGHT, HEMI, PALETTE, ROOFS, SKY, TOWER, WALLS } from './palette';
+import {
+  BULB_OFF,
+  CYAN,
+  FOG,
+  GROUND_NIGHT,
+  HEMI,
+  PALETTE,
+  ROOFS,
+  SIGN_EMISSIVE,
+  SKY,
+  SUN_WHITE,
+  TOWER,
+  WALLS,
+} from './palette';
 import type { Tier } from './params';
 
 // Seeded so the frame is identical on every load.
@@ -82,8 +95,8 @@ function variantMap(tex: THREE.Texture, v: number) {
   const key = `${tex.uuid}:${v}`;
   if (variants.has(key)) return variants.get(key)!;
   const { c, g, d } = colormapCopy(tex);
-  const wall = new THREE.Color(WALLS[v % WALLS.length]);
-  const roof = new THREE.Color(ROOFS[(v * 3) % ROOFS.length]);
+  const wall = new THREE.Color(WALLS[v % WALLS.length]!);
+  const roof = new THREE.Color(ROOFS[(v * 3) % ROOFS.length]!);
   for (let i = 0; i < d.data.length; i += 4) {
     const r = d.data[i]!,
       gg = d.data[i + 1]!,
@@ -201,7 +214,7 @@ export async function createCity(renderer: THREE.WebGLRenderer, tier: Tier) {
 
   const hemi = new THREE.HemisphereLight(HEMI.sky, HEMI.ground, 0.8);
   scene.add(hemi);
-  const sun = new THREE.DirectionalLight(0xffffff, 2.5);
+  const sun = new THREE.DirectionalLight(SUN_WHITE, 2.5);
   sun.castShadow = true;
   sun.shadow.mapSize.set(tier === 'high' ? 4096 : 2048, tier === 'high' ? 4096 : 2048);
   Object.assign(sun.shadow.camera, { left: -14, right: 14, top: 14, bottom: -14, near: 1, far: 80 });
@@ -552,7 +565,7 @@ export async function createCity(renderer: THREE.WebGLRenderer, tier: Tier) {
   const signMat = new THREE.MeshStandardMaterial({
     map: logoTex,
     emissiveMap: logoTex,
-    emissive: 0xffffff,
+    emissive: SIGN_EMISSIVE,
     emissiveIntensity: 0.15,
     alphaTest: 0.4,
     side: THREE.DoubleSide,
