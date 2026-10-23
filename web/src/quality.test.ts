@@ -1,20 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { passesFor } from './passes';
-import {
-  MIN_SAMPLES,
-  NEXT_WINDOW_MS,
-  FIRST_WINDOW_MS,
-  SETTLE_FRAMES,
-  createQuality,
-  decideTier,
-  displayInterval,
-  median,
-  settingsFor,
-  stepDown,
-} from './quality';
+import { MIN_SAMPLES, createQuality, decideTier, displayInterval, median, settingsFor, stepDown } from './quality';
 import type { Tier } from './params';
 
 const frames = (ms: number, n = 60) => Array<number>(n).fill(ms);
+// A 60 Hz display that sometimes makes its frame and mostly does not.
+const slow60 = (ms: number) => [...frames(16.7, 12), ...frames(ms, 48)];
 
 describe('median', () => {
   it('takes the middle of an odd list and the mean of the middle two of an even one', () => {
@@ -26,8 +17,8 @@ describe('median', () => {
 
 describe('decideTier', () => {
   it('steps down one tier when the median is over the limit', () => {
-    expect(decideTier('high', frames(30), false)).toBe('medium');
-    expect(decideTier('medium', frames(30), false)).toBe('low');
+    expect(decideTier('high', slow60(30), false)).toBe('medium');
+    expect(decideTier('medium', slow60(30), false)).toBe('low');
   });
 
   it('stays on low', () => {
@@ -111,6 +102,10 @@ describe('createQuality', () => {
   function run(q: ReturnType<typeof createQuality>, ms: number, count: number) {
     for (let i = 0; i < count; i++) q.tick(ms);
   }
+  // Every fifth frame makes 60 Hz, the rest take ms.
+  function runSlow(q: ReturnType<typeof createQuality>, ms: number, count: number) {
+    for (let i = 0; i < count; i++) q.tick(i % 5 === 0 ? 16.7 : ms);
+  }
   const make = (url: Tier | null, still = false) => {
     const changes: Tier[] = [];
     const q = createQuality({ url, still, onChange: (t) => changes.push(t) });
@@ -124,11 +119,11 @@ describe('createQuality', () => {
 
   it('steps down after the first window and again while frames stay slow, then stops at low', () => {
     const { q, changes } = make(null);
-    run(q, 40, Math.ceil(FIRST_WINDOW_MS / 40) + SETTLE_FRAMES);
+    runSlow(q, 40, 100);
     expect(changes).toEqual(['medium']);
-    run(q, 40, Math.ceil(NEXT_WINDOW_MS / 40) + SETTLE_FRAMES);
+    runSlow(q, 40, 80);
     expect(changes).toEqual(['medium', 'low']);
-    run(q, 40, 500);
+    runSlow(q, 40, 500);
     expect(changes).toEqual(['medium', 'low']);
   });
 
@@ -180,7 +175,7 @@ describe('createQuality', () => {
 
   it('records each tier it runs', () => {
     const { q } = make(null);
-    run(q, 40, 85);
+    runSlow(q, 40, 100);
     q.setTier('low');
     expect(q.history).toEqual(['high', 'medium', 'low']);
   });
