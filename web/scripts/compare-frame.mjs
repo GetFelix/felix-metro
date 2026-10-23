@@ -94,7 +94,7 @@ async function shoot(url, file) {
 }
 
 await shoot(`${frameUrl}?t=${T}&still`, 'style-frame.png');
-await shoot(`${appUrl}?t=${T}&still`, 'app.png');
+await shoot(`${appUrl}${appUrl.includes('?') ? '&' : '?'}t=${T}&still`, 'app.png');
 await browser.close();
 
 const read = (f) => pngjs.PNG.sync.read(readFileSync(join(out, f)));

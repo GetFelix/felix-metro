@@ -6,6 +6,8 @@ import { createPost, passesFor } from './post';
 import { createQuality, settingsFor } from './quality';
 import { createRenderer } from './renderer';
 import { createCity, move } from './scene';
+import init, { generate } from './core/felix_metro_core.js';
+import { parseCity, type City } from './layout';
 
 declare global {
   interface Window {
@@ -20,7 +22,17 @@ declare global {
 }
 
 async function main() {
-  const { frozenHour, still, tier: urlTier, ui, hud: showHud, slow } = parseParams(location.search);
+  const {
+    frozenHour,
+    still,
+    tier: urlTier,
+    ui,
+    hud: showHud,
+    slow,
+    layout,
+    seed,
+    districts,
+  } = parseParams(location.search, location.hash);
   if (!ui) document.querySelectorAll('.chip').forEach((e) => e.classList.add('hidden'));
 
   let post: ReturnType<typeof createPost> | null = null;
@@ -29,8 +41,18 @@ async function main() {
   const quality = createQuality({ url: urlTier, still, onChange: (t) => apply(t) });
 
   const renderer = createRenderer(quality.tier);
-  const { camera, controls } = createCamera(renderer.domElement);
-  const { scene, cars, people, glows, setTime, setShadows } = await createCity(renderer, quality.tier);
+  let city: City | null = null;
+  if (layout === 'city') {
+    await init();
+    city = parseCity(generate(seed, districts));
+    document.title = `Felix Metro: ${seed}`;
+    document.getElementById('subtitle')!.textContent = seed;
+  }
+  const span = city ? Math.max(1, city.tiles / 17) : 1;
+  const { camera, controls } = city
+    ? createCamera(renderer.domElement, span * 1.2, new THREE.Vector3())
+    : createCamera(renderer.domElement);
+  const { scene, cars, people, glows, setTime, setShadows } = await createCity(renderer, quality.tier, city);
   const hud = showHud ? createHud(renderer, quality) : null;
 
   // A tier change rebuilds the post chain; shadows and resolution follow the same settings.

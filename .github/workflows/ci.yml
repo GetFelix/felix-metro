@@ -33,6 +33,11 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+      # Serve it with `python3 -m http.server` from the download.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist
 
   frame:
     name: style frame
@@ -70,7 +75,7 @@ jobs:
           done
           failed=0
           for t in 6.8 12 17.8 18.7 21; do
-            FRAME_T=$t npm run frame -- http://127.0.0.1:4173/ http://127.0.0.1:4174/prototype/style-frame.html "frames/t-$t" || failed=1
+            FRAME_T=$t npm run frame -- 'http://127.0.0.1:4173/?layout=frame' http://127.0.0.1:4174/prototype/style-frame.html "frames/t-$t" || failed=1
           done
           exit $failed
         env:

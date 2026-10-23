@@ -3,11 +3,21 @@ import { parseParams } from './params';
 
 describe('parseParams', () => {
   it('defaults to a running scene with the overlay and no forced tier', () => {
-    expect(parseParams('')).toEqual({ frozenHour: null, still: false, tier: null, ui: true, hud: false, slow: 0 });
+    expect(parseParams('')).toEqual({
+      frozenHour: null,
+      still: false,
+      tier: null,
+      ui: true,
+      hud: false,
+      slow: 0,
+      layout: 'city',
+      seed: 'harbor',
+      districts: 2,
+    });
   });
 
   it('reads the frozen hour, still, tier, ui and hud flags', () => {
-    expect(parseParams('?t=17.8&still&tier=low&ui=0&hud&slow=40')).toEqual({
+    expect(parseParams('?t=17.8&still&tier=low&ui=0&hud&slow=40')).toMatchObject({
       frozenHour: 17.8,
       still: true,
       tier: 'low',
@@ -23,5 +33,13 @@ describe('parseParams', () => {
 
   it('ignores an unknown tier', () => {
     expect(parseParams('?tier=ultra').tier).toBeNull();
+  });
+
+  it('draws the generated city unless asked for the frame, with the seed from the hash', () => {
+    expect(parseParams('?layout=frame').layout).toBe('frame');
+    expect(parseParams('', '#pinecrest')).toMatchObject({ layout: 'city', seed: 'pinecrest' });
+    expect(parseParams('?districts=3').districts).toBe(3);
+    expect(parseParams('?districts=0').districts).toBe(2);
+    expect(parseParams('?districts=99').districts).toBe(16);
   });
 });
