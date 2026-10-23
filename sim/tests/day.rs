@@ -42,6 +42,13 @@ fn connection() -> Connection {
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "needs a Felix broker; CI runs it"]
 async fn a_city_runs_a_day_with_every_tick_in_every_district() {
+    // The sim's own log lines, with `--nocapture`.
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
+        )
+        .with_test_writer()
+        .init();
     let connection = connection();
     let city_name = var("METRO_TEST_CITY").unwrap_or_else(|| "harbor".into());
     let stream = events_stream(&city_name);
