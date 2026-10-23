@@ -136,3 +136,23 @@ jobs:
       - run: rustup toolchain install
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace --locked
+
+  sim:
+    name: sim
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test -p felix-metro-sim --test day --locked --no-run
+      # A broker with a stream of four shards for the city, and a token for the sim.
+      - run: sim/ci/up.sh
+      # A simulated day, 5760 ticks, in every district; read back from the broker.
+      - name: A city runs a day with every tick in every district
+        run: cargo test -p felix-metro-sim --test day --locked -- --ignored --nocapture
+        env:
+          METRO_TEST_CA_FILE: ${{ github.workspace }}/sim/ci/state/broker-cert.pem
+          METRO_TEST_TOKEN_FILE: ${{ github.workspace }}/sim/ci/state/sim.token
+      - if: failure()
+        run: docker compose -f sim/ci/compose.yml logs --no-color
