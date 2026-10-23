@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { createCamera } from './camera';
 import { parseParams } from './params';
-import { createPost, createRenderer } from './renderer';
+import { createPost, passesFor } from './post';
+import { createRenderer } from './renderer';
 import { createCity, move } from './scene';
 
 declare global {
@@ -18,7 +19,7 @@ async function main() {
   const renderer = createRenderer(tier);
   const { camera, controls } = createCamera(renderer.domElement);
   const { scene, cars, people, glows, setTime } = await createCity(renderer, tier);
-  const { composer, bloom, tilt, depthRT, depthMat, resize } = createPost(renderer, scene, camera, tier, glows);
+  const { bloom, render, resize } = createPost(renderer, scene, camera, passesFor(tier), glows);
 
   const slider = document.getElementById('hour') as HTMLInputElement;
   let hour = frozenHour ?? parseFloat(slider.value);
@@ -36,18 +37,7 @@ async function main() {
     move(people, dt, false);
     for (const p of people) p.mixer.update(dt);
     controls.update();
-    if (tier !== 'low') {
-      const shown = glows.map((g) => g.visible);
-      glows.forEach((g) => (g.visible = false));
-      scene.overrideMaterial = depthMat;
-      renderer.setRenderTarget(depthRT);
-      renderer.render(scene, camera);
-      renderer.setRenderTarget(null);
-      scene.overrideMaterial = null;
-      glows.forEach((g, i) => (g.visible = shown[i]!));
-      tilt.uniforms.focus!.value = camera.position.distanceTo(controls.target);
-    }
-    composer.render();
+    render(controls.target);
     requestAnimationFrame(frame);
   }
   move(cars, 0, true);
