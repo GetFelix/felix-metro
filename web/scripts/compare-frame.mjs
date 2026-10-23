@@ -42,7 +42,7 @@ async function shoot(url, file) {
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e)));
   page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
-  if (url.endsWith('.html') && url.includes('style-frame')) {
+  if (url.includes('style-frame')) {
     await page.route(
       (u) => u.pathname.endsWith('style-frame.html'),
       async (route) => {
