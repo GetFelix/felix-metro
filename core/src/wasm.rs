@@ -26,3 +26,10 @@ pub fn hash(seed: &str, districts_per_side: u16) -> Result<String, JsError> {
 pub fn resident_name(seed: &str, index: u32) -> String {
     crate::resident_name(seed, index)
 }
+
+/// Any record as one JSON string (see [`crate::record::Record::to_json`]); the
+/// `kind` field says which. Throws when the bytes are not exactly one record.
+#[wasm_bindgen(js_name = decodeRecord)]
+pub fn decode_record(bytes: &[u8]) -> Result<String, JsError> {
+    crate::record::decode_json(bytes).map_err(|e| JsError::new(&e.to_string()))
+}

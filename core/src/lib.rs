@@ -7,6 +7,7 @@
 pub mod city;
 pub mod kinds;
 pub mod names;
+pub mod record;
 mod rng;
 #[cfg(target_arch = "wasm32")]
 pub mod wasm;
