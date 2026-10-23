@@ -44,4 +44,13 @@ describe('createMaterials', () => {
     expect(materialFor('cars', source(), 1)).not.toBe(materialFor('cars', source(), 0));
     expect(lit()).toHaveLength(1);
   });
+
+  it('splits lit materials by window bucket and shares unlit ones across buckets', () => {
+    const { build, source } = counting();
+    const { materialFor, lit } = createMaterials(build);
+    expect(materialFor('commercial', source(), 1, 0, 0)).not.toBe(materialFor('commercial', source(), 1, 0, 3));
+    expect(materialFor('commercial', source(), 1, 0, 3)).toBe(materialFor('commercial', source(), 1, 0, 3));
+    expect(materialFor('commercial', source(), 0, 0, 3)).toBe(materialFor('commercial', source(), 0, 0, 5));
+    expect(lit().map((m) => m.userData.bucket)).toEqual([0, 3]);
+  });
 });

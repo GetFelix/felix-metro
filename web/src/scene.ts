@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import type { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
-import { BULB_OFF, CYAN, FOG, GROUND_NIGHT, HEMI, PALETTE, SIGN_EMISSIVE, SKY, SUN_WHITE, TOWER } from './palette';
+import { BULB_OFF, CYAN, FOG, GROUND_NIGHT, HEMI, PALETTE, SIGN_EMISSIVE, SUN_WHITE, TOWER } from './palette';
+import { daylight, lampId, lampSwitch, windowBucket, windowSwitch } from './daylight';
 import type { Pack } from './assets';
 import { cloneModel, facing as facingOf, fitToLot, loadModel } from './models';
 import { createMaterials } from './materials';
@@ -11,25 +12,6 @@ import type { Tier } from './params';
 let seed = 7;
 const rand = () => ((seed = (seed * 16807) % 2147483647) - 1) / 2147483646;
 const pick = <T>(a: readonly T[]): T => a[Math.floor(rand() * a.length)]!;
-
-const smooth = (t: number) => t * t * (3 - 2 * t);
-
-function sky(hour: number) {
-  let i = 0;
-  while (i < SKY.length - 2 && hour >= SKY[i + 1]![0]) i++;
-  const a = SKY[i]!;
-  const b = SKY[i + 1]!;
-  const t = smooth(THREE.MathUtils.clamp((hour - a[0]) / (b[0] - a[0]), 0, 1));
-  const mix = (k: 1 | 2 | 4 | 5) => a[k].clone().lerp(b[k], t);
-  const num = (k: 3 | 6 | 7) => a[k] + (b[k] - a[k]) * t;
-  return { sky: mix(1), sun: mix(2), sunI: num(3), hs: mix(4), hg: mix(5), hI: num(6), exp: num(7) };
-}
-
-// How dark it is, 0 at noon to 1 at night; drives windows, lamps and headlights.
-const night = (h: number) => {
-  const d = Math.min(Math.abs(h - 13), 24 - Math.abs(h - 13)); // hours from 13:00
-  return smooth(THREE.MathUtils.clamp((d - 4.8) / 2.0, 0, 1));
-};
 
 // Light pools are additive ground decals instead of real lights, so fifty lamps cost almost nothing.
 function radial(color: string) {
@@ -152,7 +134,7 @@ export async function createCity(renderer: THREE.WebGLRenderer, tier: Tier) {
   async function place(pack: Pack, name: string, x: number, z: number, rotY = 0, scale = 1, lit = 0, v = -1) {
     const o = cloneModel(await loadModel(pack, name));
     meshes(o, (n) => {
-      n.material = materials.materialFor(pack, n.material as THREE.MeshStandardMaterial, lit, v);
+      n.material = materials.materialFor(pack, n.material as THREE.MeshStandardMaterial, lit, v, windowBucket(x, z));
       n.castShadow = true;
       n.receiveShadow = true;
     });
@@ -315,9 +297,14 @@ export async function createCity(renderer: THREE.WebGLRenderer, tier: Tier) {
     depthWrite: false,
     opacity: 0,
   });
-  const bulbMat = new THREE.MeshBasicMaterial({ color: PALETTE.lamp });
   // Additive glows: hidden while ambient occlusion reads the scene, or they shade it like solid quads.
   const glows: THREE.Object3D[] = [];
+  const lampLights: {
+    id: number;
+    pool: THREE.MeshBasicMaterial;
+    glow: THREE.SpriteMaterial;
+    bulb: THREE.MeshBasicMaterial;
+  }[] = [];
   const glowMat = new THREE.SpriteMaterial({
     map: radial('rgba(255,210,140,1)'),
     blending: THREE.AdditiveBlending,
@@ -455,15 +442,22 @@ export async function createCity(renderer: THREE.WebGLRenderer, tier: Tier) {
 
   await Promise.all(jobs);
 
-  // Bulbs, glows and pools hang off the lamp models' arms.
+  // Bulbs, glows and pools hang off the lamp models' arms. Each lamp has its own materials so it can switch on alone.
   for (const lamp of lamps) {
     const arm = new THREE.Vector3(0, 0.58, -0.17).applyEuler(lamp.rotation).add(lamp.position);
-    const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.025, 8, 6), bulbMat);
+    const light = {
+      id: lampId(lamp.position.x, lamp.position.z),
+      pool: poolMat.clone(),
+      glow: glowMat.clone(),
+      bulb: new THREE.MeshBasicMaterial({ color: BULB_OFF }),
+    };
+    lampLights.push(light);
+    const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.025, 8, 6), light.bulb);
     bulb.position.copy(arm);
-    const glow = new THREE.Sprite(glowMat);
+    const glow = new THREE.Sprite(light.glow);
     glow.position.copy(arm);
     glow.scale.setScalar(0.45);
-    const pool = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 1.5), poolMat);
+    const pool = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 1.5), light.pool);
     pool.rotation.x = -Math.PI / 2;
     pool.position.set(arm.x, 0.03, arm.z);
     scene.add(bulb, glow, pool);
@@ -471,38 +465,39 @@ export async function createCity(renderer: THREE.WebGLRenderer, tier: Tier) {
   }
 
   // ---------- time of day ----------
+  const groundColor = new THREE.Color();
+  const nightGround = new THREE.Color(GROUND_NIGHT);
+  const lampColor = new THREE.Color(PALETTE.lamp);
+  const bulbOff = new THREE.Color(BULB_OFF);
   function setTime(hour: number, bloom: UnrealBloomPass) {
-    const s = sky(hour);
-    scene.background = s.sky;
-    fog.color.copy(s.sky);
-    // The sun travels east to west; at night the same light is the moon, high and cool.
-    const n = night(hour);
-    const dayAngle = ((hour - 6) / 12) * Math.PI;
-    const elev = n > 0.85 ? 0.9 : Math.max(0.12, Math.sin(dayAngle));
-    const az = n > 0.85 ? 2.2 : dayAngle;
-    // West is +x, so the evening sun comes from the camera's side and lights the faces in view.
-    sun.position.set(-Math.cos(az) * 20, elev * 22 + 3, 6 + Math.sin(az) * 3);
-    sun.color.copy(s.sun);
-    sun.intensity = s.sunI;
-    hemi.color.copy(s.hs);
-    hemi.groundColor.copy(s.hg);
-    hemi.intensity = s.hI;
-    renderer.toneMappingExposure = s.exp;
-    scene.environmentIntensity = 0.06 + 0.5 * (1 - n);
-    (ground.material as THREE.MeshStandardMaterial).color
-      .set(PALETTE.grass)
-      .lerp(new THREE.Color(GROUND_NIGHT), n * 0.6);
-    for (const m of materials.lit()) m.emissiveIntensity = n * 0.85 * m.userData.lit;
-    const lampOn = smooth(THREE.MathUtils.clamp((n - 0.25) / 0.4, 0, 1));
-    poolMat.opacity = lampOn * 0.55;
-    glowMat.opacity = lampOn * 0.9;
-    bulbMat.color.set(lampOn > 0.05 ? PALETTE.lamp : BULB_OFF);
-    headMat.opacity = lampOn;
-    tailMat.opacity = lampOn * 0.8;
-    beamMat.opacity = lampOn * 0.35;
-    bloom.strength = 0.1 + n * 0.35;
-    crownMat.emissiveIntensity = 0.5 + n * 2.5;
-    signMat.emissiveIntensity = 0.12 + n * 0.3;
+    const d = daylight(hour);
+    scene.background = d.sky;
+    fog.color.copy(d.sky);
+    sun.position.set(...d.sunPosition);
+    sun.color.copy(d.sun);
+    sun.intensity = d.sunIntensity;
+    hemi.color.copy(d.hemiSky);
+    hemi.groundColor.copy(d.hemiGround);
+    hemi.intensity = d.hemiIntensity;
+    renderer.toneMappingExposure = d.exposure;
+    scene.environmentIntensity = d.environment;
+    (ground.material as THREE.MeshStandardMaterial).color.copy(
+      groundColor.set(PALETTE.grass).lerp(nightGround, d.groundNight),
+    );
+    for (const m of materials.lit())
+      m.emissiveIntensity = d.windowBrightness * m.userData.lit * windowSwitch(hour, m.userData.bucket);
+    for (const l of lampLights) {
+      const on = lampSwitch(hour, l.id);
+      l.pool.opacity = on * d.poolOpacity;
+      l.glow.opacity = on * d.glowOpacity;
+      l.bulb.color.copy(bulbOff).lerp(lampColor, on);
+    }
+    headMat.opacity = d.headlight;
+    tailMat.opacity = d.taillight;
+    beamMat.opacity = d.beam;
+    bloom.strength = d.bloom;
+    crownMat.emissiveIntensity = d.crown;
+    signMat.emissiveIntensity = d.signEmissive;
     const hh = Math.floor(hour) % 24,
       mm = Math.floor((hour % 1) * 60);
     document.getElementById('clock')!.textContent = `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;

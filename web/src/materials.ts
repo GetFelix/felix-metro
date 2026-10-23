@@ -75,14 +75,16 @@ export interface TextureBuilders {
 const canvasBuilders: TextureBuilders = { variant: variantMap, mask: windowMask };
 
 // Every model of a pack samples the same colormap, so a variant texture and a window mask are built once per pack
-// from whichever model asks first. Materials are shared by (pack, light level, variant).
+// from whichever model asks first. Materials are shared by (pack, light level, variant, window bucket).
 export function createMaterials(build: TextureBuilders = canvasBuilders) {
   const variants = new Map<string, THREE.Texture>();
   const masks = new Map<Pack, THREE.Texture>();
   const shared = new Map<string, THREE.MeshStandardMaterial>();
 
-  function materialFor(pack: Pack, src: THREE.MeshStandardMaterial, lit: number, v = -1) {
-    const key = `${pack}:${lit}:${v}`;
+  function materialFor(pack: Pack, src: THREE.MeshStandardMaterial, lit: number, v = -1, bucket = 0) {
+    // Buildings that light up at different hours need different materials; unlit ones all share bucket 0.
+    const b = lit > 0 ? bucket : 0;
+    const key = `${pack}:${lit}:${v}:${b}`;
     let m = shared.get(key);
     if (!m) {
       let map = src.map!;
@@ -100,6 +102,7 @@ export function createMaterials(build: TextureBuilders = canvasBuilders) {
         m.emissiveMap = masks.get(pack)!;
         m.emissive = PALETTE.window.clone();
         m.userData.lit = lit;
+        m.userData.bucket = b;
       }
       shared.set(key, m);
     }
