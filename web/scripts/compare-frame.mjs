@@ -38,10 +38,10 @@ async function shoot(url, file) {
   if (errors.length) throw new Error(`${url}:\n${errors.join('\n')}`);
 }
 
-await shoot(`${frameUrl}?t=${T}&still`, 'style-frame.png');
-await shoot(`${appUrl}?t=${T}&still`, 'app.png');
-await shoot(`${frameUrl}?t=${T}&still`, 'style-frame-2.png');
-await shoot(`${appUrl}?t=${T}&still`, 'app-2.png');
+await shoot(`${frameUrl}?t=${T}&still${process.env.FRAME_EXTRA ?? ""}`, 'style-frame.png');
+await shoot(`${appUrl}?t=${T}&still${process.env.FRAME_EXTRA ?? ""}`, 'app.png');
+await shoot(`${frameUrl}?t=${T}&still${process.env.FRAME_EXTRA ?? ""}`, 'style-frame-2.png');
+await shoot(`${appUrl}?t=${T}&still${process.env.FRAME_EXTRA ?? ""}`, 'app-2.png');
 await browser.close();
 
 const read = (f) => pngjs.PNG.sync.read(readFileSync(join(out, f)));
