@@ -41,7 +41,7 @@ construction cones and barriers, which may be enough for M4.
 - **Lit windows come from the same texture.** The colormap's light-blue swatches are windows; a mask of them is the emissive map, scaled by how dark it is. Towers use a lower level because their glass is one large swatch.
 - **Light pools are decals.** Street lights and headlights are additive sprites and ground decals, not real lights, so hundreds cost almost nothing. They are hidden from the ambient occlusion pass.
 - **Time of day is one function.** Sky, fog, sun, hemisphere light, exposure, window light, lamps and headlights all come from the hour (`web/src/daylight.ts`). Each building starts lighting its windows at its own fixed time between 17:30 and 19:30 and starts to darken between 06:00 and 07:30, each fade taking ten minutes, so the last are done by 19:40 and 07:40. Each street lamp switches on at its own time between 18:27 and 18:47 and fades out at dawn between 06:54 and 07:14, nine minutes either way. Both come from a hash of position, so the same moment always looks the same. The sun sets in the west (+x), on the camera's side, so evening light falls on the faces in view.
-- **Post processing**, in order: ambient occlusion (high tier only), bloom with a threshold of 1 so only lights glow, tilt-shift blur, tone mapping, then a small saturation lift and vignette. The blur is by depth, like a miniature photo: it grows with distance from the focus plane through the orbit target, so a tall building at that depth stays sharp to its roof.
+- **Post processing**, in order: ambient occlusion (high tier only, see [Quality tiers](#quality-tiers)), bloom with a threshold of 1 so only lights glow, tilt-shift blur, tone mapping, then a small saturation lift and vignette. The blur is by depth, like a miniature photo: it grows with distance from the focus plane through the orbit target, so a tall building at that depth stays sharp to its roof.
 - **Buildings fit their lot.** Some Kenney buildings are wider than a tile, so each is scaled down to fit 0.9 of its lot and none overlap.
 - **Brand**: Inter and JetBrains Mono, cyan `hsl(192, 90%, 46%)` for Felix accents, amber for light, and coral to violet for the timeline. The Felix tower downtown carries the mark.
 
@@ -54,8 +54,34 @@ Serve the repository root (`python3 -m http.server`) and open
 |---|---|
 | `?t=17.8` | Freeze the clock at that hour |
 | `?still` | Freeze cars and people, for screenshots |
-| `?tier=low\|medium\|high` | Quality tier. Low drops shadows, ambient occlusion and tilt-shift |
+| `?tier=low\|medium\|high` | Force a quality tier and turn off the automatic choice |
+| `?hud` | Frame-time overlay under the brand chip |
 | `?ui=0` | Hide the overlay |
 
 The screenshots above are `?t=12&still`, `?t=17.8&still` and `?t=21&still` at
 1600 × 900.
+
+## Quality tiers
+
+Each tier drops effects in the order that costs the least in looks, so the
+picture degrades before the frame rate does.
+
+| Tier | Ambient occlusion | Tilt-shift | Shadows | Pixel ratio | Pedestrian rigs |
+|---|---|---|---|---|---|
+| high | yes | yes | 4096 map | up to 2 | yes |
+| medium | no | yes | 2048 map | up to 2 | no |
+| low | no | no | no | 1 | no |
+
+`web/src/quality.ts` chooses the tier. It starts on high and measures frame
+times for the first 3 seconds after the city is ready, ignoring the first 10
+frames. If the median is over 22 ms it steps down one tier, rebuilds the post
+chain and judges another 1.5 seconds. It repeats until the median is under the
+limit or it reaches low, and it never steps up. A frozen scene (`?still`) has
+no meaningful frame times and never chooses on its own.
+
+A tier from `?tier=` or from a saved choice (`setTier()` stores it in
+`localStorage`) is used as it is and turns the automatic choice off.
+
+`?hud` shows the median and 95th percentile frame time over the last 120
+frames, draw calls and triangles for the last frame, and the tier with whether
+it was chosen automatically or forced.

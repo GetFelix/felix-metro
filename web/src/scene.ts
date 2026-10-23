@@ -7,6 +7,7 @@ import type { Pack } from './assets';
 import { cloneModel, facing as facingOf, fitToLot, loadModel } from './models';
 import { createMaterials } from './materials';
 import type { Tier } from './params';
+import { settingsFor } from './quality';
 
 // Seeded so the frame is identical on every load.
 let seed = 7;
@@ -105,7 +106,7 @@ export async function createCity(renderer: THREE.WebGLRenderer, tier: Tier) {
   scene.add(hemi);
   const sun = new THREE.DirectionalLight(SUN_WHITE, 2.5);
   sun.castShadow = true;
-  sun.shadow.mapSize.set(tier === 'high' ? 4096 : 2048, tier === 'high' ? 4096 : 2048);
+  sun.shadow.mapSize.set(settingsFor(tier).shadowMapSize, settingsFor(tier).shadowMapSize);
   Object.assign(sun.shadow.camera, { left: -14, right: 14, top: 14, bottom: -14, near: 1, far: 80 });
   sun.shadow.bias = -0.0004;
   sun.shadow.normalBias = 0.02;
@@ -469,7 +470,7 @@ export async function createCity(renderer: THREE.WebGLRenderer, tier: Tier) {
   const nightGround = new THREE.Color(GROUND_NIGHT);
   const lampColor = new THREE.Color(PALETTE.lamp);
   const bulbOff = new THREE.Color(BULB_OFF);
-  function setTime(hour: number, bloom: UnrealBloomPass) {
+  function setTime(hour: number, bloom: UnrealBloomPass | null) {
     const d = daylight(hour);
     scene.background = d.sky;
     fog.color.copy(d.sky);
@@ -495,7 +496,7 @@ export async function createCity(renderer: THREE.WebGLRenderer, tier: Tier) {
     headMat.opacity = d.headlight;
     tailMat.opacity = d.taillight;
     beamMat.opacity = d.beam;
-    bloom.strength = d.bloom;
+    if (bloom) bloom.strength = d.bloom;
     crownMat.emissiveIntensity = d.crown;
     signMat.emissiveIntensity = d.signEmissive;
     const hh = Math.floor(hour) % 24,
@@ -504,5 +505,24 @@ export async function createCity(renderer: THREE.WebGLRenderer, tier: Tier) {
     document.getElementById('track')!.style.setProperty('--p', `${(hour / 24) * 100}%`);
   }
 
-  return { scene, cars, people, glows, setTime };
+  // Toggles shadows on the renderer and the sun together. Materials recompile once; nothing is allocated per frame
+  // unless the map size changes.
+  function setShadows(on: boolean, mapSize: number) {
+    const resized = sun.shadow.mapSize.x !== mapSize;
+    if (resized) {
+      sun.shadow.mapSize.set(mapSize, mapSize);
+      sun.shadow.map?.dispose();
+      sun.shadow.map = null;
+    }
+    if (renderer.shadowMap.enabled === on && !resized) return;
+    renderer.shadowMap.enabled = on;
+    sun.castShadow = on;
+    scene.traverse((n) => {
+      const m = (n as THREE.Mesh).material;
+      if (Array.isArray(m)) m.forEach((x) => (x.needsUpdate = true));
+      else if (m) m.needsUpdate = true;
+    });
+  }
+
+  return { scene, cars, people, glows, setTime, setShadows };
 }
