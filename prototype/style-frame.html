@@ -643,6 +643,7 @@ function frame() {
 move(cars, 0, true); move(people, 0, false);
 frame();
 document.body.dataset.ready = '1';
+window.__ready = true;
 
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight;
