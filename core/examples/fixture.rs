@@ -140,6 +140,7 @@ fn records() -> Vec<(&'static str, Vec<u8>)> {
                     id: 3,
                     doing: Doing::Activity {
                         kind: 0,
+                        lot: 17,
                         until: 300,
                     },
                 },
@@ -202,8 +203,8 @@ fn records() -> Vec<(&'static str, Vec<u8>)> {
         ("tick", busy.encode().unwrap()),
         ("keyframe", key.encode().unwrap()),
     ];
-    out.extend(commands.iter().map(|c| ("command", c.encode())));
-    out.extend(registry.iter().map(|r| ("registry", r.encode())));
+    out.extend(commands.iter().map(|c| ("command", c.encode().unwrap())));
+    out.extend(registry.iter().map(|r| ("registry", r.encode().unwrap())));
     out
 }
 

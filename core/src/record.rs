@@ -6,8 +6,11 @@
 //! ticks that are usually small are LEB128 varints, and lists of ids are
 //! zigzag deltas. Layouts are in `docs/design.md`.
 //!
-//! Decoding never panics: truncated bytes, unknown kinds and tags, bad
-//! UTF-8 and trailing bytes are all errors.
+//! Events and keyframe resident entries are a tag, a length and a body, so a
+//! reader skips a tag it does not know and ignores bytes appended to a body it
+//! does. Header flag bits select the layout and stay strict. Decoding never
+//! panics: truncated bytes, unknown kinds, short bodies, bad UTF-8, trailing
+//! bytes and non-canonical varints are all errors.
 
 mod codec;
 mod json;
@@ -28,8 +31,11 @@ pub const KIND_REGISTRY: u8 = 3;
 /// Header flag: the record carries a keyframe before its events.
 pub const FLAG_KEYFRAME: u8 = 1;
 
-/// Longest string kept in a record; longer ones are cut when encoded.
-pub const MAX_STR: usize = 255;
+/// Longest string in a record, in bytes. Encoding refuses longer ones.
+pub const MAX_STR: usize = 64;
+
+/// Highest [`Vehicle::progress`]: the end of its leg, in thousandths.
+pub const MAX_PROGRESS: u16 = 1000;
 
 /// A building kind that means the lot is empty.
 pub const NO_BUILDING: u16 = u16::MAX;
@@ -69,17 +75,27 @@ impl std::fmt::Display for DecodeError {
 
 impl std::error::Error for DecodeError {}
 
-/// A tick record is more than 65535 events.
+/// Why a record could not be written.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct TooManyEvents;
+pub enum EncodeError {
+    /// A tick record holds at most 65535 events.
+    TooManyEvents,
+    /// A name, seed or parent is over [`MAX_STR`] bytes.
+    StringTooLong,
+}
 
-impl std::fmt::Display for TooManyEvents {
+impl std::fmt::Display for EncodeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("a tick record holds at most 65535 events")
+        match self {
+            EncodeError::TooManyEvents => f.write_str("a tick record holds at most 65535 events"),
+            EncodeError::StringTooLong => {
+                write!(f, "a string in a record is at most {MAX_STR} bytes")
+            }
+        }
     }
 }
 
-impl std::error::Error for TooManyEvents {}
+impl std::error::Error for EncodeError {}
 
 /// Any record this crate reads.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -129,6 +145,8 @@ pub struct Header {
 pub struct TickRecord {
     pub header: Header,
     pub keyframe: Option<Keyframe>,
+    /// Events with an unknown tag are skipped on decode, so a reader never
+    /// sees them.
     pub events: Vec<Event>,
 }
 
@@ -241,7 +259,12 @@ pub struct ResidentState {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Doing {
-    Activity { kind: u8, until: u32 },
+    /// Doing `kind` inside `lot` until the tick `until`.
+    Activity {
+        kind: u8,
+        lot: u32,
+        until: u32,
+    },
     Trip(Vehicle),
 }
 
@@ -309,8 +332,8 @@ pub enum RegistryRecord {
 }
 
 impl TickRecord {
-    /// Fails when there are more than 65535 events.
-    pub fn encode(&self) -> Result<Vec<u8>, TooManyEvents> {
+    /// Fails on more than 65535 events or a string over [`MAX_STR`] bytes.
+    pub fn encode(&self) -> Result<Vec<u8>, EncodeError> {
         codec::encode_tick(self)
     }
 
@@ -326,7 +349,8 @@ impl TickRecord {
 }
 
 impl CommandRecord {
-    pub fn encode(&self) -> Vec<u8> {
+    /// Fails on a name over [`MAX_STR`] bytes.
+    pub fn encode(&self) -> Result<Vec<u8>, EncodeError> {
         codec::encode_command(self)
     }
 
@@ -340,7 +364,8 @@ impl CommandRecord {
 }
 
 impl RegistryRecord {
-    pub fn encode(&self) -> Vec<u8> {
+    /// Fails on a string over [`MAX_STR`] bytes.
+    pub fn encode(&self) -> Result<Vec<u8>, EncodeError> {
         codec::encode_registry(self)
     }
 

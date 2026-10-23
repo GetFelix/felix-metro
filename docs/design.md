@@ -113,18 +113,28 @@ writes decisions instead, and the client works out positions:
 | `speed` | ticks per second | The city's speed changed; 0 is paused |
 
 A route is its segment ids from the road graph (`u32`) and one speed byte per
-segment, a percentage of the segment class's speed. A trip of 12 segments is 35
+segment, a percentage of the segment class's speed. A trip of 12 segments is 36
 bytes, so a resident making five or six trips a city day, in a city of 20,000
 residents, writes under 5 KB/s of events at normal speed.
 
 ### Byte layouts
 
 Every record starts with a kind byte, and a layout change gets a new kind.
-Integers are little-endian. A varint is LEB128, and a delta is a zigzag varint of
-the difference from the previous id in the list, so lists need no order. A
-string is a length byte and UTF-8, cut at 255 bytes. `core/src/record.rs`
-encodes and decodes all of them, and decoding returns an error for truncated or
-trailing bytes, unknown kinds, tags and flag bits, and out-of-range values.
+Integers are little-endian. A varint is LEB128 in its shortest form (a padded
+one is refused, so a retried tick is the same bytes), and a delta is a zigzag
+varint of the difference from the previous id in the list, so lists need no
+order. A string is a length byte and UTF-8, at most 64 bytes; encoding refuses a
+longer one instead of cutting it. `core/src/record.rs` encodes and decodes all
+of them.
+
+Decoding returns an error for truncated or trailing bytes, an unknown kind or
+header flag bit, an out-of-range value, a string over 64 bytes or bad UTF-8,
+and a body shorter than its tag's fields. Flag bits choose the layout, so
+they stay strict, as in the wire protocol. Events and a keyframe's resident
+entries are framed instead (a tag, a varint body length and the body), so an
+older reader skips a tag it does not know and keeps the rest of the tick, and
+ignores bytes appended to a body it does know. A field can therefore be added
+to the end of an event without a new kind.
 
 | Kind | Record |
 |---|---|
@@ -151,7 +161,8 @@ that.
 | 29 | 2 | `events`, the number of events |
 | 31 | | the keyframe if bit 0 is set, then the events |
 
-An event is a tag byte and its fields. `resident` is a `u32`.
+An event is a tag byte, a varint body length and the fields below. `resident`
+is a `u32`. `events` counts every event, including ones a reader skips.
 
 | Tag | Event | Fields |
 |---|---|---|
@@ -169,7 +180,8 @@ An event is a tag byte and its fields. `resident` is a `u32`.
 
 A route is a varint leg count, the segment ids (first as a delta from 0, then
 each from the one before), then one speed byte per leg. A vehicle state is kind
-`u8`, progress along its first leg in thousandths `u16`, and a route.
+`u8`, progress along its first leg in thousandths `u16` (0 to 1000), and a
+route.
 
 ### Keyframes
 
@@ -183,7 +195,7 @@ commit also writes the stream state key `keyframe`, so the newest one is one
 |---|---|
 | buildings | varint count; per lot that differs from the generated city: lot delta, kind `u16` (65535 for none), rotation `u8` |
 | roads | varint count; per segment closed or added: segment delta, change `u8` |
-| residents | varint count; per resident in the district: id delta, then `0` kind `u8` and until varint (an activity), or `1` and a vehicle state (a trip in progress) |
+| residents | varint count; per resident in the district: id delta, then a framed state: tag `0`, kind `u8`, lot `u32` and until varint (an activity in that lot), or tag `1` and a vehicle state (a trip in progress) |
 | counts | varints: home, at work, on the road, asleep |
 
 Because buildings and roads are diffs against the city the seed generates, the
@@ -197,8 +209,16 @@ The counts are what the stats sparkline plots.
 ### Commands and the registry
 
 A command record is the kind byte, a command id `u32`, the builder's display
-name, a tag and fields. The gateway stamps who sent it; the `command` event
-copies the principal hash and name into the district it touched.
+name, a tag and fields. It carries no principal: the gateway's `stamp_sender`
+adds who sent it outside the payload, and the sim copies that principal hash
+with the name into the `command` event of the district it touched.
+
+The display name comes from the ID token's name claim, chosen client-side, so it
+is whatever the builder chose and is shown as given. The record layer only
+limits it to 64 bytes. A fork's name is a seed part, 1 to 32 characters of
+`a-z`, `0-9` and `-`, and the sim refuses the command (result code) when it is
+not. The lineage name `harbor~bridge-closed` that registry records carry must
+fit 64 bytes too, so a fork too deep to name is refused the same way.
 
 | Tag | Command | Fields |
 |---|---|---|

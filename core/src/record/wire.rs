@@ -1,6 +1,6 @@
 //! Little-endian fixed fields, LEB128 varints and zigzag deltas.
 
-use super::DecodeError;
+use super::{DecodeError, EncodeError};
 
 pub(super) struct Writer(pub(super) Vec<u8>);
 
@@ -35,14 +35,29 @@ impl Writer {
         self.varint(((d << 1) ^ (d >> 63)) as u64);
     }
 
-    /// A length byte and UTF-8, cut at a character boundary if over 255 bytes.
-    pub(super) fn str(&mut self, s: &str) {
-        let mut n = s.len().min(super::MAX_STR);
-        while !s.is_char_boundary(n) {
-            n -= 1;
+    /// A length byte and UTF-8.
+    pub(super) fn str(&mut self, s: &str) -> Result<(), EncodeError> {
+        if s.len() > super::MAX_STR {
+            return Err(EncodeError::StringTooLong);
         }
-        self.u8(n as u8);
-        self.0.extend_from_slice(&s.as_bytes()[..n]);
+        self.u8(s.len() as u8);
+        self.0.extend_from_slice(s.as_bytes());
+        Ok(())
+    }
+
+    /// A tag, then a varint length and the body `put` writes, so a reader
+    /// can skip a tag it does not know.
+    pub(super) fn framed(
+        &mut self,
+        tag: u8,
+        put: impl FnOnce(&mut Writer) -> Result<(), EncodeError>,
+    ) -> Result<(), EncodeError> {
+        let mut body = Writer(Vec::new());
+        put(&mut body)?;
+        self.u8(tag);
+        self.varint(body.0.len() as u64);
+        self.0.extend_from_slice(&body.0);
+        Ok(())
     }
 }
 
@@ -76,6 +91,23 @@ impl<'a> Reader<'a> {
         Ok(*head)
     }
 
+    fn slice(&mut self, n: usize) -> Result<&'a [u8], DecodeError> {
+        if n > self.bytes.len() {
+            return Err(DecodeError::Truncated);
+        }
+        let (head, rest) = self.bytes.split_at(n);
+        self.bytes = rest;
+        Ok(head)
+    }
+
+    /// A tag and the body that follows its length. A reader of the body that
+    /// stops early leaves the rest unread, so fields can be appended later.
+    pub(super) fn framed(&mut self) -> Result<(u8, Reader<'a>), DecodeError> {
+        let tag = self.u8()?;
+        let len = usize::try_from(self.varint()?).map_err(|_| DecodeError::Truncated)?;
+        Ok((tag, Reader::new(self.slice(len)?)))
+    }
+
     pub(super) fn u8(&mut self) -> Result<u8, DecodeError> {
         Ok(self.take::<1>()?[0])
     }
@@ -103,6 +135,10 @@ impl<'a> Reader<'a> {
             }
             v |= bits << shift;
             if b & 0x80 == 0 {
+                // A zero last byte after the first is padding. One value has one encoding.
+                if b == 0 && shift > 0 {
+                    return Err(DecodeError::Invalid("varint is not canonical"));
+                }
                 return Ok(v);
             }
         }
@@ -116,7 +152,10 @@ impl<'a> Reader<'a> {
     pub(super) fn delta(&mut self, prev: u32) -> Result<u32, DecodeError> {
         let z = self.varint()?;
         let d = ((z >> 1) as i64) ^ -((z & 1) as i64);
-        u32::try_from(i64::from(prev) + d).map_err(|_| DecodeError::Invalid("delta leaves u32"))
+        i64::from(prev)
+            .checked_add(d)
+            .and_then(|v| u32::try_from(v).ok())
+            .ok_or(DecodeError::Invalid("delta leaves u32"))
     }
 
     /// An element count. Every element takes at least a byte, so a count past
@@ -131,11 +170,10 @@ impl<'a> Reader<'a> {
 
     pub(super) fn str(&mut self) -> Result<String, DecodeError> {
         let n = usize::from(self.u8()?);
-        if n > self.bytes.len() {
-            return Err(DecodeError::Truncated);
+        if n > super::MAX_STR {
+            return Err(DecodeError::Invalid("string is too long"));
         }
-        let (head, rest) = self.bytes.split_at(n);
-        self.bytes = rest;
-        String::from_utf8(head.to_vec()).map_err(|_| DecodeError::Invalid("string is not UTF-8"))
+        String::from_utf8(self.slice(n)?.to_vec())
+            .map_err(|_| DecodeError::Invalid("string is not UTF-8"))
     }
 }

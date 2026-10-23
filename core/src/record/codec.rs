@@ -2,9 +2,9 @@
 
 use super::wire::{Reader, Writer};
 use super::{
-    BuildingDiff, Command, CommandRecord, Counts, DecodeError, Doing, Event, FLAG_KEYFRAME, Header,
-    KIND_COMMAND, KIND_REGISTRY, KIND_TICK, Keyframe, Leg, RegistryRecord, ResidentState, RoadDiff,
-    TickRecord, TooManyEvents, Vehicle,
+    BuildingDiff, Command, CommandRecord, Counts, DecodeError, Doing, EncodeError, Event,
+    FLAG_KEYFRAME, Header, KIND_COMMAND, KIND_REGISTRY, KIND_TICK, Keyframe, Leg, MAX_PROGRESS,
+    RegistryRecord, ResidentState, RoadDiff, TickRecord, Vehicle,
 };
 use crate::city::City;
 
@@ -49,8 +49,8 @@ pub fn building_diffs(city: &City, current: &[BuildingDiff]) -> Vec<BuildingDiff
         .collect()
 }
 
-pub(super) fn encode_tick(r: &TickRecord) -> Result<Vec<u8>, TooManyEvents> {
-    let events = u16::try_from(r.events.len()).map_err(|_| TooManyEvents)?;
+pub(super) fn encode_tick(r: &TickRecord) -> Result<Vec<u8>, EncodeError> {
+    let events = u16::try_from(r.events.len()).map_err(|_| EncodeError::TooManyEvents)?;
     let mut w = Writer(Vec::with_capacity(TICK_HEADER_LEN + 32 * r.events.len()));
     let h = &r.header;
     w.u8(KIND_TICK);
@@ -67,10 +67,10 @@ pub(super) fn encode_tick(r: &TickRecord) -> Result<Vec<u8>, TooManyEvents> {
     w.u64(h.wall_us);
     w.u16(events);
     if let Some(k) = &r.keyframe {
-        put_keyframe(&mut w, k);
+        put_keyframe(&mut w, k)?;
     }
     for e in &r.events {
-        put_event(&mut w, e);
+        put_event(&mut w, e)?;
     }
     Ok(w.0)
 }
@@ -96,7 +96,7 @@ pub(super) fn decode_tick(bytes: &[u8]) -> Result<TickRecord, DecodeError> {
     };
     let mut events = Vec::with_capacity(n.min(r.remaining()));
     for _ in 0..n {
-        events.push(get_event(&mut r)?);
+        events.extend(get_event(&mut r)?);
     }
     r.finish()?;
     Ok(TickRecord {
@@ -158,110 +158,16 @@ fn put_vehicle(w: &mut Writer, v: &Vehicle) {
 }
 
 fn get_vehicle(r: &mut Reader) -> Result<Vehicle, DecodeError> {
+    let kind = r.u8()?;
+    let progress = r.u16()?;
+    if progress > MAX_PROGRESS {
+        return Err(DecodeError::Invalid("progress is past the end of the leg"));
+    }
     Ok(Vehicle {
-        kind: r.u8()?,
-        progress: r.u16()?,
+        kind,
+        progress,
         route: get_route(r)?,
     })
-}
-
-fn put_event(w: &mut Writer, e: &Event) {
-    match e {
-        Event::Trip {
-            resident,
-            vehicle,
-            depart,
-            route,
-        } => {
-            w.u8(EV_TRIP);
-            w.u32(*resident);
-            w.u8(*vehicle);
-            w.u32(*depart);
-            put_route(w, route);
-        }
-        Event::Replan {
-            resident,
-            from_segment,
-            route,
-        } => {
-            w.u8(EV_REPLAN);
-            w.u32(*resident);
-            w.u32(*from_segment);
-            put_route(w, route);
-        }
-        Event::Arrived { resident, lot } => {
-            w.u8(EV_ARRIVED);
-            w.u32(*resident);
-            w.u32(*lot);
-        }
-        Event::Activity {
-            resident,
-            kind,
-            until,
-        } => {
-            w.u8(EV_ACTIVITY);
-            w.u32(*resident);
-            w.u8(*kind);
-            w.u32(*until);
-        }
-        Event::Left {
-            resident,
-            district,
-            vehicle,
-        } => {
-            w.u8(EV_LEFT);
-            w.u32(*resident);
-            w.u16(*district);
-            put_vehicle(w, vehicle);
-        }
-        Event::Entered {
-            resident,
-            district,
-            vehicle,
-        } => {
-            w.u8(EV_ENTERED);
-            w.u32(*resident);
-            w.u16(*district);
-            put_vehicle(w, vehicle);
-        }
-        Event::Built {
-            lot,
-            kind,
-            rotation,
-        } => {
-            w.u8(EV_BUILT);
-            put_building(w, *lot, *kind, *rotation);
-        }
-        Event::Demolished {
-            lot,
-            kind,
-            rotation,
-        } => {
-            w.u8(EV_DEMOLISHED);
-            put_building(w, *lot, *kind, *rotation);
-        }
-        Event::Road { segment, change } => {
-            w.u8(EV_ROAD);
-            w.u32(*segment);
-            w.u8(*change);
-        }
-        Event::Command {
-            principal,
-            name,
-            id,
-            result,
-        } => {
-            w.u8(EV_COMMAND);
-            w.u64(*principal);
-            w.str(name);
-            w.u32(*id);
-            w.u8(*result);
-        }
-        Event::Speed { ticks_per_second } => {
-            w.u8(EV_SPEED);
-            w.u8(*ticks_per_second);
-        }
-    }
 }
 
 fn put_building(w: &mut Writer, lot: u32, kind: u16, rotation: u8) {
@@ -270,8 +176,110 @@ fn put_building(w: &mut Writer, lot: u32, kind: u16, rotation: u8) {
     w.u8(rotation);
 }
 
-fn get_event(r: &mut Reader) -> Result<Event, DecodeError> {
-    Ok(match r.u8()? {
+fn put_event(w: &mut Writer, e: &Event) -> Result<(), EncodeError> {
+    match e {
+        Event::Trip {
+            resident,
+            vehicle,
+            depart,
+            route,
+        } => w.framed(EV_TRIP, |b| {
+            b.u32(*resident);
+            b.u8(*vehicle);
+            b.u32(*depart);
+            put_route(b, route);
+            Ok(())
+        }),
+        Event::Replan {
+            resident,
+            from_segment,
+            route,
+        } => w.framed(EV_REPLAN, |b| {
+            b.u32(*resident);
+            b.u32(*from_segment);
+            put_route(b, route);
+            Ok(())
+        }),
+        Event::Arrived { resident, lot } => w.framed(EV_ARRIVED, |b| {
+            b.u32(*resident);
+            b.u32(*lot);
+            Ok(())
+        }),
+        Event::Activity {
+            resident,
+            kind,
+            until,
+        } => w.framed(EV_ACTIVITY, |b| {
+            b.u32(*resident);
+            b.u8(*kind);
+            b.u32(*until);
+            Ok(())
+        }),
+        Event::Left {
+            resident,
+            district,
+            vehicle,
+        } => w.framed(EV_LEFT, |b| {
+            b.u32(*resident);
+            b.u16(*district);
+            put_vehicle(b, vehicle);
+            Ok(())
+        }),
+        Event::Entered {
+            resident,
+            district,
+            vehicle,
+        } => w.framed(EV_ENTERED, |b| {
+            b.u32(*resident);
+            b.u16(*district);
+            put_vehicle(b, vehicle);
+            Ok(())
+        }),
+        Event::Built {
+            lot,
+            kind,
+            rotation,
+        } => w.framed(EV_BUILT, |b| {
+            put_building(b, *lot, *kind, *rotation);
+            Ok(())
+        }),
+        Event::Demolished {
+            lot,
+            kind,
+            rotation,
+        } => w.framed(EV_DEMOLISHED, |b| {
+            put_building(b, *lot, *kind, *rotation);
+            Ok(())
+        }),
+        Event::Road { segment, change } => w.framed(EV_ROAD, |b| {
+            b.u32(*segment);
+            b.u8(*change);
+            Ok(())
+        }),
+        Event::Command {
+            principal,
+            name,
+            id,
+            result,
+        } => w.framed(EV_COMMAND, |b| {
+            b.u64(*principal);
+            b.str(name)?;
+            b.u32(*id);
+            b.u8(*result);
+            Ok(())
+        }),
+        Event::Speed { ticks_per_second } => w.framed(EV_SPEED, |b| {
+            b.u8(*ticks_per_second);
+            Ok(())
+        }),
+    }
+}
+
+/// The next event, or `None` for a tag this build does not know.
+fn get_event(r: &mut Reader) -> Result<Option<Event>, DecodeError> {
+    let (tag, mut r) = r.framed()?;
+    let r = &mut r;
+    Ok(Some(match tag {
         EV_TRIP => Event::Trip {
             resident: r.u32()?,
             vehicle: r.u8()?,
@@ -325,11 +333,11 @@ fn get_event(r: &mut Reader) -> Result<Event, DecodeError> {
         EV_SPEED => Event::Speed {
             ticks_per_second: r.u8()?,
         },
-        tag => return Err(DecodeError::UnknownTag(tag)),
-    })
+        _ => return Ok(None),
+    }))
 }
 
-fn put_keyframe(w: &mut Writer, k: &Keyframe) {
+fn put_keyframe(w: &mut Writer, k: &Keyframe) -> Result<(), EncodeError> {
     w.varint(k.buildings.len() as u64);
     let mut prev = 0;
     for b in &k.buildings {
@@ -351,21 +359,23 @@ fn put_keyframe(w: &mut Writer, k: &Keyframe) {
         w.delta(prev, res.id);
         prev = res.id;
         match &res.doing {
-            Doing::Activity { kind, until } => {
-                w.u8(DOING_ACTIVITY);
-                w.u8(*kind);
-                w.varint(u64::from(*until));
-            }
-            Doing::Trip(v) => {
-                w.u8(DOING_TRIP);
-                put_vehicle(w, v);
-            }
+            Doing::Activity { kind, lot, until } => w.framed(DOING_ACTIVITY, |b| {
+                b.u8(*kind);
+                b.u32(*lot);
+                b.varint(u64::from(*until));
+                Ok(())
+            })?,
+            Doing::Trip(v) => w.framed(DOING_TRIP, |b| {
+                put_vehicle(b, v);
+                Ok(())
+            })?,
         }
     }
     let c = &k.counts;
     for n in [c.home, c.at_work, c.on_road, c.asleep] {
         w.varint(u64::from(n));
     }
+    Ok(())
 }
 
 fn get_keyframe(r: &mut Reader) -> Result<Keyframe, DecodeError> {
@@ -395,13 +405,16 @@ fn get_keyframe(r: &mut Reader) -> Result<Keyframe, DecodeError> {
     let mut residents = Vec::with_capacity(n);
     for _ in 0..n {
         prev = r.delta(prev)?;
-        let doing = match r.u8()? {
+        let (tag, mut b) = r.framed()?;
+        let b = &mut b;
+        let doing = match tag {
             DOING_ACTIVITY => Doing::Activity {
-                kind: r.u8()?,
-                until: r.varint_u32()?,
+                kind: b.u8()?,
+                lot: b.u32()?,
+                until: b.varint_u32()?,
             },
-            DOING_TRIP => Doing::Trip(get_vehicle(r)?),
-            tag => return Err(DecodeError::UnknownTag(tag)),
+            DOING_TRIP => Doing::Trip(get_vehicle(b)?),
+            _ => continue,
         };
         residents.push(ResidentState { id: prev, doing });
     }
@@ -419,11 +432,11 @@ fn get_keyframe(r: &mut Reader) -> Result<Keyframe, DecodeError> {
     })
 }
 
-pub(super) fn encode_command(c: &CommandRecord) -> Vec<u8> {
+pub(super) fn encode_command(c: &CommandRecord) -> Result<Vec<u8>, EncodeError> {
     let mut w = Writer(Vec::with_capacity(32));
     w.u8(KIND_COMMAND);
     w.u32(c.id);
-    w.str(&c.name);
+    w.str(&c.name)?;
     match &c.command {
         Command::PlaceRoad { a, b } => {
             w.u8(CMD_PLACE_ROAD);
@@ -454,10 +467,10 @@ pub(super) fn encode_command(c: &CommandRecord) -> Vec<u8> {
         Command::Fork { tick, name } => {
             w.u8(CMD_FORK);
             w.u32(*tick);
-            w.str(name);
+            w.str(name)?;
         }
     }
-    w.0
+    Ok(w.0)
 }
 
 pub(super) fn decode_command(bytes: &[u8]) -> Result<CommandRecord, DecodeError> {
@@ -493,7 +506,7 @@ pub(super) fn decode_command(bytes: &[u8]) -> Result<CommandRecord, DecodeError>
     Ok(CommandRecord { id, name, command })
 }
 
-pub(super) fn encode_registry(e: &RegistryRecord) -> Vec<u8> {
+pub(super) fn encode_registry(e: &RegistryRecord) -> Result<Vec<u8>, EncodeError> {
     let mut w = Writer(Vec::with_capacity(48));
     w.u8(KIND_REGISTRY);
     match e {
@@ -504,8 +517,8 @@ pub(super) fn encode_registry(e: &RegistryRecord) -> Vec<u8> {
             wall_us,
         } => {
             w.u8(REG_CREATED);
-            w.str(name);
-            w.str(seed);
+            w.str(name)?;
+            w.str(seed)?;
             w.u16(*districts);
             w.u64(*wall_us);
         }
@@ -516,13 +529,13 @@ pub(super) fn encode_registry(e: &RegistryRecord) -> Vec<u8> {
             wall_us,
         } => {
             w.u8(REG_FORKED);
-            w.str(name);
-            w.str(parent);
+            w.str(name)?;
+            w.str(parent)?;
             w.u32(*tick);
             w.u64(*wall_us);
         }
     }
-    w.0
+    Ok(w.0)
 }
 
 pub(super) fn decode_registry(bytes: &[u8]) -> Result<RegistryRecord, DecodeError> {

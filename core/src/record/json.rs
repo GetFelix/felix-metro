@@ -173,8 +173,8 @@ fn keyframe(out: &mut String, k: &Keyframe) {
     list(out, &k.residents, |o, r| {
         let _ = write!(o, "{{\"id\":{},", r.id);
         match &r.doing {
-            Doing::Activity { kind, until } => {
-                let _ = write!(o, "\"activity\":{kind},\"until\":{until}");
+            Doing::Activity { kind, lot, until } => {
+                let _ = write!(o, "\"activity\":{kind},\"lot\":{lot},\"until\":{until}");
             }
             Doing::Trip(v) => vehicle(o, v),
         }
