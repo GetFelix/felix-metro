@@ -53,7 +53,8 @@ services:
       # A broker without a node id is not a cluster member, and a stream on it
       # has one shard. Joining as a cluster of one is what gives it four.
       FELIX_NODE_ID: broker-0
-      FELIX_NODE_ADVERTISE_ADDR: broker:5001
+      # Peers reach the internal listener here; with one node there are none.
+      FELIX_NODE_ADVERTISE_ADDR: 127.0.0.1:5001
       FELIX_INTERNAL_ALLOW_UNAUTHENTICATED: "true"
       # Where clients on the host reach it, under the name its certificate carries.
       FELIX_CLIENT_ADVERTISE_ADDR: localhost:5000
