@@ -8,6 +8,8 @@ import { cloneModel, facing as facingOf, fitToLot, loadModel } from './models';
 import { createMaterials } from './materials';
 import type { Tier } from './params';
 import { settingsFor } from './quality';
+import { clockwise, facingAngle, lotLook, roadModel, type City } from './layout';
+import { KINDS } from './kinds';
 
 // Seeded so the frame is identical on every load.
 let seed = 7;
@@ -95,11 +97,17 @@ const CARS = [
 const CAR_SCALE = 0.12;
 const PEOPLE = 'abcdef'.split('').flatMap((c) => [`character-female-${c}`, `character-male-${c}`]);
 
-export async function createCity(renderer: THREE.WebGLRenderer, tier: Tier) {
+// The frame's map is 17 tiles across; a bigger city widens the shadow, fog and ground to match.
+const FRAME_TILES = 17;
+
+/** Draws the style frame's hand-made city, or the generated `city` when there is one. */
+export async function createCity(renderer: THREE.WebGLRenderer, tier: Tier, city: City | null = null) {
+  const span = city ? Math.max(1, city.tiles / FRAME_TILES) : 1;
+  const half = city ? (city.tiles - 1) / 2 : 0;
   const scene = new THREE.Scene();
   const pmrem = new THREE.PMREMGenerator(renderer);
   scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
-  const fog = new THREE.Fog(FOG, 30, 70);
+  const fog = new THREE.Fog(FOG, 30 * span, 70 * span);
   scene.fog = fog;
 
   const hemi = new THREE.HemisphereLight(HEMI.sky, HEMI.ground, 0.8);
@@ -107,14 +115,21 @@ export async function createCity(renderer: THREE.WebGLRenderer, tier: Tier) {
   const sun = new THREE.DirectionalLight(SUN_WHITE, 2.5);
   sun.castShadow = true;
   sun.shadow.mapSize.set(settingsFor(tier).shadowMapSize, settingsFor(tier).shadowMapSize);
-  Object.assign(sun.shadow.camera, { left: -14, right: 14, top: 14, bottom: -14, near: 1, far: 80 });
+  Object.assign(sun.shadow.camera, {
+    left: -14 * span,
+    right: 14 * span,
+    top: 14 * span,
+    bottom: -14 * span,
+    near: 1,
+    far: 80 * span,
+  });
   sun.shadow.bias = -0.0004;
   sun.shadow.normalBias = 0.02;
   scene.add(sun, sun.target);
 
   // Ground: grass under the city, darker toward the fog.
   const ground = new THREE.Mesh(
-    new THREE.CircleGeometry(60, 64),
+    new THREE.CircleGeometry(60 * span, 64),
     new THREE.MeshStandardMaterial({ color: PALETTE.grass, roughness: 1 }),
   );
   ground.rotation.x = -Math.PI / 2;
@@ -151,131 +166,136 @@ export async function createCity(renderer: THREE.WebGLRenderer, tier: Tier) {
   const lamps: THREE.Object3D[] = [];
   const jobs: Promise<unknown>[] = [];
   const N = 9;
-  for (let x = -N; x <= N; x++) {
-    for (let z = -N; z <= N; z++) {
-      const rx = isRoad(x),
-        rz = isRoad(z);
-      const dist = Math.hypot(x, z);
-      if (dist > 12.5 || Math.abs(x) > 8 || Math.abs(z) > 8) continue;
-      if (rx && rz) {
-        jobs.push(place('roads', 'road-crossroad-path', x, z));
-        continue;
-      }
-      if (rx || rz) {
-        // road-straight runs along X as modelled.
-        jobs.push(place('roads', 'road-straight', x, z, rx ? Math.PI / 2 : 0));
-        // A lamp on every other road tile, on alternating sides. The model's arm points along -Z, so each lamp turns
-        // its arm toward the road's centre.
-        if ((x + z) % 2 === 0 && dist < 11.5) {
-          const side = (rx ? z : x) % 4 === 2 ? 1 : -1;
-          const lx = rx ? x + 0.44 * side : x,
-            lz = rz ? z + 0.44 * side : z;
-          jobs.push(
-            place(
-              'roads',
-              'light-square',
-              lx,
-              lz,
-              rx ? (side > 0 ? Math.PI / 2 : -Math.PI / 2) : side > 0 ? 0 : Math.PI,
-            ).then((o) => lamps.push(o)),
-          );
+  if (!city)
+    for (let x = -N; x <= N; x++) {
+      for (let z = -N; z <= N; z++) {
+        const rx = isRoad(x),
+          rz = isRoad(z);
+        const dist = Math.hypot(x, z);
+        if (dist > 12.5 || Math.abs(x) > 8 || Math.abs(z) > 8) continue;
+        if (rx && rz) {
+          jobs.push(place('roads', 'road-crossroad-path', x, z));
+          continue;
         }
-        continue;
-      }
-      const kind = district(blockOf(x), blockOf(z));
-      // Window light levels; towers stay dimmer because their glass is one big swatch.
-      const lit = rand() < 0.75 ? pick([0.6, 1, 1.4]) : 0;
-      const center = !isRoad(x + 1) && !isRoad(x - 1) && !isRoad(z + 1) && !isRoad(z - 1);
-      if (kind === 'downtown') {
-        jobs.push(place('roads', 'tile-low', x, z));
-        if (x === -2 && z === 2) continue; // the Felix tower
-        if (center || rand() < 0.3)
-          jobs.push(
-            place('commercial', pick(SKYSCRAPERS), x, z, facing(x, z), 0.7, lit ? 0.3 : 0, Math.floor(rand() * 6)),
-          );
-        else jobs.push(place('commercial', pick(COMMERCIAL), x, z, facing(x, z), 1, lit, Math.floor(rand() * 6)));
-      } else if (kind === 'commercial') {
-        jobs.push(place('roads', 'tile-low', x, z));
-        if (center) {
-          jobs.push(place('commercial', 'detail-parasol-a', x - 0.2, z + 0.1, 0, 1));
-          jobs.push(place('suburban', 'tree-large', x + 0.25, z - 0.2, rand() * 6, 1.1));
-        } else jobs.push(place('commercial', pick(COMMERCIAL), x, z, facing(x, z), 1, lit, Math.floor(rand() * 6)));
-      } else if (kind === 'suburban') {
-        if (center) {
-          jobs.push(place('suburban', 'tree-large', x - 0.2, z - 0.15, rand() * 6, 1.2));
-          jobs.push(place('suburban', 'tree-small', x + 0.25, z + 0.2, rand() * 6, 1.2));
+        if (rx || rz) {
+          // road-straight runs along X as modelled.
+          jobs.push(place('roads', 'road-straight', x, z, rx ? Math.PI / 2 : 0));
+          // A lamp on every other road tile, on alternating sides. The model's arm points along -Z, so each lamp turns
+          // its arm toward the road's centre.
+          if ((x + z) % 2 === 0 && dist < 11.5) {
+            const side = (rx ? z : x) % 4 === 2 ? 1 : -1;
+            const lx = rx ? x + 0.44 * side : x,
+              lz = rz ? z + 0.44 * side : z;
+            jobs.push(
+              place(
+                'roads',
+                'light-square',
+                lx,
+                lz,
+                rx ? (side > 0 ? Math.PI / 2 : -Math.PI / 2) : side > 0 ? 0 : Math.PI,
+              ).then((o) => lamps.push(o)),
+            );
+          }
+          continue;
+        }
+        const kind = district(blockOf(x), blockOf(z));
+        // Window light levels; towers stay dimmer because their glass is one big swatch.
+        const lit = rand() < 0.75 ? pick([0.6, 1, 1.4]) : 0;
+        const center = !isRoad(x + 1) && !isRoad(x - 1) && !isRoad(z + 1) && !isRoad(z - 1);
+        if (kind === 'downtown') {
+          jobs.push(place('roads', 'tile-low', x, z));
+          if (x === -2 && z === 2) continue; // the Felix tower
+          if (center || rand() < 0.3)
+            jobs.push(
+              place('commercial', pick(SKYSCRAPERS), x, z, facing(x, z), 0.7, lit ? 0.3 : 0, Math.floor(rand() * 6)),
+            );
+          else jobs.push(place('commercial', pick(COMMERCIAL), x, z, facing(x, z), 1, lit, Math.floor(rand() * 6)));
+        } else if (kind === 'commercial') {
+          jobs.push(place('roads', 'tile-low', x, z));
+          if (center) {
+            jobs.push(place('commercial', 'detail-parasol-a', x - 0.2, z + 0.1, 0, 1));
+            jobs.push(place('suburban', 'tree-large', x + 0.25, z - 0.2, rand() * 6, 1.1));
+          } else jobs.push(place('commercial', pick(COMMERCIAL), x, z, facing(x, z), 1, lit, Math.floor(rand() * 6)));
+        } else if (kind === 'suburban') {
+          if (center) {
+            jobs.push(place('suburban', 'tree-large', x - 0.2, z - 0.15, rand() * 6, 1.2));
+            jobs.push(place('suburban', 'tree-small', x + 0.25, z + 0.2, rand() * 6, 1.2));
+          } else {
+            jobs.push(place('suburban', pick(HOUSES), x, z, facing(x, z), 0.62, lit ? 1 : 0, Math.floor(rand() * 5)));
+            if (rand() < 0.6)
+              jobs.push(
+                place(
+                  'suburban',
+                  pick(['tree-small', 'tree-large']),
+                  x + (rand() - 0.5) * 0.7,
+                  z + (rand() - 0.5) * 0.7,
+                  rand() * 6,
+                  0.9,
+                ),
+              );
+          }
+        } else if (kind === 'industrial') {
+          jobs.push(place('roads', 'tile-low', x, z));
+          if (center)
+            jobs.push(
+              place('industrial', pick(['water-tower', 'chimney-large', 'detail-tank-large']), x, z, rand() * 6, 0.55),
+            );
+          else if (rand() < 0.2) {
+            jobs.push(
+              place(
+                'industrial',
+                pick(['shipping-container-a', 'shipping-container-b', 'shipping-container-c']),
+                x - 0.15,
+                z,
+                facing(x, z),
+                0.5,
+              ),
+            );
+            jobs.push(
+              place(
+                'industrial',
+                pick(['shipping-container-a', 'shipping-container-c']),
+                x + 0.2,
+                z + 0.1,
+                facing(x, z),
+                0.5,
+              ),
+            );
+          } else
+            jobs.push(
+              place('industrial', pick(INDUSTRIAL), x, z, facing(x, z), 0.46, lit ? 1 : 0, 2 + Math.floor(rand() * 3)),
+            );
         } else {
-          jobs.push(place('suburban', pick(HOUSES), x, z, facing(x, z), 0.62, lit ? 1 : 0, Math.floor(rand() * 5)));
-          if (rand() < 0.6)
+          // Park: trees and a pond.
+          for (let k = 0; k < 3; k++)
             jobs.push(
               place(
                 'suburban',
-                pick(['tree-small', 'tree-large']),
-                x + (rand() - 0.5) * 0.7,
-                z + (rand() - 0.5) * 0.7,
+                pick(['tree-large', 'tree-small']),
+                x + (rand() - 0.5) * 0.8,
+                z + (rand() - 0.5) * 0.8,
                 rand() * 6,
-                0.9,
+                1 + rand() * 0.4,
               ),
             );
         }
-      } else if (kind === 'industrial') {
-        jobs.push(place('roads', 'tile-low', x, z));
-        if (center)
-          jobs.push(
-            place('industrial', pick(['water-tower', 'chimney-large', 'detail-tank-large']), x, z, rand() * 6, 0.55),
-          );
-        else if (rand() < 0.2) {
-          jobs.push(
-            place(
-              'industrial',
-              pick(['shipping-container-a', 'shipping-container-b', 'shipping-container-c']),
-              x - 0.15,
-              z,
-              facing(x, z),
-              0.5,
-            ),
-          );
-          jobs.push(
-            place(
-              'industrial',
-              pick(['shipping-container-a', 'shipping-container-c']),
-              x + 0.2,
-              z + 0.1,
-              facing(x, z),
-              0.5,
-            ),
-          );
-        } else
-          jobs.push(
-            place('industrial', pick(INDUSTRIAL), x, z, facing(x, z), 0.46, lit ? 1 : 0, 2 + Math.floor(rand() * 3)),
-          );
-      } else {
-        // Park: trees and a pond.
-        for (let k = 0; k < 3; k++)
-          jobs.push(
-            place(
-              'suburban',
-              pick(['tree-large', 'tree-small']),
-              x + (rand() - 0.5) * 0.8,
-              z + (rand() - 0.5) * 0.8,
-              rand() * 6,
-              1 + rand() * 0.4,
-            ),
-          );
       }
     }
+  if (city) drawCity(city);
+  else addPond();
+  function addPond() {
+    const pond = new THREE.Mesh(
+      new THREE.CircleGeometry(0.9, 40),
+      new THREE.MeshStandardMaterial({ color: PALETTE.water, roughness: 0.15, metalness: 0.1 }),
+    );
+    pond.rotation.x = -Math.PI / 2;
+    pond.position.set(6, 0.005, 6);
+    pond.receiveShadow = true;
+    scene.add(pond);
   }
-  const pond = new THREE.Mesh(
-    new THREE.CircleGeometry(0.9, 40),
-    new THREE.MeshStandardMaterial({ color: PALETTE.water, roughness: 0.15, metalness: 0.1 }),
-  );
-  pond.rotation.x = -Math.PI / 2;
-  pond.position.set(6, 0.005, 6);
-  pond.receiveShadow = true;
-  scene.add(pond);
 
   // Scattered trees outside the grid so the city sits in a landscape.
-  for (let k = 0; k < 140; k++) {
+  for (let t = 0; t < (city ? 0 : 140); t++) {
     const a = rand() * Math.PI * 2,
       r = 12.8 + rand() * 9;
     jobs.push(
@@ -288,6 +308,101 @@ export async function createCity(renderer: THREE.WebGLRenderer, tier: Tier) {
         1 + rand() * 0.6,
       ),
     );
+  }
+
+  // ---------- the generated city ----------
+  // Tile (x, z) of the map sits at world (x - half, z - half), so the city is centred on the origin.
+  function drawCity(c: City) {
+    const wx = (v: number) => v - half;
+    for (const r of c.roads) {
+      const { name, turns } = roadModel(r.piece, r.rot, r.avenue);
+      jobs.push(place('roads', name, wx(r.x), wx(r.z), clockwise(turns)));
+      // A lamp on every other straight, alternating sides; its arm points along -Z, so it turns toward the road.
+      if (r.piece !== 0 || (r.x + r.z) % 2 !== 0) continue;
+      const alongZ = r.mask === 5;
+      const side = ((r.x + r.z) / 2) % 2 === 0 ? 1 : -1;
+      const lx = wx(r.x) + (alongZ ? 0.44 * side : 0);
+      const lz = wx(r.z) + (alongZ ? 0 : 0.44 * side);
+      const rot = alongZ ? (side > 0 ? Math.PI / 2 : -Math.PI / 2) : side > 0 ? 0 : Math.PI;
+      jobs.push(place('roads', 'light-square', lx, lz, rot).then((o) => lamps.push(o)));
+    }
+
+    // Water: a tile each, and open sea past the map edge it lies along.
+    if (c.water.length) {
+      const waterMat = new THREE.MeshStandardMaterial({ color: PALETTE.water, roughness: 0.15, metalness: 0.1 });
+      const tiles = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1), waterMat, c.water.length);
+      const m = new THREE.Matrix4().makeRotationX(-Math.PI / 2);
+      c.water.forEach(([x, z], i) => tiles.setMatrixAt(i, m.setPosition(wx(x), 0.005, wx(z))));
+      tiles.receiveShadow = true;
+      scene.add(tiles);
+      if (c.shore !== null) {
+        const reach = 60 * span;
+        const sea = new THREE.Mesh(new THREE.PlaneGeometry(reach, reach), waterMat);
+        sea.rotation.x = -Math.PI / 2;
+        const edge = half + 0.5 + reach / 2;
+        const [sx, sz] = [
+          [0, -edge],
+          [edge, 0],
+          [0, edge],
+          [-edge, 0],
+        ][c.shore]!;
+        sea.position.set(sx!, 0.004, sz!);
+        sea.receiveShadow = true;
+        scene.add(sea);
+      }
+    }
+
+    for (const lot of c.lots) {
+      const { pack, model } = KINDS[lot.kind]!;
+      const look = lotLook(pack, model);
+      const x = wx(lot.x),
+        z = wx(lot.z);
+      const rotY = facingAngle(lot.facing);
+      const lit = rand() < 0.75 ? pick([0.6, 1, 1.4]) : 0;
+      const paved = lot.zone === 'downtown' || lot.zone === 'commercial' || lot.zone === 'industrial';
+      if (paved) jobs.push(place('roads', 'tile-low', x, z));
+      if (lot.id === c.tower) continue; // drawn below with its crown
+      if (look === 'skyscraper') {
+        jobs.push(place(pack, model, x, z, rotY, 0.7, lit ? 0.3 : 0, Math.floor(rand() * 6)));
+      } else if (look === 'commercial') {
+        jobs.push(place(pack, model, x, z, rotY, 1, lit, Math.floor(rand() * 6)));
+      } else if (look === 'house') {
+        jobs.push(place(pack, model, x, z, rotY, 0.62, lit ? 1 : 0, Math.floor(rand() * 5)));
+        if (rand() < 0.6) {
+          const tree = pick(['tree-small', 'tree-large']);
+          jobs.push(place('suburban', tree, x + (rand() - 0.5) * 0.7, z + (rand() - 0.5) * 0.7, rand() * 6, 0.9));
+        }
+      } else if (look === 'factory') {
+        jobs.push(place(pack, model, x, z, rotY, 0.46, lit ? 1 : 0, 2 + Math.floor(rand() * 3)));
+      } else if (look === 'prop') {
+        jobs.push(place(pack, model, x, z, rand() * 6, 0.55));
+      } else if (look === 'tree') {
+        // Parks and filler: two or three trees to a tile read as a copse.
+        const n = lot.zone === 'park' ? 3 : 1;
+        for (let i = 0; i < n; i++) {
+          const spread = n > 1 ? 0.8 : 0.5;
+          const at = [x + (rand() - 0.5) * spread, z + (rand() - 0.5) * spread] as const;
+          jobs.push(place(pack, model, at[0], at[1], rand() * 6, 1 + rand() * 0.4));
+        }
+      } else {
+        jobs.push(place(pack, model, x, z, 0, 1));
+      }
+    }
+
+    // Trees past the map, except along the sea.
+    for (let i = 0; i < 140; i++) {
+      const out = half + 1.5 + rand() * 8;
+      const along = (rand() * 2 - 1) * (half + 6);
+      const side = Math.floor(rand() * 4);
+      if (side === c.shore) continue;
+      const [tx, tz] = [
+        [along, -out],
+        [out, along],
+        [along, out],
+        [-out, along],
+      ][side]!;
+      jobs.push(place('suburban', pick(['tree-large', 'tree-small']), tx!, tz!, rand() * 6, 1 + rand() * 0.6));
+    }
   }
 
   // ---------- lights that come on at night ----------
@@ -366,7 +481,7 @@ export async function createCity(renderer: THREE.WebGLRenderer, tier: Tier) {
     cars.push({ o, axis, line, dir, s: offset, speed });
   }
   // Right-hand traffic: lanes 0.17 from the centre line.
-  for (const r of ROADS.slice(1, 4)) {
+  for (const r of city ? [] : ROADS.slice(1, 4)) {
     for (const dir of [1, -1]) {
       for (let k = 0; k < 3; k++) {
         jobs.push(addCar('x', r - 0.17 * dir, dir, rand() * 24 - 12, 0.9 + rand() * 0.5));
@@ -396,7 +511,7 @@ export async function createCity(renderer: THREE.WebGLRenderer, tier: Tier) {
     scene.add(o);
     people.push({ o, mixer, axis, line, dir, s: offset, speed });
   }
-  for (const r of ROADS.slice(1, 4)) {
+  for (const r of city ? [] : ROADS.slice(1, 4)) {
     for (const side of [-1, 1]) {
       for (let k = 0; k < 3; k++) {
         jobs.push(addPerson('x', r + 0.4 * side, pick([1, -1]), rand() * 20 - 10));
@@ -406,7 +521,9 @@ export async function createCity(renderer: THREE.WebGLRenderer, tier: Tier) {
   }
 
   // The Felix tower: the tallest building downtown, a cyan crown and the cat on its roof.
-  const tower = await place('commercial', 'building-skyscraper-e', -2, 2, 0, 1, 0.3, 4);
+  const towerLot = city?.lots[city.tower];
+  const [tx, tz] = towerLot ? [towerLot.x - half, towerLot.z - half] : [-2, 2];
+  const tower = await place('commercial', 'building-skyscraper-e', tx, tz, 0, 1, 0.3, 4);
   const towerBox = new THREE.Box3().setFromObject(tower);
   const towerSize = towerBox.getSize(new THREE.Vector3());
   const top = towerBox.max.y;
@@ -417,7 +534,7 @@ export async function createCity(renderer: THREE.WebGLRenderer, tier: Tier) {
     roughness: 0.4,
   });
   const crown = new THREE.Mesh(new THREE.BoxGeometry(towerSize.x + 0.02, 0.07, towerSize.z + 0.02), crownMat);
-  crown.position.set(-2, top - 0.05, 2);
+  crown.position.set(tx, top - 0.05, tz);
   const logoTex = await new THREE.TextureLoader().loadAsync('brand/felix-metro-mark.png');
   logoTex.colorSpace = THREE.SRGBColorSpace;
   logoTex.anisotropy = 8;
@@ -431,14 +548,14 @@ export async function createCity(renderer: THREE.WebGLRenderer, tier: Tier) {
     roughness: 0.6,
   });
   const sign = new THREE.Mesh(new THREE.PlaneGeometry(0.8, 0.8), signMat);
-  sign.position.set(-2, top + 0.48, 2);
+  sign.position.set(tx, top + 0.48, tz);
   sign.rotation.y = Math.PI / 4;
   sign.castShadow = true;
   const mast = new THREE.Mesh(
     new THREE.BoxGeometry(0.05, 0.12, 0.05),
     new THREE.MeshStandardMaterial({ color: TOWER.mast }),
   );
-  mast.position.set(-2, top + 0.06, 2);
+  mast.position.set(tx, top + 0.06, tz);
   scene.add(crown, sign, mast);
 
   await Promise.all(jobs);
@@ -474,7 +591,7 @@ export async function createCity(renderer: THREE.WebGLRenderer, tier: Tier) {
     const d = daylight(hour);
     scene.background = d.sky;
     fog.color.copy(d.sky);
-    sun.position.set(...d.sunPosition);
+    sun.position.set(...d.sunPosition).multiplyScalar(span);
     sun.color.copy(d.sun);
     sun.intensity = d.sunIntensity;
     hemi.color.copy(d.hemiSky);
