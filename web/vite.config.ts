@@ -1,5 +1,5 @@
 import { createReadStream, cpSync, existsSync, statSync } from 'node:fs';
-import { extname, join, resolve } from 'node:path';
+import { extname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defineConfig, type Plugin } from 'vitest/config';
 
@@ -16,6 +16,14 @@ function sharedAssets(): Plugin {
   let command = '';
   return {
     name: 'shared-assets',
+    // A `?model` import is the model's URL, not its bytes (see src/assets.ts). Bundling the GLB would hash its name and
+    // break the relative path to its texture.
+    enforce: 'pre',
+    load(id) {
+      const [file, query] = id.split('?');
+      if (query !== 'model') return null;
+      return `export default ${JSON.stringify('assets/' + relative(SHARED.assets!, file!))};`;
+    },
     configResolved(config) {
       command = config.command;
       outDir = resolve(config.root, config.build.outDir);
@@ -39,6 +47,14 @@ function sharedAssets(): Plugin {
 
 export default defineConfig({
   plugins: [sharedAssets()],
+  build: {
+    rollupOptions: {
+      input: {
+        main: fileURLToPath(new URL('index.html', import.meta.url)),
+        models: fileURLToPath(new URL('models.html', import.meta.url)),
+      },
+    },
+  },
   server: { fs: { allow: ['..'] } },
   test: { environment: 'node' },
 });

@@ -31,6 +31,10 @@ Gaps for later milestones: no buses or trams, no parks furniture beyond parasols
 no construction states for "building goes up". Kenney's Roads kit has
 construction cones and barriers, which may be enough for M4.
 
+## Asset pipeline
+
+`web/src/assets.ts` globs every GLB under `prototype/assets/models`, so a model is addressed by pack (folder) and file name and a new file needs no code. `models.ts` loads each file once and clones it per placement. `materials.ts` builds the colormap variants and the window mask once per pack and shares materials by pack, variant and light level. `web/models.html` loads every model and runs in CI.
+
 ## Rules
 
 - **Colour comes from recoloured colormaps.** Every model of a pack samples one 512 × 512 `colormap.png`. The default has white walls and green roofs; a building's look is a variant of that texture with its wall swatches (bright, unsaturated) and roof swatches (green) tinted from the palette lists in the style frame. Windows, trims and roads keep Kenney's colours.

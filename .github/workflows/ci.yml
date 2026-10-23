@@ -61,6 +61,14 @@ jobs:
           exit $failed
         env:
           FRAME_MAX_DIFFERING_PERCENT: '0.01'
+      # Every GLB under prototype/assets/models loads and clones through src/models.ts.
+      - name: Every model loads
+        run: |
+          npx vite preview --host 127.0.0.1 --port 4175 --strictPort &
+          up=0
+          for _ in $(seq 1 30); do curl -sf "http://127.0.0.1:4175/" >/dev/null && up=1 && break; sleep 1; done
+          [[ $up -eq 1 ]] || { echo "nothing is serving on port 4175" >&2; exit 1; }
+          npm run models -- http://127.0.0.1:4175/models.html
       - if: always()
         uses: actions/upload-artifact@v4
         with:
