@@ -28,6 +28,28 @@ const speed = (v) => execFileSync(join(root, 'dev', 'speed.sh'), [city, String(v
 const GPU = ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'];
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// CLIP_TIMING=1 only times a few frames at each tier, to see which one a runner can draw.
+if (process.env.CLIP_TIMING) {
+  for (const tier of ['low', 'medium', 'high']) {
+    const b = await chromium.launch({ args: GPU });
+    const p = await b.newPage({ viewport: { width: W, height: H }, deviceScaleFactor: 1 });
+    await p.goto(`${base}/?tier=${tier}&capture&trace#${city}`, { waitUntil: 'load', timeout: 300_000 });
+    await p.waitForFunction(() => window.__capture && Number.isFinite(window.__live?.tick), null, {
+      polling: 250,
+      timeout: 300_000,
+    });
+    for (let i = 0; i < 3; i++) {
+      const began = Date.now();
+      await p.evaluate((t) => window.__capture.frame(t), i * 33);
+      const drawn = Date.now();
+      await p.screenshot({ type: 'jpeg', quality: 95, timeout: 600_000 });
+      log(`${tier}: frame ${i}: ${drawn - began} ms to draw, ${Date.now() - drawn} ms to capture`);
+    }
+    await b.close();
+  }
+  process.exit(0);
+}
+
 // 1. Run the sim to the start of the rush, counting what is on the road on the way, then hold it there.
 const probeBrowser = await chromium.launch({ args: GPU });
 const probe = await probeBrowser.newPage({ viewport: { width: 480, height: 270 } });

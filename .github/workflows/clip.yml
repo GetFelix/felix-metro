@@ -16,6 +16,10 @@ on:
       tier:
         description: Quality tier the page draws at (low, medium, high)
         default: medium
+      timing:
+        description: Only time a few frames at each tier, no clip
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -28,6 +32,7 @@ jobs:
       CITY: ${{ inputs.city || 'harbor' }}
       LENGTH: ${{ inputs.length || '30' }}
       CLIP_TIER: ${{ inputs.tier || 'medium' }}
+      CLIP_TIMING: ${{ inputs.timing && '1' || '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -44,6 +49,7 @@ jobs:
           npx playwright install --with-deps chromium
           node scripts/clip.mjs 'http://127.0.0.1:8088' "$CITY" "$LENGTH" clip-out
       - name: Encode
+        if: ${{ !inputs.timing }}
         working-directory: web/clip-out
         run: |
           command -v ffmpeg >/dev/null || sudo apt-get install -y ffmpeg
