@@ -294,12 +294,12 @@ for (const back of [8, 40]) {
   console.log(`back to live from ${back} ticks back (${gap} behind at the click) took ${seconds.toFixed(1)} s`);
 }
 
-// The session the past opened ahead is gone by the click: the race starts at once anyway, with the tick drawn moving
+// The session the past opened ahead is gone by the click (no Play first: a playback would hold that session itself): the race starts at once anyway, with the tick drawn moving
 // and the head following when the session is open. A frame is drawn about once a second here, so the first movement is
 // allowed a few frames.
 {
   const live = Math.floor(await page.evaluate(tipOf));
-  const { seconds, gap, movedMs } = await backToLive(live - 40, 5, { cold: true });
+  const { seconds, gap, movedMs } = await backToLive(live - 40, 5, { cold: true, play: false });
   const frameMs = await page.evaluate(() => 1000 / Math.max(0.5, window.__fps ?? 1));
   console.log(
     `cold back to live (${gap} behind at the click): the tick drawn moved after ${movedMs} ms, arrived in ${seconds.toFixed(1)} s (frames ${frameMs.toFixed(0)} ms apart)`,
