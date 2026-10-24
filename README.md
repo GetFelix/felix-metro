@@ -221,6 +221,7 @@ seed against a broker for the sim's integration test.
 
 - [docs/design.md](docs/design.md): the design, data model and build order
 - [docs/art.md](docs/art.md): art direction, the asset packs and the style frame
+- [docs/game.md](docs/game.md): draft of what makes it a game: money, policy, goals, investigations, what-ifs
 - [Felix docs](https://docs.getfelix.dev/)
 
 ## Felix version
