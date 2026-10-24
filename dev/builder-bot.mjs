@@ -13,7 +13,7 @@
 //   --demolish-after <s>  once done, wait this long and take buildings down again, newest first
 //   --demolish <n>        how many to take down (default 3)
 //   --json <path|->       one JSON object a line: start, each build/demolish with its tick, end ("-" is stdout)
-//   --side <n>            districts per side of the city (default DISTRICTS_PER_SIDE, else 4)
+//   --side <n>            districts per side of the city (default: the square root of DISTRICTS, so 2)
 //   --city-file <path>    the city as `city_json` prints it (default: run that example with cargo)
 //   --result-timeout <s>  how long a command may go unanswered before it counts as lost (default 30)
 //
@@ -26,7 +26,7 @@ import { createWriteStream, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { APPLIED, EMPTY, RESULT_NAMES, build, demolish, joined, sleep } from "./lib/gateway.mjs";
+import { APPLIED, DISTRICTS, EMPTY, RESULT_NAMES, build, demolish, joined, sleep } from "./lib/gateway.mjs";
 
 const NAME = "builder-bot";
 const FIRST_FILLER = 38; // kinds from here are trees and plaza props: nothing a builder counts as a building
@@ -46,7 +46,7 @@ const { values: flags, positionals } = parseArgs({
     "demolish-after": { type: "string" },
     demolish: { type: "string", default: "3" },
     json: { type: "string" },
-    side: { type: "string", default: process.env.DISTRICTS_PER_SIDE ?? "4" },
+    side: { type: "string", default: String(Math.round(Math.sqrt(DISTRICTS))) },
     "city-file": { type: "string" },
     "result-timeout": { type: "string", default: "30" },
   },

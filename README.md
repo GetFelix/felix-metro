@@ -187,7 +187,7 @@ refusal (in use, occupied, busy, unsupported) moves on to the next lot, and no l
 | `--demolish-after <s>` | off | once done, wait this long and take buildings down again, newest first |
 | `--demolish <n>` | 3 | how many to take down |
 | `--json <path or ->` | off | a line of JSON for the start, each command with its tick, and the end |
-| `--side <n>` | 4, or `DISTRICTS_PER_SIDE` | districts a side of the city has |
+| `--side <n>` | 2 (the square root of `DISTRICTS`) | districts a side of the city has; the sim's default |
 | `--city-file <path>` | run the example | the example's output, saved |
 | `--result-timeout <s>` | 30 | how long a command may go unanswered before it counts as lost |
 
