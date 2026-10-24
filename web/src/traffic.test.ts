@@ -89,6 +89,26 @@ describe('Traffic', () => {
     expect(made.cars).toBe(1);
   });
 
+  it('turns in from the road onto its lot as a trip leaves and arrives', () => {
+    const car = new THREE.Object3D();
+    const traffic = new Traffic({ car: () => ({ o: car }), person: () => ({ o: new THREE.Object3D() }) }, 0);
+    const v = voyage(1, 2, 0, 10);
+    const o = () => car;
+    for (const tick of [0.01, 9.99]) {
+      traffic.update(tick, 0, [v]);
+      const [at] = traffic.where();
+      expect(Math.abs(at!.z)).toBeGreaterThan(0.7);
+      expect(o().scale.x).toBeLessThan(0.05);
+    }
+    traffic.update(5, 0, [v]);
+    expect(traffic.where()[0]!.z).toBeCloseTo(-LANE);
+    expect(o().scale.x).toBe(1);
+    traffic.update(9.5, 0, [v]);
+    const half = traffic.where()[0]!.z;
+    traffic.update(9.5, 0, [v]);
+    expect(traffic.where()[0]!.z).toBe(half);
+  });
+
   it('makes only so many new models in one update and the rest in the ones after it', () => {
     const { f, made } = fleet();
     const traffic = new Traffic(f, 0, 3);

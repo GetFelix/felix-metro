@@ -6,6 +6,19 @@ import type { Voyage } from './city';
 /** Tiles from the road's centre line to a car's lane and to a walker's pavement. */
 export const LANE = 0.17;
 export const PAVEMENT = 0.38;
+/** Tiles from the centre line to where a lot's door opens: past the pavement, off the road. */
+export const LOT = 0.75;
+/** Ticks a trip spends turning in from the road at each end. */
+export const TURN_TICKS = 1;
+
+/**
+ * How far into its lot a trip is at `tick`, 0 on the road and 1 at the door: it rises over the first tick after the
+ * trip leaves and falls over the last tick before it arrives. A function of the tick alone, so a rewind draws the same.
+ */
+export function doorEase(tick: number, depart: number, arrive: number): number {
+  const t = Math.max(1 - (tick - depart) / TURN_TICKS, 1 - (arrive - tick) / TURN_TICKS, 0);
+  return Math.min(t, 1);
+}
 
 export interface Pose {
   x: number;
@@ -55,6 +68,8 @@ interface Slot {
   kind: string;
   heading: number;
   voyage: Voyage;
+  /** The scale the scene made the model at, which a turn into a lot shrinks from. */
+  scale: number;
 }
 
 export class Traffic {
@@ -107,6 +122,7 @@ export class Traffic {
     if (!slot || slot.voyage !== voyage) return;
     this.slots.delete(voyage.resident);
     slot.figure.o.visible = false;
+    slot.figure.o.scale.setScalar(slot.scale);
     const pool = this.free.get(slot.kind) ?? [];
     pool.push(slot.figure);
     this.free.set(slot.kind, pool);
@@ -146,10 +162,13 @@ export class Traffic {
       this.from[1] = this.a[1]! / 1000 - this.half;
       this.to[0] = this.b[0]! / 1000 - this.half;
       this.to[1] = this.b[1]! / 1000 - this.half;
-      const pose = poseBetween(this.from, this.to, f, on ? PAVEMENT : LANE, slot.heading, this.pose);
+      const into = doorEase(tick, v.depart, v.journey.arrive());
+      const side = on ? PAVEMENT : LANE;
+      const pose = poseBetween(this.from, this.to, f, side + into * (LOT - side), slot.heading, this.pose);
       slot.heading = pose.heading;
+      slot.figure.o.scale.setScalar(slot.scale * (1 - into));
       slot.figure.o.position.set(pose.x, on ? 0 : 0.036, pose.z);
-      slot.figure.o.rotation.y = pose.heading;
+      slot.figure.o.rotation.y = pose.heading + (into * Math.PI) / 2;
       slot.figure.mixer?.update(dt);
     }
   }
@@ -163,7 +182,7 @@ export class Traffic {
       figure = v.vehicle === 0 ? this.fleet.person(v.resident) : this.fleet.car(v.vehicle);
     }
     figure.o.visible = true;
-    const slot = { figure, kind, heading: 0, voyage: v };
+    const slot = { figure, kind, heading: 0, voyage: v, scale: figure.o.scale.x };
     this.slots.set(v.resident, slot);
     return slot;
   }
