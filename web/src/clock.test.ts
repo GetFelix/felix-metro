@@ -47,4 +47,19 @@ describe('TickClock', () => {
     }
     expect(40 - last).toBeLessThan(2);
   });
+
+  it('jumps to just behind the newest tick after a long stall', () => {
+    const clock = new TickClock();
+    clock.advance(0.016, 10, 4);
+    // A hidden tab: the sim went on for a minute.
+    const now = clock.advance(0.016, 250, 4);
+    expect(now).toBeGreaterThanOrEqual(249);
+    expect(now).toBeLessThanOrEqual(250);
+  });
+
+  it('steers instead of jumping when only a little behind', () => {
+    const clock = new TickClock();
+    clock.advance(0.016, 10, 4);
+    expect(clock.advance(0.016, 20, 4)).toBeLessThan(11);
+  });
 });

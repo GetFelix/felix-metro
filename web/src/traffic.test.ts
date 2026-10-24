@@ -89,6 +89,21 @@ describe('Traffic', () => {
     expect(made.cars).toBe(1);
   });
 
+  it('keeps drawing a trip while the resident’s next one waits to leave', () => {
+    const { f, made } = fleet();
+    const traffic = new Traffic(f, 0);
+    const first = voyage(1, 2, 0, 10);
+    const next = voyage(1, 2, 12, 20);
+    traffic.update(8, 0, [first, next]);
+    expect(traffic.drawn).toBe(1);
+    expect(traffic.where()[0]!.x).toBeCloseTo(8);
+    traffic.update(11, 0, [first, next]);
+    expect(traffic.drawn).toBe(0);
+    traffic.update(13, 0, [first, next]);
+    expect(traffic.where()[0]!.x).toBeCloseTo(13);
+    expect(made.cars).toBe(1);
+  });
+
   it('centres the map’s tiles on the middle', () => {
     const { f } = fleet();
     const traffic = new Traffic(f, 5);

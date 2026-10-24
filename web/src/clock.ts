@@ -8,6 +8,9 @@ export const TICKS_PER_DAY = 5760;
 /** Ticks the page keeps between what it draws and the newest tick it has, so motion has both ends to run between. */
 const LAG = 1;
 
+/** Further behind than this many seconds of sim time, the clock jumps to the newest tick instead of steering. */
+const SNAP_SECONDS = 3;
+
 /** The day, counted from 1, and the hour of it as a fraction, for a tick. */
 export function cityTime(tick: number): { day: number; hour: number } {
   return { day: Math.floor(tick / TICKS_PER_DAY) + 1, hour: ((tick % TICKS_PER_DAY) / TICKS_PER_DAY) * 24 };
@@ -15,7 +18,7 @@ export function cityTime(tick: number): { day: number; hour: number } {
 
 /**
  * The tick being drawn, as a fraction. It runs at the sim's speed and is steered to stay one tick behind the newest
- * one: a late record slows it, a burst speeds it up, and it never passes the newest tick or moves backwards.
+ * one: a late record slows it, a burst speeds it up, and it never passes the newest tick or moves backwards, except to jump forward when far behind.
  */
 export class TickClock {
   /** The tick drawn now, or `NaN` before the first record arrives. */
@@ -25,7 +28,12 @@ export class TickClock {
   advance(dt: number, latest: number, speed: number): number {
     if (latest < 0) return this.now;
     if (Number.isNaN(this.now)) this.now = Math.max(0, latest - LAG);
-    const lag = latest - this.now;
+    let lag = latest - this.now;
+    // After a hidden tab or a long stall the page is too far behind to catch up by steering: jump.
+    if (lag > Math.max(LAG + 1, speed * SNAP_SECONDS)) {
+      this.now = latest - LAG;
+      lag = LAG;
+    }
     const steer = Math.min(2.5, Math.max(0.5, 1 + (lag - LAG) * 0.5));
     this.now = Math.min(latest, this.now + dt * speed * steer);
     return this.now;

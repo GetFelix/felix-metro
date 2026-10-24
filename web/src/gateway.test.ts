@@ -176,4 +176,64 @@ describe('Gateway', () => {
     socket.say({ type: 'state_value', id: socket.sent[2]!.id, payload: null, version: null, as_of: 44 });
     expect((await none).payload).toBeNull();
   });
+
+  it('never has a fifth read on the wire, however the answers interleave', async () => {
+    const { gateway, socket } = await joined();
+    let settled = 0;
+    let started = 0;
+    const ask = () => {
+      started++;
+      void gateway.read('events', 0, 0).then(() => settled++);
+    };
+    for (let i = 0; i < 40; i++) ask();
+    const answered = new Set<unknown>();
+    let peak = 0;
+    const open = () => socket.sent.filter((m) => m.type === 'read' && !answered.has(m.id));
+    const look = () => {
+      peak = Math.max(peak, open().length);
+      expect(open().length).toBeLessThanOrEqual(4);
+    };
+    for (let round = 0; settled < started && round < 5000; round++) {
+      await Promise.resolve();
+      look();
+      // Answer the newest and the oldest in turn, so slots free in no fixed order.
+      const m = round % 2 ? open().at(-1) : open()[0];
+      if (!m) continue;
+      answered.add(m.id);
+      socket.say({ type: 'records', id: m.id, records: [], next_offset: 0 });
+      // A newcomer arriving at each step of a slot being freed must queue behind the waiters.
+      for (let step = 0; step < round % 6; step++) {
+        await Promise.resolve();
+        look();
+      }
+      if (started < 80) ask();
+      look();
+    }
+    expect(settled).toBe(started);
+    expect(peak).toBe(4);
+  });
+
+  it('fails what is waiting when the socket closes, and what is asked after', async () => {
+    const { gateway, socket } = await joined();
+    const seen: Error[] = [];
+    gateway.onError = (e) => seen.push(e);
+    const subscribed = gateway.subscribe('events', 'd00', 0, 'live', () => {});
+    const reads = Array.from({ length: 6 }, () => gateway.read('events', 0, 0));
+    const state = gateway.stateGet('events', 'keyframe', 'd00');
+    socket.dispatchEvent(new Event('close'));
+    for (const p of [subscribed, ...reads, state]) await expect(p).rejects.toMatchObject({ code: 'closed' });
+    await expect(gateway.read('events', 0, 0)).rejects.toMatchObject({ code: 'closed' });
+    await expect(gateway.subscribe('events', 'd00', 0, 'live', () => {})).rejects.toMatchObject({ code: 'closed' });
+    expect(seen).toHaveLength(1);
+  });
+
+  it('closes quietly when the page closes it', async () => {
+    const { gateway } = await joined();
+    const seen: Error[] = [];
+    gateway.onError = (e) => seen.push(e);
+    const read = gateway.read('events', 0, 0);
+    gateway.close();
+    await expect(read).rejects.toMatchObject({ code: 'closed' });
+    expect(seen).toHaveLength(0);
+  });
 });

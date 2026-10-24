@@ -47,7 +47,7 @@ describe('CityState', () => {
     expect(state.latest).toBe(-1);
     state.apply(record(1, 4));
     expect(state.latest).toBe(4);
-    state.apply(record(1, 6));
+    state.apply(record(1, 5));
     expect(state.latest).toBe(5);
   });
 
@@ -65,16 +65,56 @@ describe('CityState', () => {
     const ended: number[] = [];
     state.onVoyageEnd = (v) => ended.push(v.resident);
     state.apply(record(0, 5, [trip(1, 5), trip(2, 5)]));
-    state.apply(record(0, 6, [trip(1, 6)]));
-    expect(ended).toEqual([1]);
-    expect(trips.made[0]!.freed).toBe(true);
     state.retire(14);
     expect(state.voyages.size).toBe(2);
     state.retire(15);
-    expect([...state.voyages.keys()]).toEqual([1]);
+    expect([...state.voyages.keys()]).toEqual([]);
     expect(ended).toEqual([1, 2]);
-    state.retire(16);
+    expect(trips.made.every((j) => j.freed)).toBe(true);
+  });
+
+  it('keeps drawing a trip a resident’s next one replaced until it arrives', () => {
+    trips.made.length = 0;
+    const state = new CityState(city, trips, 2);
+    const ended: number[] = [];
+    state.onVoyageEnd = (v) => ended.push(v.depart);
+    state.apply(record(0, 5, [trip(1, 5)]));
+    state.apply(record(0, 6, [trip(1, 14)]));
+    expect(ended).toEqual([]);
+    expect([...state.active()].map((v) => v.depart)).toEqual([5, 14]);
+    state.retire(14);
+    expect(ended).toEqual([]);
+    state.retire(15);
+    expect(ended).toEqual([5]);
+    expect(trips.made[0]!.freed).toBe(true);
+    expect([...state.active()].map((v) => v.depart)).toEqual([14]);
+  });
+
+  it('refuses a record that skips a tick and takes it once the gap is filled', () => {
+    const state = new CityState(city, trips, 2);
+    expect(state.apply(record(0, 5))).toBe('applied');
+    expect(state.apply(record(0, 7, [trip(1, 7)]))).toBe('gap');
+    expect(state.ticks[0]).toBe(5);
     expect(state.voyages.size).toBe(0);
+    expect(state.apply(record(0, 6))).toBe('applied');
+    expect(state.apply(record(0, 7, [trip(1, 7)]))).toBe('applied');
+    expect(state.voyages.size).toBe(1);
+    // A keyframe repairs a gap, so it is never one.
+    expect(state.apply(record(0, 240, [], { buildings: [] }))).toBe('applied');
+    expect(state.apply(record(0, 300), true)).toBe('applied');
+  });
+
+  it('tells records apart by epoch, district and tick', () => {
+    const state = new CityState(city, trips, 2);
+    const at = (district: number, tick: number, epoch: number) => ({ ...record(district, tick), epoch });
+    state.apply(at(0, 5, 2));
+    expect(state.apply(at(0, 5, 2))).toBe('seen');
+    expect(state.apply(at(0, 6, 1))).toBe('seen');
+    // A new sim may re-commit a tick the old one had; the old one's records are the stale ones.
+    expect(state.apply(at(0, 5, 3))).toBe('applied');
+    expect(state.apply(at(0, 6, 2))).toBe('seen');
+    expect(state.apply(at(0, 6, 3))).toBe('applied');
+    expect(state.apply(at(1, 5, 1))).toBe('applied');
   });
 
   it('counts a trip it cannot place instead of drawing it', () => {

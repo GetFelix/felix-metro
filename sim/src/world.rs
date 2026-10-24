@@ -1,6 +1,10 @@
 //! One city's state and the rules that advance it a tick at a time.
 
-use felix_metro_core::record::{Counts, Doing, Event, Keyframe, Leg, ResidentState, Vehicle};
+use std::collections::BTreeMap;
+
+use felix_metro_core::record::{
+    BuildingDiff, Counts, Doing, Event, Keyframe, Leg, ResidentState, Vehicle,
+};
 use felix_metro_core::{
     Activity, City, Congestion, Mode, Places, Resident, TICKS_PER_DAY, TICKS_PER_HOUR, Trip,
 };
@@ -54,6 +58,8 @@ pub(crate) struct World {
     tick: u32,
     /// Cars on each segment at the last tick, which routes are planned around.
     cars: Vec<u16>,
+    /// The lots whose building was changed after generation, by lot.
+    built: BTreeMap<u32, BuildingDiff>,
 }
 
 impl World {
@@ -76,7 +82,14 @@ impl World {
             people,
             tick: 0,
             cars,
+            built: BTreeMap::new(),
         }
+    }
+
+    /// Change a lot's building, as a `built` or `demolished` event will.
+    #[cfg(test)]
+    pub(crate) fn set_building(&mut self, diff: BuildingDiff) {
+        self.built.insert(diff.lot, diff);
     }
 
     pub(crate) fn districts(&self) -> usize {
@@ -216,6 +229,14 @@ impl World {
                 counts: Counts::default(),
             })
             .collect();
+        // A keyframe lists every lot that differs from the generated city, so a viewer can tell a lot it leaves out
+        // is the generated one.
+        for diff in self.built.values() {
+            let lot = &self.city.lots[diff.lot as usize];
+            if diff.kind != u16::from(lot.kind.0) || diff.rotation != lot.facing {
+                frames[usize::from(lot.district)].buildings.push(*diff);
+            }
+        }
         let time = tick % TICKS_PER_DAY;
         for person in &self.people {
             let id = person.resident.id;

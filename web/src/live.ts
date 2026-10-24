@@ -3,7 +3,7 @@
 import { signIn, type Oidc } from './auth';
 import type { CityState, TickRecord } from './city';
 import { decodeRecord, districtKey } from './core/felix_metro_core.js';
-import { Gateway, GatewayError } from './gateway';
+import { Gateway, GatewayError, type EventFrame } from './gateway';
 
 const STREAM = 'events';
 const ROUTINGS = ['modulo', 'jump_hash'];
@@ -48,7 +48,14 @@ async function keyframeOffset(gateway: Gateway, district: number, districts: num
     }
   }
   for (const key of keys) {
-    const { payload } = await gateway.stateGet(STREAM, 'keyframe', key);
+    let payload;
+    try {
+      ({ payload } = await gateway.stateGet(STREAM, 'keyframe', key));
+    } catch (err) {
+      // Asked under the wrong routing the gateway can refuse; the other routing may answer.
+      if (err instanceof GatewayError && err.code !== 'closed') continue;
+      throw err;
+    }
     if (!payload || payload.length < 8) continue;
     const offset = Number(new DataView(payload.buffer, payload.byteOffset, payload.byteLength).getBigUint64(0, true));
     const page = await gateway.read(STREAM, district, offset, offset + 1);
@@ -58,52 +65,118 @@ async function keyframeOffset(gateway: Gateway, district: number, districts: num
   return 0;
 }
 
-/**
- * Follow every district: subscribe live first, so nothing committed from here on is missed, then read the district's
- * log from its latest keyframe up to where the subscription starts, then let the live records through. Resolves once
- * every district is caught up; the records after that keep arriving until the session ends.
- */
-async function follow(gateway: Gateway, state: CityState): Promise<void> {
-  const districts = state.ticks.length;
-  const waiting: TickRecord[][] = Array.from({ length: districts }, () => []);
-  const caughtUp = Array<boolean>(districts).fill(false);
-  const live = await Promise.all(
-    Array.from({ length: districts }, (_, d) =>
-      gateway.subscribe(STREAM, slot(d), d, 'live', (frame) => {
-        const record = parse(frame.payload);
-        if (!record) return;
-        if (caughtUp[d]) state.apply(record);
-        else waiting[d]!.push(record);
-      }),
-    ),
-  );
-  await Promise.all(
-    live.map(async (subscribed, d) => {
-      const tail = subscribed.liveOffset ?? 0;
-      let from = await keyframeOffset(gateway, d, districts);
-      while (from < tail) {
-        let page;
-        try {
-          page = await gateway.read(STREAM, d, from, tail);
-        } catch (err) {
-          // Retention moved past the keyframe; start from what is left.
-          if (err instanceof GatewayError && err.code === 'trimmed' && err.oldest !== undefined && err.oldest > from) {
-            from = err.oldest;
-            continue;
-          }
-          throw err;
+/** How many times a district tries to catch up, the last one taking the log as it is, before the session is dropped. */
+const ATTEMPTS = 3;
+
+/** One district's shard: its live subscription, the catch-up read, and the check that nothing was missed. */
+class Feed {
+  /** The offset of the last record handled, or -1 before any. */
+  private last = -1;
+  private waiting: { offset: number | null; record: TickRecord | null }[] = [];
+  private caughtUp = false;
+  private resyncing = false;
+
+  constructor(
+    private readonly gateway: Gateway,
+    private readonly state: CityState,
+    readonly district: number,
+    private readonly districts: number,
+    private readonly onFail: (err: Error) => void,
+  ) {}
+
+  get slot(): string {
+    return slot(this.district);
+  }
+
+  /** Subscribe live first, so nothing committed from here on is missed, then read up to where the subscription starts. */
+  async start(): Promise<void> {
+    for (let attempt = 0; ; attempt++) {
+      if (await this.catchUp(attempt === ATTEMPTS - 1)) return;
+      if (attempt === ATTEMPTS - 1) throw new Error(`district ${this.district} would not catch up`);
+    }
+  }
+
+  /** The subscription dropped records or ended: subscribe again and read from the last offset handled plus one. */
+  lost(): void {
+    if (this.resyncing) return;
+    this.resyncing = true;
+    this.caughtUp = false;
+    this.start().then(
+      () => (this.resyncing = false),
+      (err) => {
+        this.resyncing = false;
+        this.onFail(err instanceof Error ? err : new Error(String(err)));
+      },
+    );
+  }
+
+  /**
+   * Take a record at `offset`. False when it cannot be taken yet: the offset skips one, or the record skips a tick.
+   * `lenient` takes it anyway, after the log has been tried and cannot do better.
+   */
+  private take(offset: number | null, record: TickRecord | null, lenient: boolean): boolean {
+    if (offset !== null) {
+      if (offset <= this.last) return true;
+      if (this.last >= 0 && offset !== this.last + 1 && !lenient) return false;
+    }
+    if (record && this.state.apply(record, lenient) === 'gap') return false;
+    if (offset !== null) this.last = offset;
+    return true;
+  }
+
+  private onFrame(frame: EventFrame): void {
+    const record = parse(frame.payload);
+    if (!this.caughtUp) {
+      this.waiting.push({ offset: frame.offset, record });
+    } else if (frame.skippedBefore > 0 || !this.take(frame.offset, record, false)) {
+      this.lost();
+    }
+  }
+
+  /** One try; false when the log showed a hole to try again for. */
+  private async catchUp(lenient: boolean): Promise<boolean> {
+    this.caughtUp = false;
+    this.waiting = [];
+    const subscribed = await this.gateway.subscribe(STREAM, this.slot, this.district, 'live', (f) => this.onFrame(f));
+    const tail = subscribed.liveOffset ?? 0;
+    // After a hole the last try starts from the keyframe, which repairs whatever the hole took.
+    let from = this.last + 1;
+    if (this.last < 0 || lenient)
+      from = Math.max(from, await keyframeOffset(this.gateway, this.district, this.districts));
+    while (from < tail) {
+      let page;
+      try {
+        page = await this.gateway.read(STREAM, this.district, from, tail);
+      } catch (err) {
+        // Retention moved past where this needs to start; start from what is left.
+        if (err instanceof GatewayError && err.code === 'trimmed' && err.oldest !== undefined && err.oldest > from) {
+          from = err.oldest;
+          lenient = true;
+          continue;
         }
-        for (const r of page.records) {
-          const record = parse(r.payload);
-          if (record) state.apply(record);
-        }
-        if (page.nextOffset <= from) break;
-        from = page.nextOffset;
+        throw err;
       }
-      for (const record of waiting[d]!.splice(0)) state.apply(record);
-      caughtUp[d] = true;
-    }),
-  );
+      for (const r of page.records) {
+        if (!this.take(r.offset, parse(r.payload), lenient)) return false;
+      }
+      if (page.nextOffset <= from) return false;
+      from = page.nextOffset;
+    }
+    // No await from here to the flag, so no frame lands between the last of the backlog and going live.
+    for (const w of this.waiting.splice(0)) {
+      if (!this.take(w.offset, w.record, lenient)) return false;
+    }
+    this.caughtUp = true;
+    return true;
+  }
+}
+
+/** Follow every district. Resolves once each is caught up; the records after that keep arriving until the session ends. */
+export async function follow(gateway: Gateway, state: CityState, onFail: (err: Error) => void): Promise<Feed[]> {
+  const districts = state.ticks.length;
+  const feeds = Array.from({ length: districts }, (_, d) => new Feed(gateway, state, d, districts, onFail));
+  await Promise.all(feeds.map((feed) => feed.start()));
+  return feeds;
 }
 
 /**
@@ -119,13 +192,27 @@ export async function connectLive(options: LiveOptions): Promise<{ close(): void
     const token = await signIn(oidc);
     const gateway = await Gateway.connect(url, city, token);
     current = gateway;
-    const ended = new Promise<void>((resolve) => {
-      gateway.onError = (err) => {
-        if (err.code === 'closed') resolve();
-        else console.error('gateway', err.code, err.message);
-      };
-    });
-    await follow(gateway, state);
+    let feeds: Feed[] = [];
+    let end = () => {};
+    const ended = new Promise<void>((resolve) => (end = resolve));
+    // Closing says nothing to `onError`, so a session this page gives up on ends here.
+    const fail = (err: Error) => {
+      console.error('the live session failed', err);
+      gateway.close();
+      end();
+    };
+    gateway.onError = (err) => {
+      if (err.code === 'closed') end();
+      else if (err.code === 'subscription_ended') {
+        for (const feed of feeds) if (err.slot === undefined || err.slot === feed.slot) feed.lost();
+      } else console.error('gateway', err.code, err.message);
+    };
+    try {
+      feeds = await follow(gateway, state, fail);
+    } catch (err) {
+      gateway.close();
+      throw err;
+    }
     onStatus?.('live');
     return { ended };
   };

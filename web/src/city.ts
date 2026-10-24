@@ -68,10 +68,14 @@ export class CityState {
   readonly built = new Map<number, Building>();
   /** The newest tick of each district. */
   readonly ticks: number[];
+  /** The sim epoch of each district's newest record. */
+  private readonly epochs: number[];
   /** The sim's ticks a second, from the newest record. */
   speed = 4;
   /** Trips the log described that no record has said arrived, by resident. */
   readonly voyages = new Map<number, Voyage>();
+  /** Voyages a resident's next trip replaced before they arrived; still drawn until they do. */
+  private readonly finishing: Voyage[] = [];
   /** Trips whose legs matched no route of their resident; zero unless the sim and this page disagree. */
   unplaced = 0;
   /** Told when a lot's building changes, with `null` for the generated one. */
@@ -85,6 +89,7 @@ export class CityState {
     districts: number,
   ) {
     this.ticks = Array<number>(districts).fill(-1);
+    this.epochs = Array<number>(districts).fill(-1);
   }
 
   /** The newest tick every district has, or -1 until each has one. */
@@ -92,10 +97,20 @@ export class CityState {
     return Math.min(...this.ticks);
   }
 
-  /** Take one district's record. A record at or before the district's newest tick is one already seen. */
-  apply(record: TickRecord): void {
+  /**
+   * Take one district's record. A record is a repeat, and ignored, when its `(epoch, district, tick)` is not newer than
+   * the district's newest. A record that skips a tick without a keyframe to make up for it is a `gap`: it is not taken,
+   * and the caller reads what is missing and applies it in order.
+   */
+  apply(record: TickRecord, allowGap = false): 'applied' | 'seen' | 'gap' {
     const d = record.district;
-    if (d >= this.ticks.length || record.tick <= this.ticks[d]!) return;
+    if (d >= this.ticks.length) return 'seen';
+    const newEpoch = record.epoch > this.epochs[d]!;
+    if (record.epoch < this.epochs[d]! || (!newEpoch && record.tick <= this.ticks[d]!)) return 'seen';
+    if (!newEpoch && !allowGap && !record.keyframe && this.ticks[d]! >= 0 && record.tick !== this.ticks[d]! + 1) {
+      return 'gap';
+    }
+    this.epochs[d] = record.epoch;
     this.ticks[d] = record.tick;
     this.speed = record.speed;
     if (record.keyframe) this.keyframe(d, record.keyframe.buildings);
@@ -108,7 +123,7 @@ export class CityState {
           continue;
         }
         const old = this.voyages.get(t.resident);
-        if (old) this.end(old);
+        if (old) this.finishing.push(old);
         this.voyages.set(t.resident, { resident: t.resident, vehicle: t.vehicle, depart: t.depart, journey });
       } else if (e.type === 'built' || e.type === 'demolished') {
         this.set(
@@ -119,6 +134,13 @@ export class CityState {
         this.speed = e.ticksPerSecond;
       }
     }
+    return 'applied';
+  }
+
+  /** Every voyage to draw: those under way and those a later trip replaced that have yet to arrive. */
+  *active(): Iterable<Voyage> {
+    yield* this.finishing;
+    yield* this.voyages.values();
   }
 
   /** Forget voyages that have arrived by `tick`. */
@@ -126,6 +148,13 @@ export class CityState {
     for (const [resident, v] of this.voyages) {
       if (v.journey.arrive() <= tick) {
         this.voyages.delete(resident);
+        this.end(v);
+      }
+    }
+    for (let i = this.finishing.length - 1; i >= 0; i--) {
+      const v = this.finishing[i]!;
+      if (v.journey.arrive() <= tick) {
+        this.finishing.splice(i, 1);
         this.end(v);
       }
     }

@@ -51,10 +51,10 @@ async function follow(
   pill: HTMLElement,
 ): Promise<CityState | null> {
   const url = gateway ?? `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`;
-  const oidc = await fetchOidc(gateway ? url.replace(/^ws/, 'http').replace(/\/ws$/, '/') : location.origin + '/');
-  if (!oidc) return null;
   const state = new CityState(city, metro, districts * districts);
   try {
+    const oidc = await fetchOidc(gateway ? url.replace(/^ws/, 'http').replace(/\/ws$/, '/') : location.origin + '/');
+    if (!oidc) return null;
     await connectLive({
       url,
       oidc,
@@ -67,6 +67,9 @@ async function follow(
     });
   } catch (err) {
     console.warn('the live city is not available', err);
+    pill.textContent = 'Offline';
+    pill.classList.add('late');
+    pill.classList.remove('hidden');
     return null;
   }
   pill.classList.remove('hidden');
@@ -193,7 +196,7 @@ async function main() {
       const tick = clockTicks.advance(Math.min(1, frameMs / 1000), state.latest, state.speed);
       if (!Number.isNaN(tick)) {
         state.retire(Math.floor(tick));
-        traffic.update(tick, still ? 0 : dt, state.voyages.values());
+        traffic.update(tick, still ? 0 : dt, state.active());
         const time = cityTime(tick);
         if (frozenHour === null && !(Math.abs(time.hour - shownHour) <= 0.004)) {
           shownHour = hour = time.hour;
@@ -229,4 +232,10 @@ async function main() {
   });
 }
 
-main();
+main().catch((err) => {
+  console.error('the city could not start', err);
+  const note = document.createElement('p');
+  note.style.cssText = 'position:fixed;inset:auto 16px 16px;margin:0;color:#fff;font:14px sans-serif';
+  note.textContent = 'The city could not start. Reload to try again.';
+  document.body.append(note);
+});

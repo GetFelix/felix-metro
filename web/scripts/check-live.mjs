@@ -17,7 +17,19 @@ const browser = await chromium.launch({
 const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 const errors = [];
 page.on('pageerror', (e) => errors.push(String(e)));
-page.on('console', (m) => m.type() === 'error' && console.error('console:', m.text()));
+page.on('console', (m) => {
+  if (m.type() !== 'error') return;
+  console.error('console:', m.text());
+  errors.push(`console.error: ${m.text()}`);
+});
+// The page keeps no history of the pill or of `unplaced`, so watch both for the whole run, not only at the end.
+await page.addInitScript(() => {
+  window.__watch = { reconnected: false, unplaced: 0 };
+  setInterval(() => {
+    if (document.getElementById('pill')?.textContent?.startsWith('Reconnecting')) window.__watch.reconnected = true;
+    window.__watch.unplaced = Math.max(window.__watch.unplaced, window.__live?.unplaced ?? 0);
+  }, 100);
+});
 
 const fail = async (message) => {
   console.error(message);
@@ -87,7 +99,8 @@ await page
 await page.waitForTimeout(1500);
 await page.screenshot({ path: join(out, 'street.png') });
 
-const unplaced = await page.evaluate(() => window.__live.unplaced);
+const { reconnected, unplaced } = await page.evaluate(() => window.__watch);
 if (unplaced > 0) await fail(`${unplaced} trips matched no route of their resident`);
+if (reconnected) await fail('the page lost its session and reconnected');
 if (errors.length) await fail(errors.join('\n'));
 await browser.close();

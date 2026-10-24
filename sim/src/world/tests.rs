@@ -249,3 +249,53 @@ fn a_vehicle_is_in_the_district_the_events_say_even_on_its_last_step() {
         }
     }
 }
+
+#[test]
+fn keyframes_list_the_lots_that_differ_from_the_generated_city() {
+    use felix_metro_core::record::{BuildingDiff, NO_BUILDING};
+    let mut world = World::new(City::generate("harbor", 2).unwrap());
+    let (a, b, same) = (3usize, 40usize, 7usize);
+    let (la, lb, ls) = (
+        world.city.lots[a].clone(),
+        world.city.lots[b].clone(),
+        world.city.lots[same].clone(),
+    );
+    world.set_building(BuildingDiff {
+        lot: a as u32,
+        kind: NO_BUILDING,
+        rotation: 0,
+    });
+    world.set_building(BuildingDiff {
+        lot: b as u32,
+        kind: u16::from(lb.kind.0),
+        rotation: (lb.facing + 1) % 4,
+    });
+    // Set back to what generation made: not a difference.
+    world.set_building(BuildingDiff {
+        lot: same as u32,
+        kind: u16::from(ls.kind.0),
+        rotation: ls.facing,
+    });
+    let frames = world.keyframes(0);
+    let listed: Vec<_> = frames
+        .iter()
+        .flat_map(|f| f.buildings.iter().map(|d| d.lot))
+        .collect();
+    assert_eq!(listed, {
+        let mut want = vec![a as u32, b as u32];
+        want.sort_by_key(|l| (world.city.lots[*l as usize].district, *l));
+        want
+    });
+    assert!(
+        frames[usize::from(la.district)]
+            .buildings
+            .iter()
+            .any(|d| d.lot == a as u32)
+    );
+    assert!(
+        frames[usize::from(lb.district)]
+            .buildings
+            .iter()
+            .any(|d| d.lot == b as u32)
+    );
+}

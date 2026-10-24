@@ -81,6 +81,8 @@ export class GatewayError extends Error {
     message: string,
     /** For `trimmed`: the oldest offset the shard still holds. */
     readonly oldest?: number,
+    /** For errors that name one: the slot of the subscription. */
+    readonly slot?: string,
   ) {
     super(message);
   }
@@ -109,10 +111,12 @@ export class Gateway {
   private readonly pending = new Map<string, Pending[]>();
   /** Requests waiting for an answer that names their id: publishes, reads and state reads. */
   private readonly requests = new Map<number, Request>();
-  private readonly queuedReads: (() => void)[] = [];
+  /** Reads waiting for a slot; each is handed one as an earlier read finishes. */
+  private readonly queuedReads: { go: () => void; fail: (err: Error) => void }[] = [];
   private reading = 0;
   private nextId = 1;
   private closing = false;
+  private ended: Error | null = null;
   /** Called with errors that answer no pending request, such as `subscription_ended`. */
   onError: (err: GatewayError) => void = () => {};
 
@@ -123,7 +127,9 @@ export class Gateway {
   ) {
     socket.addEventListener('message', (message) => this.receive(message));
     socket.addEventListener('close', () => {
-      if (!this.closing) this.onError(new GatewayError('closed', 'the gateway closed the session'));
+      const err = new GatewayError('closed', 'the gateway closed the session');
+      this.end(err);
+      if (!this.closing) this.onError(err);
     });
   }
 
@@ -137,6 +143,7 @@ export class Gateway {
         reject(err);
       };
       socket.addEventListener('error', () => fail(new Error(`cannot reach ${url}`)), { once: true });
+      socket.addEventListener('close', () => reject(new Error(`${url} closed before it answered`)), { once: true });
       socket.addEventListener('open', () =>
         socket.send(JSON.stringify({ type: 'join', protocol: 1, features: FEATURES, city, token })),
       );
@@ -170,6 +177,7 @@ export class Gateway {
   ): Promise<Subscribed> {
     const key = `${stream}/${slot}`;
     return new Promise((resolve, reject) => {
+      if (this.ended) return reject(this.ended);
       const queue = this.pending.get(key) ?? [];
       queue.push({ onEvent, resolve, reject });
       this.pending.set(key, queue);
@@ -212,24 +220,46 @@ export class Gateway {
   close(): void {
     this.closing = true;
     this.socket.close();
+    this.end(new GatewayError('closed', 'the session was closed'));
+  }
+
+  /** Nothing more will be answered: fail everything waiting, and anything asked later. */
+  private end(err: Error): void {
+    this.ended ??= err;
+    const requests = [...this.requests.values()];
+    this.requests.clear();
+    const subscribes = [...this.pending.values()].flat();
+    this.pending.clear();
+    const reads = this.queuedReads.splice(0);
+    for (const r of requests) r.reject(err);
+    for (const s of subscribes) s.reject(err);
+    for (const r of reads) r.fail(err);
   }
 
   private request(message: Json): Promise<Json> {
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
+      if (this.ended) return reject(this.ended);
       this.requests.set(id, { resolve, reject });
       this.socket.send(JSON.stringify({ ...message, id }));
     });
   }
 
   private async limited<T>(run: () => Promise<T>): Promise<T> {
-    if (this.reading >= READS_IN_FLIGHT) await new Promise<void>((go) => this.queuedReads.push(go));
-    this.reading++;
+    if (this.ended) throw this.ended;
+    // A finishing read passes its slot straight to the next waiter, so `reading` never dips and no newcomer can slip
+    // in between.
+    if (this.reading >= READS_IN_FLIGHT) {
+      await new Promise<void>((go, fail) => this.queuedReads.push({ go, fail }));
+    } else {
+      this.reading++;
+    }
     try {
       return await run();
     } finally {
-      this.reading--;
-      this.queuedReads.shift()?.();
+      const next = this.queuedReads.shift();
+      if (next) next.go();
+      else this.reading--;
     }
   }
 
@@ -280,6 +310,7 @@ export class Gateway {
         String(json.code),
         String(json.message),
         typeof json.oldest === 'number' ? json.oldest : undefined,
+        typeof json.slot === 'string' ? json.slot : undefined,
       );
       const waiting = typeof json.id === 'number' ? this.requests.get(json.id) : undefined;
       if (waiting) {
