@@ -218,23 +218,25 @@ fn a_trip_event_gives_back_the_trip_it_came_from() {
 fn legs_that_join_no_doors_are_no_trip() {
     let city = City::generate("harbor", 2).unwrap();
     let places = Places::new(&city);
-    let r = Resident::new(&city, &places, 0).unwrap();
-    let trip = r
-        .day_trips(&city, 0, &Congestion::FREE, 0)
-        .unwrap()
-        .remove(0);
+    // A trip of one leg cannot be cut short, so look for one of several.
+    let (r, trip) = all(&places)
+        .filter_map(|index| Resident::new(&city, &places, index))
+        .find_map(|r| {
+            let trips = r.day_trips(&city, 0, &Congestion::FREE, 0)?;
+            let trip = trips.into_iter().find(|t| t.legs().len() > 1)?;
+            Some((r, trip))
+        })
+        .expect("some resident makes a trip of more than one leg");
     let mut legs = trip.legs();
     assert!(
         r.trip_from_route(&city, trip.depart, &[], trip.mode)
             .is_none()
     );
-    // Reversed, they would join the doors of the trip back, which a day with a lunch has.
-    if legs.len() > 1 {
-        assert!(
-            r.trip_from_route(&city, trip.depart, &legs[..legs.len() - 1], trip.mode)
-                .is_none()
-        );
-    }
+    // Cut short, the legs stop before the door the trip is going to.
+    assert!(
+        r.trip_from_route(&city, trip.depart, &legs[..legs.len() - 1], trip.mode)
+            .is_none()
+    );
     legs[0].segment = u32::MAX;
     assert!(
         r.trip_from_route(&city, trip.depart, &legs, trip.mode)

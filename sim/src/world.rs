@@ -67,8 +67,12 @@ impl World {
     /// their day.
     pub(crate) fn new(city: City) -> World {
         let places = Places::new(&city);
+        World::with_places(city, &places)
+    }
+
+    pub(crate) fn with_places(city: City, places: &Places) -> World {
         let people = (0..places.population())
-            .filter_map(|index| Resident::new(&city, &places, index))
+            .filter_map(|index| Resident::new(&city, places, index))
             .map(|resident| Person {
                 resident,
                 block: 0,

@@ -5,12 +5,22 @@
 ### The city
 
 - Rush hour is busier. A city has six residents per home instead of two, office
-  and shop workers keep to a half-hour window around 08:00 and 17:15, office
+  workers arrive 07:45 to 08:15 and leave 17:00 to 17:30, shopkeepers arrive 07:45 to
+  08:30 and leave 17:00 to 18:30, office
   workers go out to the shops at lunch, errands pick the nearest of eight
   places so more are walked, and half the retirees go out in the afternoon.
   The harbor city at 2 by 2 districts has 522 residents (was 174) and up to 104
   cars on the road at once (was 18). A seed generates different residents and
   schedules than before; there is no compatibility with logs written earlier.
+- The log is sized for its peak. A 20,000-resident city averages about 8 KB/s a
+  day but writes about 17 KB/s in the busiest minute of the rush, when every
+  district's hourly keyframe lands with the commute. The README and design say so.
+
+### The look
+
+- The page draws at most 40 cars and walkers on the low tier and 80 on medium
+  (no limit on high); the rest appear as others arrive. Walkers no longer cast
+  shadows. Instancing is tracked in #91.
 
 ## [0.1.0] - 2026-10-24
 

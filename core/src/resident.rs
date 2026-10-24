@@ -37,10 +37,17 @@ pub struct Places {
     any: Vec<u32>,
     /// The connected piece of road each lot's door is on, by lot id.
     piece: Vec<u32>,
+    per_home: u32,
 }
 
 impl Places {
     pub fn new(city: &City) -> Places {
+        Places::with_per_home(city, PER_HOME)
+    }
+
+    /// Like [`Places::new`] with `per_home` residents in each home, to load a city the way a
+    /// bigger one would.
+    pub fn with_per_home(city: &City, per_home: u32) -> Places {
         let mut p = Places {
             homes: Vec::new(),
             offices: Vec::new(),
@@ -49,6 +56,7 @@ impl Places {
             parks: Vec::new(),
             any: Vec::new(),
             piece: pieces(city),
+            per_home,
         };
         for lot in city.lots.iter().filter(|l| l.door().is_some()) {
             p.any.push(lot.id);
@@ -68,7 +76,7 @@ impl Places {
 
     /// How many residents the city has.
     pub fn population(&self) -> u32 {
-        self.homes.len() as u32 * PER_HOME
+        self.homes.len() as u32 * self.per_home
     }
 }
 
@@ -154,7 +162,7 @@ impl Resident {
     pub fn new(city: &City, places: &Places, index: u32) -> Option<Resident> {
         let mut rng = Rng::for_index(&format!("{}/resident", city.seed), index);
         let archetype = Archetype::from_roll(rng.below(100));
-        let home = places.homes[(index / PER_HOME) as usize % places.homes.len()];
+        let home = places.homes[(index / places.per_home) as usize % places.homes.len()];
         let work_list = match archetype {
             Archetype::Shift | Archetype::Night => &places.factories,
             Archetype::Shopkeeper => &places.shops,
