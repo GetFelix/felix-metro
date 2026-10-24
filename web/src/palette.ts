@@ -3,6 +3,7 @@ import * as THREE from 'three';
 export const PALETTE = {
   grass: 0x79a85f,
   grassFar: 0x4d8a4a,
+  dirt: 0xa98a5e,
   water: 0x3f8fb0,
   lamp: 0xffc46b,
   window: new THREE.Color(1.0, 0.66, 0.32),

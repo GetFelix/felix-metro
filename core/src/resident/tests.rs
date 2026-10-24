@@ -271,3 +271,23 @@ fn rush_hour_fills_the_streets() {
         assert!(walkers >= 2, "{name}: {walkers} walkers");
     }
 }
+
+#[test]
+fn the_development_area_does_not_shrink_the_population() {
+    for city in cities() {
+        let homes = city
+            .lots
+            .iter()
+            .filter(|l| l.door().is_some() && l.zone == Zone::Suburban)
+            .count() as u32;
+        let places = Places::new(&city);
+        assert_eq!(places.population(), homes * PER_HOME, "{}", city.seed);
+        let used: std::collections::HashSet<u32> = all(&places)
+            .map(|i| {
+                places.homes[(u64::from(i) * places.homes.len() as u64
+                    / u64::from(places.population)) as usize]
+            })
+            .collect();
+        assert_eq!(used.len(), places.homes.len(), "every home is lived in");
+    }
+}
