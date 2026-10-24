@@ -107,6 +107,8 @@ interface CaptureFrame {
   walkers: number;
   carsInView: number;
   walkersInView: number;
+  /** Draw calls, triangles and shader programs of the last draw, and the ms the GPU took to finish it. */
+  gpu: { calls: number; triangles: number; programs: number; finishMs: number };
 }
 
 /** Whether the connection is down; the clock runs on its own meanwhile. */
@@ -739,6 +741,9 @@ async function main() {
         // A screenshot of a WebGL canvas waits on the compositor, which software GL makes take minutes. The canvas is read
         // out now and shown as a picture under the overlay, so the page can be screenshotted without it.
         const canvas = renderer.domElement;
+        const finishAt = performance.now();
+        renderer.getContext().finish();
+        const finishMs = performance.now() - finishAt;
         still ??= document.createElement('img');
         still.style.cssText = 'position:absolute;top:0;left:0;display:block;z-index:0;width:100vw;height:100vh';
         still.src = canvas.toDataURL('image/jpeg', 0.95);
@@ -755,6 +760,12 @@ async function main() {
           walkers: walkers.length,
           carsInView: cars.filter((w) => inView(w.x, w.z)).length,
           walkersInView: walkers.filter((w) => inView(w.x, w.z)).length,
+          gpu: {
+            calls: renderer.info.render.calls,
+            triangles: renderer.info.render.triangles,
+            programs: renderer.info.programs?.length ?? 0,
+            finishMs,
+          },
         };
       },
     };

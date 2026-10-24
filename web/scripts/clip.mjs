@@ -7,6 +7,7 @@
 // Needs the dev stack up (dev/up.sh); the sim's speed is set through dev/speed.sh.
 import { execFileSync } from 'node:child_process';
 import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
@@ -30,20 +31,27 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // CLIP_TIMING=1 only times a few frames at each tier, to see which one a runner can draw.
 if (process.env.CLIP_TIMING) {
-  for (const tier of ['low', 'medium', 'high']) {
+  log(`${os.cpus().length} cores, load ${os.loadavg().map((l) => l.toFixed(1))}`);
+  for (const [tier, w, h, frames] of [
+    ['low', 800, 450, 6],
+    ['low', W, H, 6],
+    ['medium', 800, 450, 4],
+  ]) {
     const b = await chromium.launch({ args: GPU });
-    const p = await b.newPage({ viewport: { width: W, height: H }, deviceScaleFactor: 1 });
+    const p = await b.newPage({ viewport: { width: w, height: h }, deviceScaleFactor: 1 });
     await p.goto(`${base}/?tier=${tier}&capture&trace#${city}`, { waitUntil: 'load', timeout: 300_000 });
     await p.waitForFunction(() => window.__capture && Number.isFinite(window.__live?.tick), null, {
       polling: 250,
       timeout: 300_000,
     });
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < frames; i++) {
       const began = Date.now();
-      await p.evaluate((t) => window.__capture.frame(t), i * 33);
+      const info = await p.evaluate((t) => window.__capture.frame(t), i * 33);
       const drawn = Date.now();
       await p.screenshot({ type: 'jpeg', quality: 95, timeout: 600_000 });
-      log(`${tier}: frame ${i}: ${drawn - began} ms to draw, ${Date.now() - drawn} ms to capture`);
+      log(
+        `${tier} ${w}x${h}: frame ${i}: ${drawn - began} ms to draw (gpu ${JSON.stringify(info.gpu)}), ${Date.now() - drawn} ms to capture, load ${os.loadavg()[0].toFixed(1)}`,
+      );
     }
     await b.close();
   }
