@@ -63,6 +63,10 @@ pub struct Settings {
     pub max_backoff: Duration,
     /// Sends in a row that may fail before the run gives up.
     pub max_failures: u32,
+    /// Sends in a row that may fail with an error that looks permanent. A few
+    /// are allowed because a rollout, such as a fleet finalizing a feature,
+    /// answers the same way until it reaches every broker.
+    pub max_permanent: u32,
 }
 
 impl Default for Settings {
@@ -76,6 +80,7 @@ impl Default for Settings {
             backoff: Duration::from_millis(100),
             max_backoff: Duration::from_secs(2),
             max_failures: 60,
+            max_permanent: 30,
         }
     }
 }
@@ -162,6 +167,7 @@ pub async fn run_city<L: Log>(name: &str, city: City, settings: Settings, log: L
                 backoff: settings.backoff,
                 max_backoff: settings.max_backoff,
                 max_failures: settings.max_failures,
+                max_permanent: settings.max_permanent,
             };
             commits.spawn(async move {
                 let attempts =
@@ -203,6 +209,7 @@ struct Retry {
     backoff: Duration,
     max_backoff: Duration,
     max_failures: u32,
+    max_permanent: u32,
 }
 
 /// True for an error that sending again cannot fix, such as a revoked token,
@@ -228,6 +235,7 @@ async fn commit_until_written<L: Log>(
 ) -> Result<u32> {
     let mut wait = retry.backoff;
     let mut failures = 0u32;
+    let mut permanent = 0u32;
     for attempt in 1.. {
         let answer = tokio::time::timeout(
             retry.timeout,
@@ -254,11 +262,16 @@ async fn commit_until_written<L: Log>(
                 "district {district}: the log is at {tail}, not {expected}; another sim is writing it, or this city already has history"
             ),
             Ok(Err(err)) if is_permanent(&err) => {
-                return Err(err.context(format!(
-                    "district {district}: the log will not take offset {expected}, and sending again will not change that"
-                )));
+                permanent += 1;
+                if permanent >= retry.max_permanent {
+                    return Err(err.context(format!(
+                        "district {district}: the log refused offset {expected} {permanent} times in a row, and sending again will not change that"
+                    )));
+                }
+                warn!(district, expected, attempt, error = %format!("{err:#}"), "commit refused, sending again");
             }
             Ok(Err(err)) => {
+                permanent = 0;
                 failures += 1;
                 warn!(district, expected, attempt, error = %format!("{err:#}"), "commit failed, sending again");
             }

@@ -282,15 +282,18 @@ async fn a_retry_that_finds_another_writers_record_stops_the_city() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn an_error_that_cannot_pass_ends_the_run_at_once() {
+async fn an_error_that_cannot_pass_ends_the_run_after_a_few_sends() {
     let log = Memory::new(|district, expected, _| {
         (district == 2 && expected == 4).then_some(Fault::Permanent)
     });
-    let err = run_city("harbor", city(), settings(10), log.clone())
+    let mut s = settings(10);
+    s.max_permanent = 3;
+    let err = run_city("harbor", city(), s, log.clone())
         .await
         .unwrap_err();
     assert!(format!("{err:#}").contains("district 2"), "{err:#}");
-    assert_eq!(log.sends.lock().unwrap()[&(2, 4)], 1);
+    // Not the 60 a transient error gets.
+    assert_eq!(log.sends.lock().unwrap()[&(2, 4)], 3);
 }
 
 #[tokio::test(start_paused = true)]
@@ -305,6 +308,17 @@ async fn a_district_that_keeps_failing_ends_the_run_instead_of_freezing_the_city
         .unwrap_err();
     assert!(format!("{err:#}").contains("5 sends in a row"), "{err:#}");
     assert_eq!(log.sends.lock().unwrap()[&(0, 2)], 5);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_refusal_that_clears_is_ridden_out() {
+    let log = Memory::new(|district, expected, attempt| {
+        (district == 2 && expected == 4 && attempt <= 5).then_some(Fault::Permanent)
+    });
+    run_city("harbor", city(), settings(10), log.clone())
+        .await
+        .unwrap();
+    assert_whole(&log, 10);
 }
 
 #[tokio::test(start_paused = true)]
