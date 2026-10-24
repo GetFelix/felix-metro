@@ -1,8 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { TICKS_PER_DAY, TICKS_PER_HOUR } from './clock';
 import {
   STEP_TICKS,
-  createDragTick,
+  MIN_SPAN,
+  barSpan,
+  createSpanHold,
+  startsDrag,
+  tickAtPointer,
   agoText,
   clampTick,
   dayBands,
@@ -64,13 +68,129 @@ describe('timeline maths', () => {
   });
 });
 
-describe('releasing the handle', () => {
-  it('keeps the tick of the last drag move when the span grew and the pointer did not', () => {
-    const drag = createDragTick();
-    const grown = { oldest: range.oldest, newest: range.newest + 400 };
-    const during = drag.at(range, 0.4, false);
-    expect(drag.at(grown, 0.4, true)).toBe(during);
-    // A release somewhere new is read against the span as it is.
-    expect(drag.at(grown, 0.5, true)).toBe(tickAtFraction(grown, 0.5));
+describe('a steady bar', () => {
+  it('maps a held drag to stable ticks while the city grows', () => {
+    const hold = createSpanHold();
+    hold.set(barSpan(0, 1000));
+    hold.hold();
+    const first = tickAtPointer(hold.current, 0.5);
+    let last = 1000;
+    for (let tip = 1100; tip < 20000; tip += 700) {
+      last = tip;
+      hold.set(barSpan(0, tip));
+      expect(tickAtPointer(hold.current, 0.5)).toBe(first);
+    }
+    // After the release the latest span is the one in use.
+    hold.release();
+    expect(hold.current.live).toBe(last);
+    expect(tickAtPointer(hold.current, 0.5)).not.toBe(first);
+  });
+
+  it('releases at the right end on the live head the drag began with', () => {
+    const hold = createSpanHold();
+    hold.set(barSpan(0, 3 * TICKS_PER_DAY));
+    hold.hold();
+    hold.set(barSpan(0, 3 * TICKS_PER_DAY + 500));
+    const held = hold.held!;
+    expect(tickAtPointer(held, 1)).toBe(held.live);
+    expect(tickAtPointer(held, 1)).toBe(3 * TICKS_PER_DAY);
+    // The caller's snap: the tip it tests against is the held one, so this is "live", not the near past.
+    expect(tickAtPointer(held, 1) >= held.live).toBe(true);
+  });
+
+  it('spans at least a day, with the live head short of the right end', () => {
+    const young = barSpan(480, 480 + 600);
+    expect(young.newest - young.oldest).toBe(MIN_SPAN);
+    expect(young.live).toBe(1080);
+    // The area right of the live head cannot be picked.
+    expect(tickAtPointer(young, 1)).toBe(young.live);
+    expect(tickAtPointer(young, 0)).toBe(480);
+    expect(dayBands(young).map((b) => b.day)).toEqual([1, 2]);
+    // An older city spans its whole history.
+    const old = barSpan(0, 3 * TICKS_PER_DAY);
+    expect(old.newest).toBe(old.live);
+    // A tip at the oldest moment still has a span to draw.
+    expect(barSpan(100, 100).live).toBe(101);
+  });
+});
+
+describe('picking up the handle while live', () => {
+  it('starts a drag from a primary press anywhere, and the press at the live head reads as live', () => {
+    expect(startsDrag(0)).toBe(true);
+    expect(startsDrag(2)).toBe(false);
+    const span = barSpan(0, 3 * TICKS_PER_DAY);
+    // A press on the head, at the right end, maps to the live tick, so the first drag move is a no-op until it moves left.
+    expect(tickAtPointer(span, 1)).toBe(span.live);
+    expect(tickAtPointer(span, 0.9)).toBeLessThan(span.live);
+  });
+});
+
+describe('pressing the live head', () => {
+  type Fake = {
+    children: Fake[];
+    listeners: Record<string, ((e: unknown) => void)[]>;
+    [k: string]: unknown;
+  };
+  const fake = (): Fake => {
+    const f: Fake = {
+      children: [],
+      listeners: {},
+      className: '',
+      style: { setProperty() {}, cssText: '' },
+      dataset: {},
+      classList: { toggle() {} },
+      append(...c: Fake[]) {
+        f.children.push(...c);
+      },
+      replaceChildren() {
+        f.children = [];
+      },
+      setAttribute() {},
+      setPointerCapture: () => {},
+      focus() {},
+      getBoundingClientRect: () => ({ left: 0, width: 1000 }),
+      addEventListener(t: string, fn: (e: unknown) => void) {
+        (f.listeners[t] ??= []).push(fn);
+      },
+    };
+    return f;
+  };
+  const setup = async (live: boolean) => {
+    vi.stubGlobal('document', { createElement: fake });
+    const { createTimeline } = await import('./timeline');
+    const root = fake();
+    const moves: [number, string][] = [];
+    let lives = 0;
+    const bar = createTimeline(root as unknown as HTMLElement, {
+      onMove: (t, p) => moves.push([t, p]),
+      onStep() {},
+      onLive: () => lives++,
+      onEngage() {},
+    });
+    const tip = root.children.find((c) => c.className === 'strip')!.children.find((c) => c.className === 'tip')!;
+    const view = { ready: true, oldest: 0, newest: 2 * TICKS_PER_DAY, at: live ? 2 * TICKS_PER_DAY : 5000, live };
+    bar.update(view);
+    const fire = (type: string, extra: object) =>
+      root.listeners[type]!.forEach((fn) => fn({ button: 0, pointerId: 1, preventDefault() {}, ...extra }));
+    return { bar, tip, moves, fire, lives: () => lives };
+  };
+
+  it('goes live from the past without a drag', async () => {
+    const t = await setup(false);
+    t.fire('pointerdown', { target: t.tip, clientX: 1000 });
+    t.fire('pointerup', { target: t.tip, clientX: 990 });
+    expect(t.lives()).toBe(1);
+    expect(t.moves).toEqual([]);
+    expect(t.bar.dragging).toBe(false);
+  });
+
+  it('picks the handle up at once while live', async () => {
+    const t = await setup(true);
+    t.fire('pointerdown', { target: t.tip, clientX: 1000 });
+    expect(t.bar.dragging).toBe(true);
+    t.fire('pointermove', { target: t.tip, clientX: 500 });
+    expect(t.moves.at(-1)).toEqual([TICKS_PER_DAY, 'drag']);
+    t.fire('pointerup', { target: t.tip, clientX: 500 });
+    expect(t.lives()).toBe(0);
   });
 });

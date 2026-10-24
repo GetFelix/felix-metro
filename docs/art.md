@@ -20,7 +20,7 @@ palette and proportions, so they sit together without restyling by hand.
 | City Kit (Suburban) | Houses, trees, fences, driveways | Also the source of every tree |
 | City Kit (Industrial) | Factories, tanks, chimneys, containers, water tower | |
 | Car Kit | Traffic | Sedan, taxi, SUV, van, delivery, police, ambulance, trucks; scaled to 0.12 |
-| Mini Characters | Pedestrians | Rigged, with `walk`, `idle`, `sit` and more; scaled to 0.17 |
+| Mini Characters | Pedestrians | Rigged, with `walk`, `idle`, `sit` and more; scaled to 0.17 in the style frame and 0.22 in a city |
 
 Considered and left out:
 

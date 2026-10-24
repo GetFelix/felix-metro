@@ -79,6 +79,14 @@ pub struct Settings {
     /// are allowed because a rollout, such as a fleet finalizing a feature,
     /// answers the same way until it reaches every broker.
     pub max_permanent: u32,
+    /// Ticks to commit as fast as the log takes them before the clock starts,
+    /// when the city has no history yet. 0 starts live at tick 0. A city that
+    /// starts paused skips it.
+    pub warmup_ticks: u32,
+    /// True while the warm-up has not finished, so the operator's endpoint can
+    /// say when the city went live. The runner clears it, also when there is
+    /// no warm-up to do.
+    pub warming: Option<watch::Sender<bool>>,
 }
 
 impl Default for Settings {
@@ -95,6 +103,8 @@ impl Default for Settings {
             max_backoff: Duration::from_secs(2),
             max_failures: 60,
             max_permanent: 30,
+            warmup_ticks: 0,
+            warming: None,
         }
     }
 }
@@ -164,6 +174,22 @@ pub async fn run_city_with<L: Log>(
     let mut report = Report::new(Instant::now());
     let mut queue: VecDeque<Incoming> = VecDeque::new();
     let mut refused: VecDeque<Incoming> = VecDeque::new();
+    let warm = settings
+        .warmup_ticks
+        .min(settings.stop_at.unwrap_or(u32::MAX));
+    if warm > 0 && speed != 0 {
+        let retry = Retry::of(&settings);
+        if has_history(&log, world.districts(), retry).await? {
+            info!(city = name, "the city has history, starting live");
+        } else {
+            retries += warm_up(name, &mut world, &mut shards, warm, speed, &log, &settings).await?;
+            timer = new_timer(period, true);
+            report = Report::new(Instant::now());
+        }
+    }
+    if let Some(warming) = &settings.warming {
+        warming.send_replace(false);
+    }
     loop {
         let tick = world.next_tick();
         if settings.stop_at == Some(tick) {
@@ -297,13 +323,7 @@ pub async fn run_city_with<L: Log>(
                 .encode()
                 .with_context(|| format!("encode district {district} tick {tick}"))?;
             let log = log.clone();
-            let retry = Retry {
-                timeout: settings.commit_timeout,
-                backoff: settings.backoff,
-                max_backoff: settings.max_backoff,
-                max_failures: settings.max_failures,
-                max_permanent: settings.max_permanent,
-            };
+            let retry = Retry::of(&settings);
             commits.spawn(async move {
                 let attempts =
                     commit_until_written(&log, district as u16, shard.next, bytes, keyframe, retry)
@@ -419,6 +439,142 @@ struct Retry {
     max_backoff: Duration,
     max_failures: u32,
     max_permanent: u32,
+}
+
+impl Retry {
+    fn of(settings: &Settings) -> Self {
+        Retry {
+            timeout: settings.commit_timeout,
+            backoff: settings.backoff,
+            max_backoff: settings.max_backoff,
+            max_failures: settings.max_failures,
+            max_permanent: settings.max_permanent,
+        }
+    }
+}
+
+/// Ticks a district's committer may be behind the stepping, so a slow shard
+/// holds the stepping back instead of piling records up in memory.
+const WARMUP_AHEAD: usize = 256;
+
+/// True when any district already has a record. A read that fails is tried
+/// again, since a shard may still be electing a leader at startup.
+async fn has_history<L: Log>(log: &L, districts: usize, retry: Retry) -> Result<bool> {
+    let mut wait = retry.backoff;
+    for district in 0..districts {
+        let mut failures = 0u32;
+        loop {
+            match tokio::time::timeout(retry.timeout, log.read(district as u16, 0)).await {
+                Ok(Ok(Some(_))) => return Ok(true),
+                Ok(Ok(None)) => break,
+                Ok(Err(err)) => {
+                    failures += 1;
+                    if failures >= retry.max_failures {
+                        return Err(err.context(format!("district {district}: read for history")));
+                    }
+                    warn!(district, error = %format!("{err:#}"), "could not look for history, trying again");
+                }
+                Err(_) => {
+                    failures += 1;
+                    if failures >= retry.max_failures {
+                        bail!("district {district}: no answer looking for history");
+                    }
+                }
+            }
+            tokio::time::sleep(wait).await;
+            wait = (wait * 2).min(retry.max_backoff);
+        }
+    }
+    Ok(false)
+}
+
+/// Commits ticks `0..ticks` of a new city without waiting out their periods.
+/// Each district has its own committer, one record at a time at the offset the
+/// stepping already knows, so the expected-offset fence holds and a district
+/// can run ahead of the others by up to [`WARMUP_AHEAD`] ticks. Records are
+/// stamped as if the ticks had run at `speed` and ended where this started, so
+/// wall time and tick agree for anything that maps one to the other. Returns
+/// the commits that had to be sent again.
+async fn warm_up<L: Log>(
+    name: &str,
+    world: &mut World,
+    shards: &mut [Shard],
+    ticks: u32,
+    speed: u8,
+    log: &L,
+    settings: &Settings,
+) -> Result<u64> {
+    info!(city = name, ticks, "warming up");
+    let began = Instant::now();
+    let period_us = 1_000_000 / u64::from(speed);
+    let go_live = unix_micros();
+    let retry = Retry::of(settings);
+    let mut senders = Vec::new();
+    let mut committers = JoinSet::new();
+    for (district, shard) in shards.iter().enumerate() {
+        let (send, mut inbox) = mpsc::channel::<(Vec<u8>, bool)>(WARMUP_AHEAD);
+        senders.push(send);
+        let (log, mut next) = (log.clone(), shard.next);
+        committers.spawn(async move {
+            let mut retries = 0u64;
+            while let Some((bytes, keyframe)) = inbox.recv().await {
+                let attempts =
+                    commit_until_written(&log, district as u16, next, bytes, keyframe, retry)
+                        .await?;
+                retries += u64::from(attempts - 1);
+                next += 1;
+            }
+            Ok::<_, anyhow::Error>(retries)
+        });
+    }
+    let mut stopped = false;
+    'ticks: for _ in 0..ticks {
+        let tick = world.next_tick();
+        let wall_us = go_live.saturating_sub(u64::from(ticks - tick) * period_us);
+        for (district, step) in world.step().into_iter().enumerate() {
+            let shard = &mut shards[district];
+            let keyframe = step.keyframe.is_some();
+            let keyframe_offset = if keyframe { shard.next } else { shard.keyframe };
+            let record = TickRecord {
+                header: Header {
+                    epoch: settings.epoch,
+                    district: district as u16,
+                    tick,
+                    speed,
+                    keyframe_offset,
+                    wall_us,
+                },
+                keyframe: step.keyframe,
+                events: step.events,
+            };
+            let bytes = record
+                .encode()
+                .with_context(|| format!("encode district {district} tick {tick}"))?;
+            if keyframe {
+                shard.keyframe = shard.next;
+            }
+            shard.next += 1;
+            if senders[district].send((bytes, keyframe)).await.is_err() {
+                // The committer ended; its error is below.
+                stopped = true;
+                break 'ticks;
+            }
+        }
+    }
+    drop(senders);
+    let mut retries = 0u64;
+    while let Some(done) = committers.join_next().await {
+        retries += done.context("a warm-up commit task stopped")??;
+    }
+    anyhow::ensure!(!stopped, "a warm-up committer stopped early");
+    info!(
+        city = name,
+        ticks,
+        took_ms = began.elapsed().as_millis() as u64,
+        retries,
+        "warm-up done, going live"
+    );
+    Ok(retries)
 }
 
 /// True for an error that sending again cannot fix, such as a revoked token,

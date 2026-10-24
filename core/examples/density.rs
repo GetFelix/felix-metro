@@ -1,5 +1,5 @@
 //! Prints how many residents are on the road, by car and on foot: the city's peak per district, the
-//! busiest single segment, and the frame at 08:00 and 17:15.
+//! busiest single segment, and the frame at 08:00, 12:30 and 17:15.
 //!
 //! `cargo run --release --example density -- harbor 2` for `harbor` at 2 by 2 districts. Roads are
 //! empty, so a trip never detours around traffic.
@@ -84,7 +84,7 @@ fn main() {
         t % TICKS_PER_HOUR * 60 / TICKS_PER_HOUR
     );
     // Average over each quarter hour around the two peaks, as a camera dwelling there sees it.
-    for (label, hour, minute) in [("08:00", 8, 0), ("17:15", 17, 15)] {
+    for (label, hour, minute) in [("08:00", 8, 0), ("12:30", 12, 30), ("17:15", 17, 15)] {
         let at = (hour * TICKS_PER_HOUR + minute * TICKS_PER_HOUR / 60) as usize;
         let window = at - 30..at + 30;
         let mean = |v: &Vec<Vec<u16>>, dist: usize| {

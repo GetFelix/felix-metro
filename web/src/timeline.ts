@@ -20,25 +20,57 @@ export function tickAtFraction(range: Range, fraction: number): number {
   return clampTick(range, range.oldest + fraction * (range.newest - range.oldest));
 }
 
+/** One city day: the bar never spans less, so a young city's live head creeps along a fixed scale. */
+export const MIN_SPAN = TICKS_PER_DAY;
+
+/** What the bar draws: its scale (`oldest` to `newest`) and where the live head sits on it. */
+export interface Span extends Range {
+  live: number;
+}
+
+/** The scale for a city holding `oldest` up to the live tip. Past the tip the bar shows time that has not happened. */
+export function barSpan(oldest: number, tip: number): Span {
+  const live = Math.max(tip, oldest + 1);
+  return { oldest, newest: Math.max(live, oldest + MIN_SPAN), live };
+}
+
 /**
- * Remembers where the last drag move put the handle. The span grows while a drag is held, so a release at the same
- * pixel would map to a later tick than the person last saw; it keeps the tick the drag showed instead.
+ * The span the bar maps the pointer through. A drag holds the span it began with: if the scale moved under a held
+ * pointer, every move would read a different tick and the seeks would chase it. Updates during a drag are kept for
+ * after the release.
  */
-export function createDragTick() {
-  let last: { x: number; tick: number } | null = null;
+export function createSpanHold() {
+  let latest = barSpan(0, 1);
+  let held: Span | null = null;
   return {
-    /** The tick for a pointer at `x` (a fraction along the bar); `settle` reuses the last tick if `x` has not moved. */
-    at(range: Range, x: number, settle: boolean): number {
-      if (settle && last && last.x === x) return last.tick;
-      const tick = tickAtFraction(range, x);
-      last = { x, tick };
-      return tick;
+    set(span: Span) {
+      latest = span;
     },
-    reset() {
-      last = null;
+    get current(): Span {
+      return held ?? latest;
+    },
+    /** The span the drag began with, or null when none is held. */
+    get held(): Span | null {
+      return held;
+    },
+    hold() {
+      held = latest;
+    },
+    release() {
+      held = null;
     },
   };
 }
+
+/**
+ * Whether a press starts a drag. Any primary press on the bar does, the live head included: the head sits at the
+ * right end and a press on it is how the handle is picked up while live.
+ */
+export const startsDrag = (button: number): boolean => button === 0;
+
+/** The tick under a position along the bar, never past the live head. */
+export const tickAtPointer = (span: Span, fraction: number): number =>
+  Math.min(span.live, tickAtFraction(span, fraction));
 
 /** One step from `from`: 15 city minutes, or an hour when `big`. */
 export function stepTick(range: Range, from: number, direction: 1 | -1, big: boolean): number {
@@ -106,6 +138,8 @@ export interface TimelineHandlers {
 }
 
 export interface TimelineView extends Range {
+  /** The retained range has been read, so `oldest` is the real one; until then the bar ignores a press. */
+  ready: boolean;
   /** Where the handle is. */
   at: number;
   /** The handle is at the live tip. */
@@ -136,7 +170,9 @@ export function createTimeline(root: HTMLElement, handlers: TimelineHandlers) {
   tip.setAttribute('aria-label', 'Back to live');
   el('div', 'knob', track);
 
-  let range: Range = { oldest: 0, newest: 1 };
+  const hold = createSpanHold();
+  let ready = false;
+  let isLive = false;
   let built = '';
   let dragging = false;
   let hover = false;
@@ -150,34 +186,57 @@ export function createTimeline(root: HTMLElement, handlers: TimelineHandlers) {
   };
 
   const engage = () => {
-    const now = hover || focused || dragging;
+    const now = hover || focused || dragging || pending !== null;
     if (now !== engaged) handlers.onEngage((engaged = now));
   };
   const fraction = (e: PointerEvent) => {
     const rect = track.getBoundingClientRect();
     return rect.width > 0 ? (e.clientX - rect.left) / rect.width : 0;
   };
-  const dragTick = createDragTick();
   const move = (e: PointerEvent, phase: 'drag' | 'end') =>
-    handlers.onMove(dragTick.at(range, fraction(e), phase === 'end'), phase);
+    handlers.onMove(tickAtPointer(hold.current, fraction(e)), phase);
 
-  root.addEventListener('pointerdown', (e) => {
-    if (e.button !== 0 || e.target === tip) return;
-    root.setPointerCapture(e.pointerId);
+  // A press before the span is read waits for it (the read starts as the press engages the bar) instead of being
+  // dropped or mapped through a one-tick placeholder.
+  let pending: PointerEvent | null = null;
+  const begin = (e: PointerEvent) => {
     dragging = true;
+    hold.hold();
     root.focus({ preventScroll: true });
     engage();
     move(e, 'drag');
+  };
+  root.addEventListener('pointerdown', (e) => {
+    if (!startsDrag(e.button)) return;
+    // Off live, the head is the way back: a drag from it would release a few ticks short of live and seek there.
+    if (e.target === tip && !isLive) {
+      e.preventDefault();
+      handlers.onLive();
+      return;
+    }
+    root.setPointerCapture(e.pointerId);
     e.preventDefault();
+    if (!ready) {
+      pending = e;
+      engage();
+      return;
+    }
+    begin(e);
   });
   root.addEventListener('pointermove', (e) => {
-    if (dragging) move(e, 'drag');
+    if (pending) pending = e;
+    else if (dragging) move(e, 'drag');
   });
   const release = (e: PointerEvent) => {
+    if (pending) {
+      pending = null;
+      engage();
+      return;
+    }
     if (!dragging) return;
     dragging = false;
     move(e, 'end');
-    dragTick.reset();
+    hold.release();
     engage();
   };
   root.addEventListener('pointerup', release);
@@ -186,20 +245,21 @@ export function createTimeline(root: HTMLElement, handlers: TimelineHandlers) {
   root.addEventListener('pointerleave', () => ((hover = false), engage()));
   root.addEventListener('focusin', () => ((focused = true), engage()));
   root.addEventListener('focusout', () => ((focused = false), engage()));
-  tip.addEventListener('click', () => handlers.onLive());
   root.addEventListener('keydown', (e) => {
+    // The keys act on the live span, a drag on the one it began with; they do not mix.
+    if (dragging) return;
     const big = e.shiftKey;
     if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') handlers.onStep(-1, big);
     else if (e.key === 'ArrowRight' || e.key === 'ArrowUp') handlers.onStep(1, big);
     else if (e.key === 'PageDown') handlers.onStep(-1, true);
     else if (e.key === 'PageUp') handlers.onStep(1, true);
-    else if (e.key === 'Home') handlers.onMove(range.oldest, 'key');
+    else if (e.key === 'Home') handlers.onMove(hold.current.oldest, 'key');
     else if (e.key === 'End') handlers.onLive();
     else return;
     e.preventDefault();
   });
 
-  function rebuild() {
+  function rebuild(range: Span) {
     bands.replaceChildren();
     for (const b of dayBands(range)) {
       el('div', 'band', bands).style.cssText = `--from:${b.from};--to:${b.to}`;
@@ -220,17 +280,27 @@ export function createTimeline(root: HTMLElement, handlers: TimelineHandlers) {
   return {
     /** Draw the bar for `view`. Cheap to call every frame: only what changed is written. */
     update(view: TimelineView) {
-      range = { oldest: view.oldest, newest: Math.max(view.newest, view.oldest + 1) };
+      ready = view.ready;
+      isLive = view.live;
+      if (ready && pending) {
+        const e = pending;
+        pending = null;
+        hold.set(barSpan(view.oldest, view.newest));
+        begin(e);
+      }
+      hold.set(barSpan(view.oldest, view.newest));
+      const range = hold.current;
       const key = `${Math.floor(range.oldest / TICKS_PER_HOUR)}:${Math.floor(range.newest / TICKS_PER_HOUR)}`;
       if (key !== built) {
         built = key;
-        rebuild();
+        rebuild(range);
       }
       const span = range.newest - range.oldest;
-      const at = clampTick(range, view.at);
+      const at = Math.min(range.live, clampTick(range, view.at));
       set('--oldest', String(range.oldest));
       set('--span', String(span));
       set('--p', `${(((at - range.oldest) / span) * 100).toFixed(3)}%`);
+      set('--live', `${(((range.live - range.oldest) / span) * 100).toFixed(3)}%`);
       set('--at', String(at));
       if (shown.now !== String(at)) {
         shown.now = String(at);
@@ -248,6 +318,10 @@ export function createTimeline(root: HTMLElement, handlers: TimelineHandlers) {
     },
     get dragging() {
       return dragging;
+    },
+    /** The span a drag in progress began with, or null. A release is judged against this, not the span now. */
+    get held() {
+      return hold.held;
     },
   };
 }

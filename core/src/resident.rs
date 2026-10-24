@@ -251,22 +251,36 @@ impl Resident {
         legs: &[Leg],
         mode: Mode,
     ) -> Option<Trip> {
+        self.trip_between_lots(city, depart, legs, mode)
+            .map(|(trip, _, _)| trip)
+    }
+
+    /// Like [`Resident::trip_from_route`], with the lots the trip leaves and enters.
+    pub fn trip_between_lots(
+        &self,
+        city: &City,
+        depart: u32,
+        legs: &[Leg],
+        mode: Mode,
+    ) -> Option<(Trip, u32, u32)> {
         let blocks = &self.schedule.blocks;
         let day = depart / TICKS_PER_DAY;
         (0..blocks.len())
             .filter_map(|block| {
-                let from = city.lots[blocks[block].lot as usize].door()?;
-                let to = city.lots[blocks[(block + 1) % blocks.len()].lot as usize].door()?;
+                let (from_lot, to_lot) =
+                    (blocks[block].lot, blocks[(block + 1) % blocks.len()].lot);
+                let from = city.lots[from_lot as usize].door()?;
+                let to = city.lots[to_lot as usize].door()?;
                 let trip = Trip::from_route(city, from, to, depart, legs, mode)?;
                 let due = [day.saturating_sub(1), day]
                     .map(|d| self.schedule.leave_tick(block, d))
                     .into_iter()
                     .filter(|&t| t <= depart)
                     .max();
-                Some((depart - due.unwrap_or(0), trip))
+                Some((depart - due.unwrap_or(0), (trip, from_lot, to_lot)))
             })
             .min_by_key(|(gap, _)| *gap)
-            .map(|(_, trip)| trip)
+            .map(|(_, found)| found)
     }
 
     /// Every trip of day `day`, in order. A trip leaves at its scheduled tick,
