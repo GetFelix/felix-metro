@@ -180,12 +180,23 @@ const settled = (expected) =>
     expected,
     { polling: 100, timeout: MINUTE },
   );
-await settled(last).catch(async () =>
-  fail(`after the drag the city did not rest at tick ${last}: ${JSON.stringify(await read())}`),
-);
+// The release lands on the tick under the pointer, which moves a little as the live tip does, so the tick it rests at
+// is read from the page: the city must be folded to the very tick the bar holds.
+await page
+  .waitForFunction(
+    () => {
+      const s = document.getElementById('scrub');
+      const { past } = window.__metro.shown();
+      return past !== null && Number(s.dataset.at) === past && Math.floor(window.__live.tick) === past;
+    },
+    null,
+    { polling: 100, timeout: MINUTE },
+  )
+  .catch(async () => fail(`after the drag the city did not rest at the handle: ${JSON.stringify(await read())}`));
 const rest = await sample('after the drag', true);
+const dragEnd = rest.shown.past;
 if (rest.mode !== 'past') await fail(`after the drag the bar says "${rest.mode}"`);
-console.log(`drag ended at tick ${last}; ${drawnTicks.size} moments drawn on the way`);
+console.log(`drag ended at tick ${dragEnd}; ${drawnTicks.size} moments drawn on the way`);
 
 const pill = await page.locator('#past').innerText();
 if (!/^(just now|\d+ m ago|\d+ h \d+ m ago)\s*·\s*Back to live$/.test(pill.replace(/\s+/g, ' ').trim()))
@@ -203,7 +214,7 @@ const steps = [
   ['ArrowRight', 60],
   ['Shift+ArrowLeft', -HOUR_TICKS],
 ];
-let expected = last;
+let expected = dragEnd;
 for (const [key, delta] of steps) {
   await page.keyboard.press(key);
   expected += delta;
