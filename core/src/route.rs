@@ -51,7 +51,7 @@ pub enum Mode {
     Drive,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct TripLeg {
     segment: u32,
     /// Thousandths of a tile from the segment's first node.
@@ -84,6 +84,39 @@ pub struct Trip {
 }
 
 impl Trip {
+    /// The trip a `trip` event describes: the route `legs` from door `from` to
+    /// door `to`, leaving at `depart`. The event carries segments and speeds
+    /// but not the ends of the first and last leg, which are the doors, or the
+    /// direction each leg is driven, which follows from the segments joining
+    /// up. `None` when the legs do not form a route between the doors.
+    pub fn from_route(
+        city: &City,
+        from: Door,
+        to: Door,
+        depart: u32,
+        legs: &[Leg],
+        mode: Mode,
+    ) -> Option<Trip> {
+        let spans = rebuild_spans(city, from, to, legs)?;
+        let mut tick = depart;
+        let legs = spans
+            .into_iter()
+            .zip(legs)
+            .map(|((segment, from, to), leg)| {
+                let seg = &city.segments[segment as usize];
+                tick += leg_ticks(seg.speed, u32::from(leg.speed), from.abs_diff(to));
+                TripLeg {
+                    segment,
+                    from,
+                    to,
+                    speed: leg.speed,
+                    end: tick,
+                }
+            })
+            .collect();
+        Some(Trip { mode, depart, legs })
+    }
+
     /// The tick the trip ends.
     pub fn arrive(&self) -> u32 {
         self.legs.last().map_or(self.depart, |l| l.end)
@@ -382,6 +415,86 @@ pub fn route(city: &City, from: Door, to: Door, depart: u32, cong: &Congestion) 
         })
         .collect();
     Some(Trip { mode, depart, legs })
+}
+
+/// The spans [`route`] made `legs` from, undone: `spans` drops a span of no
+/// length at either end, so a leg is the door's segment, the destination's, or
+/// a whole segment between them.
+fn rebuild_spans(city: &City, from: Door, to: Door, legs: &[Leg]) -> Option<Vec<Span>> {
+    let segs: Vec<u32> = legs.iter().map(|l| l.segment).collect();
+    let (&first, &last) = (segs.first()?, segs.last()?);
+    if segs.iter().any(|&s| s as usize >= city.segments.len()) {
+        return None;
+    }
+    let len = |s: u32| u32::from(city.segments[s as usize].length) * 1000;
+    let ends = |s: u32| {
+        let g = &city.segments[s as usize];
+        [g.a, g.b]
+    };
+    // The node a segment is left or entered by at `offset`, if it is at one.
+    let node_at = |d: Door| -> Option<u32> {
+        let g = &city.segments[d.segment as usize];
+        match u32::from(d.offset) * 1000 {
+            0 => Some(g.a),
+            o if o == len(d.segment) => Some(g.b),
+            _ => None,
+        }
+    };
+    let leave = |s: u32, node: u32| {
+        if city.segments[s as usize].a == node {
+            0
+        } else {
+            len(s)
+        }
+    };
+    let shared = |a: u32, b: u32| ends(a).into_iter().find(|n| ends(b).contains(n));
+    let (fo, to_off) = (u32::from(from.offset) * 1000, u32::from(to.offset) * 1000);
+    if from.segment == to.segment {
+        return (segs.len() == 1 && first == from.segment).then(|| vec![(first, fo, to_off)]);
+    }
+    let head = first == from.segment;
+    let tail = last == to.segment && (segs.len() > 1 || !head);
+    let steps = &segs[usize::from(head)..segs.len() - usize::from(tail)];
+    // The node the first span is left by.
+    let start = match steps {
+        [] => match (head, tail) {
+            (true, true) => shared(first, last)?,
+            (true, false) => node_at(to)?,
+            (false, true) => node_at(from)?,
+            (false, false) => return None,
+        },
+        [next, ..] if head => shared(first, *next)?,
+        _ => node_at(from)?,
+    };
+    let mut spans: Vec<Span> = Vec::new();
+    if head {
+        spans.push((first, fo, leave(first, start)));
+    } else if node_at(from)? != start {
+        return None;
+    }
+    let mut at = start;
+    for &s in steps {
+        let [a, b] = ends(s);
+        let (enter, out) = if a == at {
+            (0, len(s))
+        } else if b == at {
+            (len(s), 0)
+        } else {
+            return None;
+        };
+        spans.push((s, enter, out));
+        at = if a == at { b } else { a };
+    }
+    if tail {
+        if !ends(last).contains(&at) {
+            return None;
+        }
+        spans.push((last, leave(last, at), to_off));
+    } else if node_at(to)? != at {
+        return None;
+    }
+    // `spans` kept one span even when every one had no length.
+    (spans.len() == segs.len()).then_some(spans)
 }
 
 fn span_length(spans: &[Span]) -> u32 {

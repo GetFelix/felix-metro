@@ -287,6 +287,36 @@ send landed, that is the answer. The sim does not move on until every district
 has answered, and a slow tick runs late: the next one starts a period after it
 ends, so no tick is skipped and none is made up in a burst.
 
+## The live view
+
+The page follows a city through the gateway on one connection, one subscription
+per district shard in a slot of its own (`d00`, `d01`, ...). To start it does
+what [Seeking](#seeking) does for the newest moment, in an order that cannot
+lose a record:
+
+1. Subscribe to every district from live and hold what arrives. Each answer
+   says the shard's tail.
+2. Read each district's `keyframe` state key. The key is held under the
+   district's entity key, which depends on how the stream hashes keys, and
+   Felix does not report that to a browser, so the page tries both routings
+   and trusts a pointer only when the record it names is that district's
+   keyframe.
+3. Read the keyframe and everything up to the tail, apply it, then the held
+   records. A record at or before a district's newest tick is skipped, so a
+   reconnect can read from the keyframe again.
+
+The page draws one tick behind the newest one every district has, so a car
+always has both ends of its motion. Its clock runs at the sim's speed and is
+steered to keep that one tick of lag: a late record slows it, a burst speeds it
+up, it never passes the newest tick and never runs backwards. The hour of day
+is the tick's, never the wall clock's, so the sun, lamps and windows follow the
+sim. A `trip` event gives a resident's route; the page rebuilds the trip from
+its legs and the resident's schedule (`Resident::trip_from_route`), which
+finds which of the resident's days it belongs to and where the first and last
+leg start and end, and places the car by `position_at`. A trip that matches no
+route is counted, not drawn. Trips already under way when a page opens are
+not drawn until their resident's next trip.
+
 ## Seeking
 
 To draw tick `T`:

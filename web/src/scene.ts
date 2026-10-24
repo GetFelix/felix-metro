@@ -2,14 +2,17 @@ import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import type { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { BULB_OFF, CYAN, FOG, GROUND_NIGHT, HEMI, PALETTE, SIGN_EMISSIVE, SUN_WHITE, TOWER } from './palette';
-import { daylight, lampId, lampSwitch, windowBucket, windowSwitch } from './daylight';
+import { daylight, lampId, lampSwitch, unitHash, windowBucket, windowSwitch } from './daylight';
 import type { Pack } from './assets';
+import type { GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import { cloneModel, facing as facingOf, fitToLot, loadModel } from './models';
 import { createMaterials } from './materials';
 import type { Tier } from './params';
 import { settingsFor } from './quality';
 import { clockwise, facingAngle, lotLook, roadModel, type City } from './layout';
 import { KINDS } from './kinds';
+import { NO_BUILDING, type Building } from './city';
+import type { Fleet } from './traffic';
 
 // Seeded so the frame is identical on every load.
 let seed = 7;
@@ -95,13 +98,25 @@ const CARS = [
   'ambulance',
 ];
 const CAR_SCALE = 0.12;
+// Vehicle kinds 1 to 6 in the log, in order.
+const CAR_KINDS = ['sedan', 'taxi', 'suv', 'van', 'hatchback-sports', 'delivery'];
 const PEOPLE = 'abcdef'.split('').flatMap((c) => [`character-female-${c}`, `character-male-${c}`]);
 
 // The frame's map is 17 tiles across; a bigger city widens the shadow, fog and ground to match.
 const FRAME_TILES = 17;
 
-/** Draws the style frame's hand-made city, or the generated `city` when there is one. */
-export async function createCity(renderer: THREE.WebGLRenderer, tier: Tier, city: City | null = null) {
+/**
+ * Draws the style frame's hand-made city, or the generated `city` when there is one, with the buildings in `initial`
+ * instead of the generated ones. `live` loads the models for the voyages of a live city.
+ */
+export async function createCity(
+  renderer: THREE.WebGLRenderer,
+  tier: Tier,
+  city: City | null = null,
+  live = false,
+  initial: ReadonlyMap<number, Building> = new Map(),
+) {
+  let setLotDrawn: (id: number, building: Building | null) => Promise<void> = async () => {};
   const span = city ? Math.max(1, city.tiles / FRAME_TILES) : 1;
   const half = city ? (city.tiles - 1) / 2 : 0;
   const scene = new THREE.Scene();
@@ -352,42 +367,74 @@ export async function createCity(renderer: THREE.WebGLRenderer, tier: Tier, city
       }
     }
 
-    for (const lot of c.lots) {
-      const { pack, model } = KINDS[lot.kind]!;
-      const look = lotLook(pack, model);
+    // What stands on each lot, so a building that changes can take its old one down.
+    const lotObjects = new Map<number, Promise<THREE.Object3D>[]>();
+    function drawLot(lot: City['lots'][number], kind: number, facingTurns: number, rnd: () => number, first: boolean) {
+      const mine: Promise<THREE.Object3D>[] = [];
+      const put = (...args: Parameters<typeof place>) => {
+        const job = place(...args);
+        mine.push(job);
+        jobs.push(job);
+      };
+      const choose = <T>(a: readonly T[]): T => a[Math.floor(rnd() * a.length)]!;
+      lotObjects.set(lot.id, mine);
       const x = wx(lot.x),
         z = wx(lot.z);
-      const rotY = facingAngle(lot.facing);
-      const lit = rand() < 0.75 ? pick([0.6, 1, 1.4]) : 0;
       const paved = lot.zone === 'downtown' || lot.zone === 'commercial' || lot.zone === 'industrial';
-      if (paved) jobs.push(place('roads', 'tile-low', x, z));
-      if (lot.id === c.tower) continue; // drawn below with its crown
+      if (kind === NO_BUILDING) {
+        if (paved) put('roads', 'tile-low', x, z);
+        return;
+      }
+      const { pack, model } = KINDS[kind]!;
+      const look = lotLook(pack, model);
+      const rotY = facingAngle(facingTurns);
+      const lit = rnd() < 0.75 ? choose([0.6, 1, 1.4]) : 0;
+      if (paved) put('roads', 'tile-low', x, z);
+      if (first && lot.id === c.tower) return; // drawn below with its crown
       if (look === 'skyscraper') {
-        jobs.push(place(pack, model, x, z, rotY, 0.7, lit ? 0.3 : 0, Math.floor(rand() * 6)));
+        put(pack, model, x, z, rotY, 0.7, lit ? 0.3 : 0, Math.floor(rnd() * 6));
       } else if (look === 'commercial') {
-        jobs.push(place(pack, model, x, z, rotY, 1, lit, Math.floor(rand() * 6)));
+        put(pack, model, x, z, rotY, 1, lit, Math.floor(rnd() * 6));
       } else if (look === 'house') {
-        jobs.push(place(pack, model, x, z, rotY, 0.62, lit ? 1 : 0, Math.floor(rand() * 5)));
-        if (rand() < 0.6) {
-          const tree = pick(['tree-small', 'tree-large']);
-          jobs.push(place('suburban', tree, x + (rand() - 0.5) * 0.7, z + (rand() - 0.5) * 0.7, rand() * 6, 0.9));
+        put(pack, model, x, z, rotY, 0.62, lit ? 1 : 0, Math.floor(rnd() * 5));
+        if (rnd() < 0.6) {
+          const tree = choose(['tree-small', 'tree-large']);
+          put('suburban', tree, x + (rnd() - 0.5) * 0.7, z + (rnd() - 0.5) * 0.7, rnd() * 6, 0.9);
         }
       } else if (look === 'factory') {
-        jobs.push(place(pack, model, x, z, rotY, 0.46, lit ? 1 : 0, 2 + Math.floor(rand() * 3)));
+        put(pack, model, x, z, rotY, 0.46, lit ? 1 : 0, 2 + Math.floor(rnd() * 3));
       } else if (look === 'prop') {
-        jobs.push(place(pack, model, x, z, rand() * 6, 0.55));
+        put(pack, model, x, z, rnd() * 6, 0.55);
       } else if (look === 'tree') {
         // Parks and filler: two or three trees to a tile read as a copse.
         const n = lot.zone === 'park' ? 3 : 1;
         for (let i = 0; i < n; i++) {
           const spread = n > 1 ? 0.8 : 0.5;
-          const at = [x + (rand() - 0.5) * spread, z + (rand() - 0.5) * spread] as const;
-          jobs.push(place(pack, model, at[0], at[1], rand() * 6, 1 + rand() * 0.4));
+          const at = [x + (rnd() - 0.5) * spread, z + (rnd() - 0.5) * spread] as const;
+          put(pack, model, at[0], at[1], rnd() * 6, 1 + rnd() * 0.4);
         }
       } else {
-        jobs.push(place(pack, model, x, z, 0, 1));
+        put(pack, model, x, z, 0, 1);
       }
     }
+    for (const lot of c.lots) {
+      const b = initial.get(lot.id);
+      drawLot(lot, b?.kind ?? lot.kind, b?.rotation ?? lot.facing, rand, true);
+    }
+    // A lot's building changed: take down what stood and draw the new one, or the generated one for `null`. The look
+    // is picked from the lot and the kind, so every browser draws the same building.
+    setLotDrawn = async (id, building) => {
+      const lot = c.lots[id];
+      if (!lot || id === c.tower) return;
+      const old = lotObjects.get(id) ?? [];
+      lotObjects.delete(id);
+      for (const job of old) scene.remove(await job);
+      const kind = building?.kind ?? lot.kind;
+      let n = 0;
+      const rnd = () => unitHash(id * 64 + kind, n++);
+      drawLot(lot, kind, building?.rotation ?? lot.facing, rnd, false);
+      await Promise.all(lotObjects.get(id) ?? []);
+    };
 
     // Trees past the map, except along the sea.
     for (let i = 0; i < 140; i++) {
@@ -453,9 +500,9 @@ export async function createCity(renderer: THREE.WebGLRenderer, tier: Tier, city
     opacity: 0,
   });
 
-  async function addCar(axis: 'x' | 'z', line: number, dir: number, offset: number, speed: number) {
-    const name = pick(CARS);
-    const o = cloneModel(await loadModel('cars', name));
+  // A car with its lights, as a child of the scene, for the loaded model.
+  function buildCar(gltf: GLTF): THREE.Object3D {
+    const o = cloneModel(gltf);
     meshes(o, (n) => {
       n.material = materials.materialFor('cars', n.material as THREE.MeshStandardMaterial, 0);
       n.castShadow = true;
@@ -478,6 +525,11 @@ export async function createCity(renderer: THREE.WebGLRenderer, tier: Tier, city
     o.add(beam);
     o.children.filter((c) => (c as THREE.Sprite).isSprite || c === beam).forEach((c) => glows.push(c));
     scene.add(o);
+    return o;
+  }
+  async function addCar(axis: 'x' | 'z', line: number, dir: number, offset: number, speed: number) {
+    const name = pick(CARS);
+    const o = buildCar(await loadModel('cars', name));
     cars.push({ o, axis, line, dir, s: offset, speed });
   }
   // Right-hand traffic: lanes 0.17 from the centre line.
@@ -492,12 +544,7 @@ export async function createCity(renderer: THREE.WebGLRenderer, tier: Tier, city
 
   // ---------- pedestrians ----------
   const people: Walker[] = [];
-  async function addPerson(axis: 'x' | 'z', line: number, dir: number, offset: number) {
-    // Drawn before the load so the pose and speed don't depend on which model arrives first.
-    const name = pick(PEOPLE);
-    const phase = rand() * 2;
-    const speed = 0.22 + rand() * 0.08;
-    const gltf = await loadModel('mini-characters', name);
+  function buildPerson(gltf: GLTF): { o: THREE.Object3D; mixer: THREE.AnimationMixer } {
     const o = cloneModel(gltf);
     meshes(o, (n) => {
       n.material = materials.materialFor('mini-characters', n.material as THREE.MeshStandardMaterial, 0);
@@ -505,10 +552,17 @@ export async function createCity(renderer: THREE.WebGLRenderer, tier: Tier, city
     });
     o.scale.setScalar(0.17);
     const mixer = new THREE.AnimationMixer(o);
-    const walk = gltf.animations.find((a) => a.name === 'walk')!;
-    mixer.clipAction(walk).play();
-    mixer.setTime(phase);
+    mixer.clipAction(gltf.animations.find((a) => a.name === 'walk')!).play();
     scene.add(o);
+    return { o, mixer };
+  }
+  async function addPerson(axis: 'x' | 'z', line: number, dir: number, offset: number) {
+    // Drawn before the load so the pose and speed don't depend on which model arrives first.
+    const name = pick(PEOPLE);
+    const phase = rand() * 2;
+    const speed = 0.22 + rand() * 0.08;
+    const { o, mixer } = buildPerson(await loadModel('mini-characters', name));
+    mixer.setTime(phase);
     people.push({ o, mixer, axis, line, dir, s: offset, speed });
   }
   for (const r of city ? [] : ROADS.slice(1, 4)) {
@@ -641,5 +695,26 @@ export async function createCity(renderer: THREE.WebGLRenderer, tier: Tier, city
     });
   }
 
-  return { scene, cars, people, glows, setTime, setShadows };
+  // Models for the voyages a live city draws: every kind loaded once, a copy per figure.
+  const fleet: Fleet | null = live
+    ? await (async () => {
+        const carModels = await Promise.all(CAR_KINDS.map((name) => loadModel('cars', name)));
+        const personModels = await Promise.all(PEOPLE.map((name) => loadModel('mini-characters', name)));
+        return {
+          car: (kind) => ({ o: buildCar(carModels[(kind - 1) % carModels.length]!) }),
+          person: (resident) => buildPerson(personModels[resident % personModels.length]!),
+        };
+      })()
+    : null;
+
+  return {
+    scene,
+    cars,
+    people,
+    glows,
+    setTime,
+    setShadows,
+    fleet,
+    setLot: (id: number, b: Building | null) => setLotDrawn(id, b),
+  };
 }

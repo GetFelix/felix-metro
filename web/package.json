@@ -13,7 +13,8 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "frame": "node scripts/compare-frame.mjs",
-    "models": "node scripts/check-models.mjs"
+    "models": "node scripts/check-models.mjs",
+    "live": "node scripts/check-live.mjs"
   },
   "dependencies": {
     "three": "0.170.0"

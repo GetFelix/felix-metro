@@ -58,7 +58,7 @@ Serve the repository root (`python3 -m http.server`) and open
 | `?hud` | Frame-time overlay under the brand chip |
 | `?ui=0` | Hide the overlay |
 
-The app (`web/`) draws the city generated from the seed in the URL hash (`/#harbor`), 2 × 2 districts by default (`?districts=3`). `?layout=frame` draws the style frame's hand-made map instead, which is what CI compares against the frame.
+The app (`web/`) draws the city generated from the seed in the URL hash (`/#harbor`), 2 × 2 districts by default (`?districts=3`). `?layout=frame` draws the style frame's hand-made map instead, which is what CI compares against the frame. `?live=0` skips the gateway and draws the city with no traffic, and `?gateway=ws://host:8787/ws` names a gateway other than the page's own.
 
 The screenshots above are `?t=12&still`, `?t=17.8&still` and `?t=21&still` at
 1600 × 900.

@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.7
-# The web app, built and served by nginx on port 80.
+# The web app, built and served by nginx on port 80, with the gateway's /oidc and /ws behind it.
 # Build from the repository root: docker build -f dev/web.Dockerfile .
 
 # core/ in WebAssembly, with the records from a native run the web tests read.
@@ -29,4 +29,5 @@ COPY --from=core /out src/core
 RUN npm run build
 
 FROM docker.io/library/nginx:1.27-alpine
+COPY dev/nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=web /src/web/dist /usr/share/nginx/html

@@ -55,13 +55,17 @@ there. [docs/design.md](docs/design.md) has the details.
 | M | Milestone | State |
 |---|---|---|
 | 0 | The look, locked | Planned |
-| 1 | A live city | Planned |
+| 1 | A live city | In progress |
 | 2 | Time travel | Planned |
 | 3 | Follow a life | Planned |
 | 4 | Build | Planned |
 | 5 | Branching timelines | Planned |
 | 6 | Scale and failover | Planned |
 | 7 | Self-hosting | Planned |
+
+What runs today: the sim, the dev stack and a browser page that shows a city live, with
+cars and walkers moving in time with the sim and the sun following the tick. Scrubbing
+back in time, following a resident and building are not built yet.
 
 ## Run it locally
 
@@ -81,6 +85,13 @@ district of both cities arrive through the gateway, and prints the web app's add
 <http://127.0.0.1:8088>. The stack keeps no state between runs: `dev/up.sh` starts it
 over each time. Stop it with `docker compose -f dev/compose.yml down --volumes`
 (`podman compose` the same).
+
+Open <http://127.0.0.1:8088/#harbor>: the page signs in as `viewer` at the stand-in
+provider, follows the city through the gateway and draws its residents driving and
+walking in time with the sim, with the sun following the tick. A city starts at
+midnight, so for traffic run `dev/speed.sh harbor 16` and give it a few minutes
+(the morning commute is around 06:00). Without a gateway the page draws the
+city alone.
 
 To watch ticks arrive the way a browser gets them, through the gateway (needs Node 22):
 

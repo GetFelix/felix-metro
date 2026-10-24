@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use felix_metro_core::record::{Doing, Event, Header, TickRecord};
-use felix_metro_core::{City, TICKS_PER_DAY};
+use felix_metro_core::{City, Mode, Places, Resident, TICKS_PER_DAY};
 
 use super::*;
 
@@ -79,6 +79,49 @@ fn a_day_has_trips_and_each_one_arrives() {
     assert!(trips > world.residents(), "{trips} trips");
     // Whoever is still out at midnight is on the way home or to work.
     assert_eq!(trips - arrivals, leaving.len());
+}
+
+#[test]
+fn a_reader_of_the_log_places_every_trip_and_ends_it_when_the_sim_does() {
+    // The browser has only the `trip` event: it must rebuild the trip from it, congestion and all.
+    for side in [2, 3] {
+        let (world, ticks) = day("harbor", side);
+        let city = &world.city;
+        let places = Places::new(city);
+        let mut ends: HashMap<u32, u32> = HashMap::new();
+        let (mut placed, mut seen) = (0, 0);
+        for (tick, step) in ticks.iter().enumerate() {
+            for event in step.iter().flat_map(|d| &d.events) {
+                match event {
+                    Event::Trip {
+                        resident,
+                        vehicle,
+                        depart,
+                        route,
+                    } => {
+                        let mode = if *vehicle == 0 {
+                            Mode::Walk
+                        } else {
+                            Mode::Drive
+                        };
+                        let trip = Resident::new(city, &places, *resident)
+                            .unwrap()
+                            .trip_from_route(city, *depart, route, mode)
+                            .unwrap_or_else(|| panic!("resident {resident} at {depart}"));
+                        ends.insert(*resident, trip.arrive());
+                        placed += 1;
+                    }
+                    Event::Arrived { resident, .. } => {
+                        assert_eq!(ends[resident] as usize, tick, "resident {resident}");
+                        seen += 1;
+                    }
+                    _ => {}
+                }
+            }
+        }
+        assert!(placed > world.residents());
+        assert!(seen > 0);
+    }
 }
 
 #[test]
@@ -205,4 +248,54 @@ fn a_vehicle_is_in_the_district_the_events_say_even_on_its_last_step() {
             assert_eq!(vehicles, drawn, "tick {tick}");
         }
     }
+}
+
+#[test]
+fn keyframes_list_the_lots_that_differ_from_the_generated_city() {
+    use felix_metro_core::record::{BuildingDiff, NO_BUILDING};
+    let mut world = World::new(City::generate("harbor", 2).unwrap());
+    let (a, b, same) = (3usize, 40usize, 7usize);
+    let (la, lb, ls) = (
+        world.city.lots[a].clone(),
+        world.city.lots[b].clone(),
+        world.city.lots[same].clone(),
+    );
+    world.set_building(BuildingDiff {
+        lot: a as u32,
+        kind: NO_BUILDING,
+        rotation: 0,
+    });
+    world.set_building(BuildingDiff {
+        lot: b as u32,
+        kind: u16::from(lb.kind.0),
+        rotation: (lb.facing + 1) % 4,
+    });
+    // Set back to what generation made: not a difference.
+    world.set_building(BuildingDiff {
+        lot: same as u32,
+        kind: u16::from(ls.kind.0),
+        rotation: ls.facing,
+    });
+    let frames = world.keyframes(0);
+    let listed: Vec<_> = frames
+        .iter()
+        .flat_map(|f| f.buildings.iter().map(|d| d.lot))
+        .collect();
+    assert_eq!(listed, {
+        let mut want = vec![a as u32, b as u32];
+        want.sort_by_key(|l| (world.city.lots[*l as usize].district, *l));
+        want
+    });
+    assert!(
+        frames[usize::from(la.district)]
+            .buildings
+            .iter()
+            .any(|d| d.lot == a as u32)
+    );
+    assert!(
+        frames[usize::from(lb.district)]
+            .buildings
+            .iter()
+            .any(|d| d.lot == b as u32)
+    );
 }

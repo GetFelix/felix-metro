@@ -1,6 +1,13 @@
 import { readFileSync } from 'node:fs';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { decodeRecord, hash as cityHash, initSync, residentDayHash } from './core/felix_metro_core.js';
+import {
+  Metro,
+  decodeRecord,
+  districtKey,
+  hash as cityHash,
+  initSync,
+  residentDayHash,
+} from './core/felix_metro_core.js';
 
 const built = (name: string) => readFileSync(new URL(`./core/${name}`, import.meta.url));
 
@@ -8,6 +15,16 @@ const built = (name: string) => readFileSync(new URL(`./core/${name}`, import.me
 const fixture = JSON.parse(built('fixture.json').toString()) as {
   cities: { seed: string; districts: number; hash: string }[];
   days: { seed: string; districts: number; index: number; hash: string }[];
+  trips: {
+    seed: string;
+    districts: number;
+    resident: number;
+    vehicle: number;
+    depart: number;
+    route: [number, number][];
+    arrive: number;
+    at: [number, number, number][];
+  }[];
   records: { name: string; record: string; json: unknown; hash: string }[];
 };
 const bytes = (hex: string) => Uint8Array.from(hex.match(/../g)!, (byte) => parseInt(byte, 16));
@@ -42,6 +59,45 @@ describe('cities and residents in WebAssembly', () => {
 
   it('refuses a resident the city does not have', () => {
     expect(() => residentDayHash('harbor', 2, 4_000_000_000)).toThrow('no such resident');
+  });
+});
+
+describe('trips in WebAssembly', () => {
+  const place = (metro: Metro, t: (typeof fixture.trips)[number], route = t.route) =>
+    metro.trip(t.resident, t.vehicle, t.depart, Uint32Array.from(route.flat()));
+
+  it('places every native trip where the native build does, from its event alone', () => {
+    expect(fixture.trips.length).toBeGreaterThan(0);
+    const out = new Uint32Array(2);
+    for (const t of fixture.trips) {
+      const journey = place(new Metro(t.seed, t.districts), t)!;
+      expect(journey, `resident ${t.resident} at ${t.depart}`).toBeDefined();
+      expect(journey.arrive()).toBe(t.arrive);
+      for (const [tick, x, z] of t.at) {
+        journey.positionAt(tick, out);
+        expect([tick, out[0], out[1]]).toEqual([tick, x, z]);
+      }
+      journey.free();
+    }
+  });
+
+  it('gives no trip for legs the resident cannot make', () => {
+    const t = fixture.trips[0]!;
+    const metro = new Metro(t.seed, t.districts);
+    expect(place(metro, t, [])).toBeUndefined();
+    expect(place(metro, t, [[4_000_000_000, 100]])).toBeUndefined();
+    expect(metro.trip(4_000_000_000, 1, t.depart, Uint32Array.from(t.route.flat()))).toBeUndefined();
+  });
+});
+
+describe('district keys in WebAssembly', () => {
+  it('names a key for each district under either routing', () => {
+    for (const routing of ['modulo', 'jump_hash']) {
+      for (let district = 0; district < 4; district++) {
+        expect(districtKey(district, 4, routing)).toMatch(new RegExp(`^d0${district}`));
+      }
+    }
+    expect(() => districtKey(4, 4, 'modulo')).toThrow();
   });
 });
 

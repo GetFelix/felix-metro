@@ -5,7 +5,7 @@
 use std::fmt::Write;
 
 use felix_metro_core::{
-    City, day_hash,
+    City, Congestion, Mode, Places, Resident, day_hash,
     record::{
         BuildingDiff, Command, CommandRecord, Counts, Doing, Event, Header, Keyframe, Leg,
         RegistryRecord, ResidentState, RoadDiff, TickRecord, Vehicle, decode_json,
@@ -208,6 +208,43 @@ fn records() -> Vec<(&'static str, Vec<u8>)> {
     out
 }
 
+/// A few residents' first days as a `trip` event describes them, with where each trip is every few ticks.
+fn trips() -> Vec<String> {
+    let mut out = Vec::new();
+    for (seed, d, index) in [("harbor", 2, 0), ("harbor", 2, 41), ("meadow", 2, 7)] {
+        let city = City::generate(seed, d).unwrap();
+        let places = Places::new(&city);
+        let resident = Resident::new(&city, &places, index).unwrap();
+        for trip in resident.day_trips(&city, 0, &Congestion::FREE, 0).unwrap() {
+            let vehicle = if trip.mode == Mode::Walk {
+                0
+            } else {
+                resident.vehicle
+            };
+            let route: Vec<String> = trip
+                .legs()
+                .iter()
+                .map(|l| format!("[{},{}]", l.segment, l.speed))
+                .collect();
+            let at: Vec<String> = (trip.depart..=trip.arrive())
+                .step_by(5)
+                .map(|tick| {
+                    let p = trip.position_at(&city, tick);
+                    format!("[{tick},{},{}]", p.x, p.z)
+                })
+                .collect();
+            out.push(format!(
+                "    {{\"seed\": \"{seed}\", \"districts\": {d}, \"resident\": {index}, \"vehicle\": {vehicle}, \"depart\": {}, \"route\": [{}], \"arrive\": {}, \"at\": [{}]}}",
+                trip.depart,
+                route.join(","),
+                trip.arrive(),
+                at.join(",")
+            ));
+        }
+    }
+    out
+}
+
 fn main() {
     let cases = [("harbor", 2), ("meadow", 2), ("harbor", 4)];
     let cities: Vec<String> = cases
@@ -244,9 +281,10 @@ fn main() {
         })
         .collect();
     println!(
-        "{{\n  \"cities\": [\n{}\n  ],\n  \"days\": [\n{}\n  ],\n  \"records\": [\n{}\n  ]\n}}",
+        "{{\n  \"cities\": [\n{}\n  ],\n  \"days\": [\n{}\n  ],\n  \"trips\": [\n{}\n  ],\n  \"records\": [\n{}\n  ]\n}}",
         cities.join(",\n"),
         days.join(",\n"),
+        trips().join(",\n"),
         recs.join(",\n")
     );
 }
