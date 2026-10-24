@@ -12,6 +12,12 @@ const STREAM = 'events';
 /** The part of a gateway session a seek needs; the history connection is one. */
 export type History = Pick<Gateway, 'read' | 'stateGet'>;
 
+/** A history session the seeker can also close. */
+export type Session = History & { close?(): void };
+
+/** Opens the sessions a seeker reads over; may be called again after they were closed. */
+export type OpenSessions = () => Promise<readonly Session[]>;
+
 /** Records kept per district, by offset: two city hours, the neighbourhood a scrub stays in. */
 const RECORDS_PER_DISTRICT = 2 * TICKS_PER_HOUR;
 /** Keyframes kept per district, by hour: four city days of 24 hours. */
@@ -20,6 +26,10 @@ const KEYFRAMES_PER_DISTRICT = 4 * 24;
 const MAX_PROBES = 48;
 /** Reads of one range sent at once, once the size of a page is known. */
 const PARALLEL_PAGES = 16;
+/** Sessions are closed after this long without a seek, so an idle page holds none of the gateway's per-person slots. */
+const IDLE_MS = 30_000;
+/** A read that finds its session closed is tried again on another this many times. */
+const CLOSED_RETRIES = 2;
 /** Rounds of seeking while retention moves under it, or while districts settle on one tick. */
 const MAX_ROUNDS = 8;
 
@@ -99,23 +109,45 @@ export class Seeker {
   private readonly keyframes: Map<number, Known>[];
   /** The oldest offset retention has left, by district; 0 until a read says otherwise. */
   private readonly oldest: number[];
-  private readonly sessions: readonly History[];
+  private sessions: Session[];
+  private readonly open: OpenSessions | null;
+  private opening: Promise<void> | null = null;
+  private shut = false;
+  private busy = 0;
+  private idle: ReturnType<typeof setTimeout> | null = null;
   private turn = 0;
   private readonly flights = new Map<string, Flight>();
   private current: AbortController | null = null;
 
   constructor(
-    history: History | readonly History[],
+    history: Session | readonly Session[] | OpenSessions,
     private readonly districts: number,
   ) {
-    this.sessions = Array.isArray(history) ? history : [history as History];
+    this.open = typeof history === 'function' ? history : null;
+    this.sessions = typeof history === 'function' ? [] : Array.isArray(history) ? [...history] : [history as Session];
     this.records = Array.from({ length: districts }, () => new Map());
     this.keyframes = Array.from({ length: districts }, () => new Map());
     this.oldest = Array<number>(districts).fill(0);
   }
 
+  /** Open the sessions now, ahead of the first seek. */
+  async warm(): Promise<void> {
+    await this.using(() => Promise.resolve());
+  }
+
+  /** Close every session and refuse further seeks; a seek in progress is aborted. */
+  close(): void {
+    this.shut = true;
+    this.current?.abort(new DOMException('the seeker was closed', 'AbortError'));
+    this.release();
+  }
+
   /** The oldest tick every district can start from and the newest tick every district has. */
   async retained(options: SeekOptions = {}): Promise<{ oldest: number; newest: number }> {
+    return this.using(() => this.retainedNow(options));
+  }
+
+  private async retainedNow(options: SeekOptions): Promise<{ oldest: number; newest: number }> {
     const signal = options.signal ?? new AbortController().signal;
     const ends = await Promise.all(
       Array.from({ length: this.districts }, async (_, d) => {
@@ -140,49 +172,100 @@ export class Seeker {
     const mine = new AbortController();
     this.current?.abort(new DOMException('a newer seek replaced this one', 'AbortError'));
     this.current = mine;
-    const outer = options.signal;
-    if (outer?.aborted) mine.abort(outer.reason);
-    else outer?.addEventListener('abort', () => mine.abort(outer.reason), { once: true });
+    const unlink = link(options.signal, mine);
     try {
-      return await this.run(tick, mine.signal);
+      return await this.using(() => this.run(tick, mine.signal));
     } finally {
+      unlink();
       if (this.current === mine) this.current = null;
     }
+  }
+
+  /** Runs `work` with sessions open, and starts the idle timer once nothing is using them. */
+  private async using<T>(work: () => Promise<T>): Promise<T> {
+    this.busy++;
+    if (this.idle) clearTimeout(this.idle);
+    this.idle = null;
+    try {
+      await this.ensure();
+      return await work();
+    } finally {
+      if (--this.busy === 0 && !this.shut) this.idle = setTimeout(() => this.release(), IDLE_MS);
+    }
+  }
+
+  /** Close the sessions; the next seek opens them again. Reads in flight fail as closed. */
+  private release(): void {
+    if (this.idle) clearTimeout(this.idle);
+    this.idle = null;
+    if (!this.open && !this.shut) return;
+    const closing = this.sessions;
+    this.sessions = [];
+    for (const s of closing) s.close?.();
+  }
+
+  private async ensure(): Promise<void> {
+    if (this.shut) throw new GatewayError('closed', 'the seeker was closed');
+    if (this.sessions.length > 0) return;
+    if (!this.open) throw new GatewayError('closed', 'every history session has closed');
+    this.opening ??= this.open().then(
+      (opened) => {
+        this.opening = null;
+        // Closed while opening: the sessions are not wanted.
+        if (this.shut) opened.forEach((s) => s.close?.());
+        else this.sessions = [...opened];
+      },
+      (err) => {
+        this.opening = null;
+        throw err;
+      },
+    );
+    await this.opening;
+    if (this.sessions.length === 0) throw new GatewayError('closed', 'no history session could be opened');
+  }
+
+  /** A session that answered `closed` leaves the rotation. */
+  private drop(session: Session): void {
+    this.sessions = this.sessions.filter((s) => s !== session);
   }
 
   private async run(requested: number, signal: AbortSignal): Promise<SeekResult> {
     let target = requested;
     for (let round = 0; round < MAX_ROUNDS; round++) {
       signal.throwIfAborted();
+      // A district that fails stops the reads the others still have waiting.
+      const attempt = new AbortController();
+      const unlink = link(signal, attempt);
       try {
-        const found = await Promise.all(Array.from({ length: this.districts }, (_, d) => this.find(d, target, signal)));
-        if (found.some((f) => f.rec === null)) {
-          const firsts = await Promise.all(
-            Array.from({ length: this.districts }, (_, d) => this.firstSeekable(d, signal)),
-          );
-          throw new SeekError(
-            'unretained',
-            `tick ${requested} is no longer kept`,
-            Math.max(...firsts.map((t) => t ?? 0)),
-          );
-        }
-        const ticks = found.map((f) => f.rec!.record.tick);
-        const lowest = Math.min(...ticks);
-        if (found.some((f) => f.future)) {
-          throw new SeekError('future', `tick ${requested} has not happened yet`, lowest);
-        }
-        // A district that skipped a tick the others have settles every district on the earlier one all of them hold.
-        if (ticks.some((t) => t !== lowest)) {
-          target = lowest;
-          continue;
-        }
-        const districts = await Promise.all(found.map((f, d) => this.build(d, f.rec!, signal)));
-        return { tick: lowest, requested, exact: lowest === requested, districts };
+        const done = await this.round(requested, target, attempt.signal);
+        if (typeof done !== 'number') return done;
+        target = done;
       } catch (err) {
+        attempt.abort(err);
         if (!(err instanceof Restart)) throw err;
+      } finally {
+        unlink();
       }
     }
     throw new SeekError('broken', `tick ${requested} was not settled in ${MAX_ROUNDS} rounds`);
+  }
+
+  /** One pass over every district: the result, or the earlier tick every district holds when they differ. */
+  private async round(requested: number, target: number, signal: AbortSignal): Promise<SeekResult | number> {
+    const found = await Promise.all(Array.from({ length: this.districts }, (_, d) => this.find(d, target, signal)));
+    if (found.some((f) => f.rec === null)) {
+      const firsts = await Promise.all(Array.from({ length: this.districts }, (_, d) => this.firstSeekable(d, signal)));
+      throw new SeekError('unretained', `tick ${requested} is no longer kept`, Math.max(...firsts.map((t) => t ?? 0)));
+    }
+    const ticks = found.map((f) => f.rec!.record.tick);
+    const lowest = Math.min(...ticks);
+    if (found.some((f) => f.future)) {
+      throw new SeekError('future', `tick ${requested} has not happened yet`, lowest);
+    }
+    // A district that skipped a tick the others have settles every district on the earlier one all of them hold.
+    if (ticks.some((t) => t !== lowest)) return lowest;
+    const districts = await Promise.all(found.map((f, d) => this.build(d, f.rec!, signal)));
+    return { tick: lowest, requested, exact: lowest === requested, districts };
   }
 
   /** The record a district shows for `tick`: the greatest not after it in the newest epoch that reaches it. */
@@ -261,20 +344,43 @@ export class Seeker {
 
   /** Reads take the sessions in turn: each allows four in flight, so a district's pages use all of them. */
   private session(): History {
-    return this.sessions[this.turn++ % this.sessions.length]!;
+    const session = this.sessions[this.turn++ % this.sessions.length];
+    if (!session) throw new GatewayError('closed', 'no history session is open');
+    return session;
   }
 
   /** The session as the pointer lookup reads it: its reads share and stop with the seek, and a trimmed start says so. */
   private cancellable(signal: AbortSignal): History {
     return {
-      stateGet: (stream, key, entity) =>
-        new Promise((resolve, reject) => {
+      stateGet: async (stream, key, entity) => {
+        for (let attempt = 0; ; attempt++) {
           signal.throwIfAborted();
-          signal.addEventListener('abort', () => reject(signal.reason), { once: true });
-          this.session().stateGet(stream, key, entity).then(resolve, reject);
-        }),
+          const session = this.session();
+          let cleanup = () => {};
+          const off = new Promise<never>((_, reject) => {
+            const stop = () => reject(signal.reason);
+            signal.addEventListener('abort', stop, { once: true });
+            cleanup = () => signal.removeEventListener('abort', stop);
+          });
+          try {
+            return await Promise.race([session.stateGet(stream, key, entity), off]);
+          } catch (err) {
+            if (!this.closedSession(err, session) || attempt >= CLOSED_RETRIES || signal.aborted) throw err;
+            await this.ensure();
+          } finally {
+            cleanup();
+          }
+        }
+      },
       read: async (_stream, shard, from, end) => this.read(shard, from, end ?? from + 1, false, signal),
     };
+  }
+
+  /** Whether `err` is `session` having closed; it is then taken out of the rotation. */
+  private closedSession(err: unknown, session: Session): boolean {
+    if (!(err instanceof GatewayError) || err.code !== 'closed') return false;
+    this.drop(session);
+    return true;
   }
 
   /** Retention moved up to `oldest`: forget what is below it. */
@@ -326,12 +432,17 @@ export class Seeker {
    * one is building on its start, so retention passing it restarts the round.
    */
   private async read(d: number, from: number, end: number, strict: boolean, signal: AbortSignal): Promise<Page> {
-    for (;;) {
+    for (let closed = 0; ; ) {
       const start = Math.max(from, this.oldest[d]!);
       if (strict && start > from) throw new Restart();
       try {
         return await this.flight(d, start, Math.max(end, start + 1), signal);
       } catch (err) {
+        // The session went away under the read: another one, or a reopened one, answers it.
+        if (err instanceof GatewayError && err.code === 'closed' && !signal.aborted && closed++ < CLOSED_RETRIES) {
+          await this.ensure();
+          continue;
+        }
         // A probe beyond the newest record finds nothing; the state read can be a little ahead of what a read sees.
         if (!strict && pastEnd(err)) return { records: [], nextOffset: start };
         if (!(err instanceof GatewayError) || err.code !== 'trimmed' || err.oldest === undefined) throw err;
@@ -349,7 +460,9 @@ export class Seeker {
     if (!flight) {
       const cancel = new AbortController();
       const sent = performance.now();
-      const promise = this.session().read(STREAM, d, from, end, cancel.signal);
+      const session = this.session();
+      const promise = session.read(STREAM, d, from, end, cancel.signal);
+      promise.catch((err) => void this.closedSession(err, session));
       flight = { promise, users: 0, cancel };
       this.stats.reads++;
       this.flights.set(key, flight);
@@ -518,4 +631,16 @@ export function fold(state: CityState, seek: SeekResult): void {
   state.ticks.forEach((tick, d) => {
     if (tick !== seek.tick) throw new SeekError('broken', `district ${d} folded to tick ${tick}, not ${seek.tick}`);
   });
+}
+
+/** Aborts `child` when `parent` does; the returned function ends the link. */
+function link(parent: AbortSignal | undefined, child: AbortController): () => void {
+  if (!parent) return () => {};
+  if (parent.aborted) {
+    child.abort(parent.reason);
+    return () => {};
+  }
+  const stop = () => child.abort(parent.reason);
+  parent.addEventListener('abort', stop, { once: true });
+  return () => parent.removeEventListener('abort', stop);
 }

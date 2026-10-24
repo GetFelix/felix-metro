@@ -137,24 +137,28 @@ async function follow(
 }
 
 /**
- * Sign in on a connection of its own for reading history, so a seek never waits behind the live subscriptions. `null`
- * when nothing here answers like a gateway.
+ * A history reader on connections of its own, so a seek never waits behind the live subscriptions. The sessions are
+ * opened by the first seek and closed after a while idle, so a page not seeking holds none of the gateway's
+ * per-person sessions. `null` when nothing here answers like a gateway.
  */
 async function openHistory(name: string, districts: number, gateway: string | null): Promise<Seeker | null> {
   const url = gateway ?? `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`;
   const oidc = await fetchOidc(gateway ? url.replace(/^ws/, 'http').replace(/\/ws$/, '/') : location.origin + '/');
   if (!oidc) return null;
-  // A session lets four reads wait at once, so a seek's reads spread over several. The gateway caps sessions per
-  // person, so the ones it refuses are left out and the seek uses the rest.
-  const token = await signIn(oidc);
-  const tried = await Promise.allSettled(
-    Array.from({ length: HISTORY_SESSIONS }, () => Gateway.connect(url, name, token)),
-  );
-  const sessions = tried.flatMap((r) => (r.status === 'fulfilled' ? [r.value] : []));
-  if (sessions.length === 0) throw new Error('the gateway would not open a session to read history');
+  const seeker = new Seeker(async () => {
+    const token = await signIn(oidc);
+    // The ones the gateway refuses are left out: history reads on fewer, and the live view's own session is never
+    // what gives way.
+    const tried = await Promise.allSettled(
+      Array.from({ length: HISTORY_SESSIONS }, () => Gateway.connect(url, name, token)),
+    );
+    const sessions = tried.flatMap((r) => (r.status === 'fulfilled' ? [r.value] : []));
+    if (sessions.length === 0) throw new Error('the gateway would not open a session to read history');
+    return sessions;
+  }, districts * districts);
   // The gateway counts sessions until it sees them close, and a page opened next may be waiting on that.
-  addEventListener('pagehide', () => sessions.forEach((s) => s.close()));
-  return new Seeker(sessions, districts * districts);
+  addEventListener('pagehide', () => seeker.close());
+  return seeker;
 }
 
 /** A short word on screen for something that did not work out, gone after a few seconds. */
@@ -188,8 +192,8 @@ function ago(wallUs: number): string {
   return minutes < 60 ? `${minutes} min ago` : `${Math.floor(minutes / 60)} h ${minutes % 60} m ago`;
 }
 
-/** Connections history is read over. */
-const HISTORY_SESSIONS = 6;
+/** Connections history is read over: two sessions keep eight reads in flight, and the gateway allows eight a person. */
+const HISTORY_SESSIONS = 2;
 
 /** Districts on a side when `?districts` does not say. */
 const DEFAULT_DISTRICTS = 2;
@@ -235,8 +239,15 @@ async function main() {
   /** The tick the city is held at when it was opened in the past, with no live connection. */
   let pastTick: number | null = null;
   let seekDone = 0;
-  /** The history connection, opened by the first seek and kept for the ones after it. */
+  /** The history reader, made by the first seek and kept for the ones after it. */
   let history: Promise<Seeker | null> | null = null;
+  const dropHistory = () => {
+    void history?.then(
+      (s) => s?.close(),
+      () => {},
+    );
+    history = null;
+  };
   const seeker = () => (history ??= openHistory(seed, districts, gateway));
   const showPast = (result: SeekResult) => {
     pill.textContent = `Earlier · ${ago(result.districts[0]!.records.at(-1)!.wallUs)}`;
@@ -268,7 +279,7 @@ async function main() {
         // A moment the city does not hold, or no way to ask: show it live instead.
         console.warn('the city could not be opened at that moment', err);
         note(`${whyNot(err)} Showing the city live.`);
-        history = null;
+        dropHistory();
       }
     }
     if (past) {
@@ -388,7 +399,7 @@ async function main() {
     };
     window.__metro = {
       async prepare() {
-        await seeker();
+        await (await seeker())?.warm();
       },
       async seek(tick) {
         const started = performance.now();
@@ -422,7 +433,7 @@ async function main() {
           };
         } catch (err) {
           if (!(err instanceof DOMException && err.name === 'AbortError')) note(whyNot(err));
-          if (err instanceof GatewayError && err.code === 'closed') history = null;
+          if (err instanceof GatewayError && err.code === 'closed') dropHistory();
           throw err;
         }
       },

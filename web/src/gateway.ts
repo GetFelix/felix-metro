@@ -274,18 +274,24 @@ export class Gateway {
     // in between.
     if (this.reading >= READS_IN_FLIGHT) {
       await new Promise<void>((go, fail) => {
-        const entry = { go, fail };
-        this.queuedReads.push(entry);
-        signal?.addEventListener(
-          'abort',
-          () => {
-            const at = this.queuedReads.indexOf(entry);
-            if (at < 0) return;
-            this.queuedReads.splice(at, 1);
-            fail(signal.reason);
+        const stop = () => {
+          const at = this.queuedReads.indexOf(entry);
+          if (at < 0) return;
+          this.queuedReads.splice(at, 1);
+          fail(signal!.reason);
+        };
+        const entry = {
+          go: () => {
+            signal?.removeEventListener('abort', stop);
+            go();
           },
-          { once: true },
-        );
+          fail: (err: Error) => {
+            signal?.removeEventListener('abort', stop);
+            fail(err);
+          },
+        };
+        this.queuedReads.push(entry);
+        signal?.addEventListener('abort', stop, { once: true });
       });
     } else {
       this.reading++;

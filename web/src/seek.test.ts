@@ -421,4 +421,112 @@ describe('seek', () => {
     result.districts[1]!.records.pop();
     expect(() => fold(new CityState(city, trips, 2), result)).toThrow(SeekError);
   });
+
+  it('stops the reads the other districts have waiting when one district fails', async () => {
+    const h = new FakeHistory(2, ticks(1000));
+    // Reads wait on the gate, except district 1's, which fail at once.
+    h.gate = new Promise<void>(() => {});
+    h.onRead = (shard) => {
+      if (shard === 1) throw new GatewayError('read_failed', 'boom');
+    };
+    const run = seeker(h).seek(300);
+    await expect(run).rejects.toMatchObject({ code: 'read_failed' });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(h.aborted).toBeGreaterThan(0);
+  });
+
+  it('leaves no listener on the caller signal after a seek, whether it finished or failed', async () => {
+    const stop = new AbortController();
+    let live = 0;
+    const add = stop.signal.addEventListener.bind(stop.signal);
+    const remove = stop.signal.removeEventListener.bind(stop.signal);
+    stop.signal.addEventListener = ((...a: Parameters<typeof add>) => (live++, add(...a))) as typeof add;
+    stop.signal.removeEventListener = ((...a: Parameters<typeof remove>) => (live--, remove(...a))) as typeof remove;
+    const s = seeker(new FakeHistory(2, ticks(1000)));
+    await s.seek(300, { signal: stop.signal });
+    expect(live).toBe(0);
+    await expect(s.seek(5000, { signal: stop.signal })).rejects.toBeInstanceOf(SeekError);
+    expect(live).toBe(0);
+  });
+
+  describe('sessions', () => {
+    const session = (h: FakeHistory) => {
+      const s = {
+        closed: false,
+        reads: 0,
+        read: (...a: Parameters<FakeHistory['read']>) => {
+          if (s.closed) return Promise.reject(new GatewayError('closed', 'the session was closed'));
+          s.reads++;
+          return h.read(...a);
+        },
+        stateGet: (...a: Parameters<FakeHistory['stateGet']>) =>
+          s.closed ? Promise.reject(new GatewayError('closed', 'the session was closed')) : h.stateGet(...a),
+        close: () => {
+          s.closed = true;
+        },
+      };
+      return s;
+    };
+
+    it('close() closes every session and refuses a later seek', async () => {
+      const h = new FakeHistory(2, ticks(1000));
+      const a = session(h);
+      const b = session(h);
+      const s = new Seeker([a, b], 2);
+      await s.seek(300);
+      s.close();
+      expect([a.closed, b.closed]).toEqual([true, true]);
+      await expect(s.seek(300)).rejects.toMatchObject({ code: 'closed' });
+    });
+
+    it('drops a session that closed and answers its read on another', async () => {
+      const h = new FakeHistory(2, ticks(1000));
+      const dead = session(h);
+      const live = session(h);
+      dead.closed = true;
+      const s = new Seeker([dead, live], 2);
+      expect((await folded(s, 300)).ticks).toEqual([300, 300]);
+      expect(live.reads).toBeGreaterThan(0);
+    });
+
+    it('opens its sessions on the first seek, closes them when idle, and opens them again for the next', async () => {
+      vi.useFakeTimers();
+      try {
+        const h = new FakeHistory(2, ticks(1000));
+        const opened: ReturnType<typeof session>[] = [];
+        const s = new Seeker(async () => {
+          opened.push(session(h), session(h));
+          return opened.slice(-2);
+        }, 2);
+        expect(opened).toHaveLength(0);
+        await s.seek(300);
+        expect(opened).toHaveLength(2);
+        await vi.advanceTimersByTimeAsync(29_000);
+        expect(opened.some((o) => o.closed)).toBe(false);
+        await vi.advanceTimersByTimeAsync(2_000);
+        expect(opened.every((o) => o.closed)).toBe(true);
+        expect((await s.seek(600)).tick).toBe(600);
+        expect(opened).toHaveLength(4);
+        expect(opened.slice(2).some((o) => o.closed)).toBe(false);
+        s.close();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('reopens when every session closed under a seek', async () => {
+      const h = new FakeHistory(2, ticks(1000));
+      const batches: ReturnType<typeof session>[] = [];
+      const s = new Seeker(async () => {
+        const one = session(h);
+        batches.push(one);
+        return [one];
+      }, 2);
+      await s.seek(300);
+      batches[0]!.closed = true;
+      expect((await s.seek(700)).tick).toBe(700);
+      expect(batches).toHaveLength(2);
+      s.close();
+    });
+  });
 });
