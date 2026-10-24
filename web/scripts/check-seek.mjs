@@ -94,7 +94,10 @@ for (const t of targets) {
 
 // The same ticks opened cold, a page apiece: not under the budget, which is for a page already loaded.
 for (const t of targets) {
-  await page.goto(`${appUrl}?at=${t}#harbor`, { waitUntil: 'load', timeout: 5 * MINUTE });
+  await page.goto(`${appUrl}${appUrl.includes('?') ? '&' : '?'}at=${t}#harbor`, {
+    waitUntil: 'load',
+    timeout: 5 * MINUTE,
+  });
   await page
     .waitForFunction(() => window.__seek?.drawMs !== null && window.__seek?.drawMs !== undefined, null, {
       polling: 100,
