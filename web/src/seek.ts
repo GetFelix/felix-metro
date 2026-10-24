@@ -30,6 +30,8 @@ const PARALLEL_PAGES = 16;
 const IDLE_MS = 30_000;
 /** A read that finds its session closed is tried again on another this many times. */
 const CLOSED_RETRIES = 2;
+/** How long a district's newest record is trusted, so a scrub of many seeks asks for it about once a second. */
+const NEWEST_MS = 1000;
 /** Rounds of seeking while retention moves under it, or while districts settle on one tick. */
 const MAX_ROUNDS = 8;
 
@@ -55,6 +57,8 @@ interface Known {
 
 /** A district's keyframe hour, the cache key: keyframes land on every 240th tick. */
 const hourOf = (tick: number) => Math.floor(tick / TICKS_PER_HOUR);
+/** The keyframe cache key: a restarted sim's epoch has its own keyframe for the same hour. */
+const frameKey = (epoch: number, hour: number) => `${epoch}:${hour}`;
 
 export interface SeekStats {
   /** Reads sent to the gateway. */
@@ -106,9 +110,11 @@ interface Flight {
 export class Seeker {
   readonly stats: SeekStats = { reads: 0, hits: 0, readMs: 0, slowestMs: 0, pageSize: 0 };
   private readonly records: Map<number, Known>[];
-  private readonly keyframes: Map<number, Known>[];
+  private readonly keyframes: Map<string, Known>[];
   /** The oldest offset retention has left, by district; 0 until a read says otherwise. */
   private readonly oldest: number[];
+  /** The newest record each district had when last asked, and when. */
+  private readonly newestSeen: ({ known: Known; at: number } | null)[];
   private sessions: Session[];
   private readonly open: OpenSessions | null;
   private opening: Promise<void> | null = null;
@@ -128,6 +134,33 @@ export class Seeker {
     this.records = Array.from({ length: districts }, () => new Map());
     this.keyframes = Array.from({ length: districts }, () => new Map());
     this.oldest = Array<number>(districts).fill(0);
+    this.newestSeen = Array(districts).fill(null);
+  }
+
+  /**
+   * The city at the keyframe of `tick`'s hour, from what earlier seeks cached and with no read; null when a district
+   * does not hold that hour's keyframe. It is the nearest moment that can be drawn at once, before a seek finishes.
+   */
+  cachedKeyframe(tick: number): SeekResult | null {
+    const hour = hourOf(tick);
+    // The newest epoch holding the hour is the one a seek reaches it in; every district must agree on it.
+    let epoch = -1;
+    for (const known of this.keyframes[0]!.values()) {
+      if (hourOf(known.record.tick) === hour && known.record.epoch > epoch) epoch = known.record.epoch;
+    }
+    if (epoch < 0) return null;
+    const frames = this.keyframes.map((m) => m.get(frameKey(epoch, hour)));
+    const first = frames[0]!;
+    for (const [d, f] of frames.entries()) {
+      if (!f || f.record.tick !== first.record.tick || f.offset < this.oldest[d]!) return null;
+    }
+    const at = first.record.tick;
+    return {
+      tick: at,
+      requested: tick,
+      exact: at === tick,
+      districts: frames.map((f) => ({ records: [f!.record], offset: f!.offset })),
+    };
   }
 
   /** Open the sessions now, ahead of the first seek. */
@@ -270,7 +303,9 @@ export class Seeker {
 
   /** The record a district shows for `tick`: the greatest not after it in the newest epoch that reaches it. */
   private async find(d: number, tick: number, signal: AbortSignal): Promise<Found> {
-    const newest = await this.newest(d, signal);
+    let newest = await this.newest(d, signal);
+    // The cached newest can be a second old; a tick past it is asked about again before it is called the future.
+    if (tick > newest.record.tick) newest = await this.newest(d, signal, true);
     if (tick > newest.record.tick) return { rec: newest, future: true };
     let epoch = newest.record.epoch;
     for (;;) {
@@ -299,8 +334,9 @@ export class Seeker {
       throw new SeekError('broken', `district ${d} has no keyframe for tick ${target.record.tick}`);
     }
     const frames = this.keyframes[d]!;
-    frames.delete(hourOf(keyframe.tick));
-    frames.set(hourOf(keyframe.tick), { offset: start, record: keyframe });
+    const key = frameKey(keyframe.epoch, hourOf(keyframe.tick));
+    frames.delete(key);
+    frames.set(key, { offset: start, record: keyframe });
     trim(frames, KEYFRAMES_PER_DISTRICT);
     const last = records.at(-1);
     if (last?.tick !== target.record.tick || last.epoch !== target.record.epoch) {
@@ -331,7 +367,17 @@ export class Seeker {
   }
 
   /** The newest record. The state read says how long the log was when it answered, which two reads confirm. */
-  private async newest(d: number, signal: AbortSignal): Promise<Known> {
+  private async newest(d: number, signal: AbortSignal, fresh = false): Promise<Known> {
+    const seen = this.newestSeen[d];
+    if (!fresh && seen && performance.now() - seen.at < NEWEST_MS && seen.known.offset >= this.oldest[d]!) {
+      return seen.known;
+    }
+    const known = await this.newestNow(d, signal);
+    this.newestSeen[d] = { known, at: performance.now() };
+    return known;
+  }
+
+  private async newestNow(d: number, signal: AbortSignal): Promise<Known> {
     const { asOf } = await keyframePointer(this.cancellable(signal), d, this.districts, false);
     if (asOf !== null && asOf > 0) {
       const [last, past] = await Promise.all([this.at(d, asOf - 1, signal), this.at(d, asOf, signal)]);
@@ -386,9 +432,8 @@ export class Seeker {
   /** Retention moved up to `oldest`: forget what is below it. */
   private trimTo(d: number, oldest: number): void {
     this.oldest[d] = oldest;
-    for (const cache of [this.records[d]!, this.keyframes[d]!]) {
-      for (const [key, known] of cache) if (known.offset < oldest) cache.delete(key);
-    }
+    for (const [key, known] of this.records[d]!) if (known.offset < oldest) this.records[d]!.delete(key);
+    for (const [key, known] of this.keyframes[d]!) if (known.offset < oldest) this.keyframes[d]!.delete(key);
   }
 
   /** The record at `offset`, or null past the log's end. Retention moves `oldest` up as a side effect. */
@@ -498,7 +543,7 @@ export class Seeker {
 
   /** What to estimate from: the cached keyframe of the tick's hour, else the known record nearest to it. */
   private async anchor(d: number, epoch: number, tick: number, signal: AbortSignal): Promise<Known | null> {
-    const frame = this.keyframes[d]!.get(hourOf(tick));
+    const frame = this.keyframes[d]!.get(frameKey(epoch, hourOf(tick)));
     if (frame && frame.record.epoch === epoch && frame.offset >= this.oldest[d]!) return frame;
     let best: Known | null = null;
     for (const known of this.records[d]!.values()) {
@@ -617,7 +662,7 @@ function distance(r: TickRecord, epoch: number, tick: number): number {
   return r.epoch !== epoch ? Number.MAX_SAFE_INTEGER : Math.abs(r.tick - tick);
 }
 
-function trim<V>(map: Map<number, V>, max: number): void {
+function trim<K, V>(map: Map<K, V>, max: number): void {
   while (map.size > max) map.delete(map.keys().next().value!);
 }
 
@@ -631,6 +676,49 @@ export function fold(state: CityState, seek: SeekResult): void {
   state.ticks.forEach((tick, d) => {
     if (tick !== seek.tick) throw new SeekError('broken', `district ${d} folded to tick ${tick}, not ${seek.tick}`);
   });
+}
+
+/**
+ * Whether `next` continues `prev`: every district's records begin with the ones `prev` has, so a state folded to `prev`
+ * reaches `next` by taking only the records after them.
+ */
+export function continues(prev: SeekResult, next: SeekResult): boolean {
+  if (prev.districts.length !== next.districts.length || next.tick < prev.tick) return false;
+  return prev.districts.every(({ records }, d) => {
+    const after = next.districts[d]!.records;
+    const same = (a: TickRecord | undefined, b: TickRecord | undefined) =>
+      !!a && !!b && a.epoch === b.epoch && a.tick === b.tick && !!a.keyframe === !!b.keyframe;
+    return (
+      records.length > 0 &&
+      after.length >= records.length &&
+      same(records[0], after[0]) &&
+      same(records.at(-1), after[records.length - 1])
+    );
+  });
+}
+
+/** Take the records of `next` past those of `prev` onto a state folded to `prev`; see {@link continues}. */
+export function foldMore(state: CityState, prev: SeekResult, next: SeekResult): void {
+  next.districts.forEach(({ records }, d) => {
+    for (const r of records.slice(prev.districts[d]!.records.length)) state.apply(r, true);
+  });
+  state.ticks.forEach((tick, d) => {
+    if (tick !== next.tick) throw new SeekError('broken', `district ${d} folded to tick ${tick}, not ${next.tick}`);
+  });
+}
+
+/**
+ * Move a state folded to `prev` on to `next` when `next` continues it. False when it does not, or when taking the
+ * records failed partway, which leaves the state half advanced: the caller must drop it and fold `next` afresh.
+ */
+export function tryFoldMore(state: CityState, prev: SeekResult, next: SeekResult): boolean {
+  if (!continues(prev, next)) return false;
+  try {
+    foldMore(state, prev, next);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** Aborts `child` when `parent` does; the returned function ends the link. */

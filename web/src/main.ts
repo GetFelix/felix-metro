@@ -10,10 +10,12 @@ import init, { generate, Metro } from './core/felix_metro_core.js';
 import { parseCity, type City } from './layout';
 import { beforeSignIn, fetchOidc, signIn } from './auth';
 import { CityState, type Building } from './city';
-import { TickClock, cityTime } from './clock';
+import { TICKS_PER_HOUR, TickClock, cityTime } from './clock';
 import { connectLive } from './live';
 import { Gateway, GatewayError } from './gateway';
-import { SeekError, Seeker, fold, type SeekResult } from './seek';
+import { SeekError, Seeker, fold, tryFoldMore, type SeekResult } from './seek';
+import { Latest } from './scrub';
+import { agoText, createTimeline, stepTick, clampTick, type Range } from './timeline';
 import { createLoader, type Loader } from './loader';
 import { createPicker } from './picker';
 import { displayName } from './registry';
@@ -71,6 +73,14 @@ declare global {
       }>;
       /** The state the live connection feeds: its districts' ticks and buildings. */
       live(): { ticks: number[]; buildings: number; sig: string };
+      /** The state on screen: its folded ticks, building count and signature, the tick held in the past or null, and whether it is the live one. */
+      shown(): { ticks: number[]; buildings: number; sig: string; past: number | null; live: boolean };
+      /** Whether the history sessions have been asked for. */
+      historyOpen(): boolean;
+      /** Read the span the timeline covers now. */
+      refresh(): Promise<void>;
+      /** Hold each scrub seek this many ms before it is shown; 0 for none. */
+      holdSeeks(ms: number): void;
     };
     __quality?: {
       history: readonly Tier[];
@@ -186,12 +196,6 @@ function signature(built: ReadonlyMap<number, Building>): string {
   return h.toString(16);
 }
 
-/** How long ago a wall time was, in the words the page uses for it. */
-function ago(wallUs: number): string {
-  const minutes = Math.max(0, Math.round((Date.now() - wallUs / 1000) / 60_000));
-  return minutes < 60 ? `${minutes} min ago` : `${Math.floor(minutes / 60)} h ${minutes % 60} m ago`;
-}
-
 /** Connections history is read over: two sessions keep eight reads in flight, and the gateway allows eight a person. */
 const HISTORY_SESSIONS = 2;
 
@@ -249,12 +253,14 @@ async function main() {
     history = null;
   };
   const seeker = () => (history ??= openHistory(seed, districts, gateway));
-  const showPast = (result: SeekResult) => {
-    pill.textContent = `Earlier · ${ago(result.districts[0]!.records.at(-1)!.wallUs)}`;
-    pill.classList.add('late');
-    pill.classList.remove('hidden');
-    if (!result.exact) note('That exact moment is missing; showing the closest one before it.');
-  };
+  /** The seeks behind the state on screen, to fold forward from, or null when it is the live one. */
+  let shownResult: SeekResult | null = null;
+  /** The tick the handle is at while a seek for it is waiting or running; the sun and the clock follow it. */
+  let scrubTarget: number | null = null;
+  /** Whether a live connection feeds this page; a page opened with ?at has none. */
+  let hasLive = false;
+  /** Draws the bar and the past pill from the tick on screen; set once the page can scrub. */
+  let timelineFrame: ((tick: number) => void) | null = null;
   /** Told the frame after the city changed has been drawn. */
   const frameWaiters: (() => void)[] = [];
   const pill = document.getElementById('pill')!;
@@ -293,8 +299,10 @@ async function main() {
         reads: (await seeker())!.stats.reads,
         ticks: [...past.state.ticks],
       };
-      showPast(past.result);
+      shownResult = past.result;
+      if (!past.result.exact) note('That exact moment is missing; showing the closest one before it.');
     } else if (wantLive) {
+      hasLive = true;
       const joined = await follow(city, new Metro(seed, districts), seed, districts, gateway, pill, loader, trace);
       state = joined?.state ?? null;
       link = joined?.link ?? link;
@@ -385,7 +393,7 @@ async function main() {
     const metro = new Metro(seed, districts);
     const summary = (s: CityState) => ({ ticks: [...s.ticks], buildings: s.built.size, sig: signature(s.built) });
     /** Draw `next` in place of the state on screen, which is let go; the live one keeps filling in the background. */
-    const swap = (next: CityState, tick: number) => {
+    const swap = (next: CityState, tick: number | null) => {
       const old = state!;
       if (old !== liveState) old.retire(Infinity);
       else for (const v of old.active()) traffic.release(v);
@@ -397,6 +405,172 @@ async function main() {
       state = next;
       pastTick = tick;
     };
+
+    /** The seeker once the first seek has opened it, for what needs it without waiting. */
+    let opened: Seeker | null = null;
+    const hourOf = (tick: number) => Math.floor(tick / TICKS_PER_HOUR);
+    /** A release or step this close to the live tip, a city minute, goes back to live. */
+    const LIVE_SNAP_TICKS = 4;
+    /** What the bar spans; the newest end is the live tip while connected. */
+    let range: Range | null = null;
+    const tipTick = () => (hasLive ? liveState!.latest : (range?.newest ?? 0));
+    const refreshing = { busy: false };
+    /** Test knob: milliseconds each scrub seek waits before it is shown, to hold one in flight. */
+    let holdSeeks = 0;
+    const refreshRange = async () => {
+      if (refreshing.busy) return;
+      refreshing.busy = true;
+      try {
+        const s = await seeker();
+        if (!s) return;
+        opened = s;
+        range = await s.retained();
+      } catch (err) {
+        console.warn('the span of the timeline could not be read', err);
+        if (err instanceof GatewayError && err.code === 'closed') dropHistory();
+      } finally {
+        refreshing.busy = false;
+      }
+    };
+    const goLive = () => {
+      scrubLatest.cancel();
+      scrubTarget = null;
+      if (!hasLive) {
+        // Nothing live feeds a page opened at a moment; opening it again without one is the way back.
+        const url = new URL(location.href);
+        url.searchParams.delete('at');
+        location.assign(url);
+        return;
+      }
+      // A seek still running was dropped above; with nothing past drawn there is nothing to swap back.
+      if (pastTick === null) return;
+      swap(liveState!, null);
+      shownResult = null;
+    };
+    /** Show a seek's result unless the handle has already moved to an hour whose keyframe is on screen. */
+    const place = (result: SeekResult) => {
+      if (scrubTarget !== null && hourOf(result.tick) !== hourOf(scrubTarget)) {
+        const kf = opened?.cachedKeyframe(scrubTarget);
+        if (kf && pastTick !== null && hourOf(pastTick) === hourOf(kf.tick)) return;
+      }
+      if (shownResult && pastTick !== null && tryFoldMore(state!, shownResult, result)) {
+        pastTick = result.tick;
+      } else {
+        const next = new CityState(city!, metro, districts * districts);
+        fold(next, result);
+        swap(next, result.tick);
+      }
+      shownResult = result;
+    };
+    /** The nearest keyframe on hand, drawn at once while the handle moves. */
+    const preview = (tick: number) => {
+      const kf = opened?.cachedKeyframe(tick);
+      if (!kf || (pastTick !== null && hourOf(pastTick) === hourOf(kf.tick))) return;
+      const next = new CityState(city!, metro, districts * districts);
+      fold(next, kf);
+      swap(next, kf.tick);
+      shownResult = kf;
+    };
+    const scrubLatest = new Latest(async (tick, current) => {
+      try {
+        const s = await seeker();
+        if (!s) throw new Error('nothing here answers like a gateway');
+        opened = s;
+        const result = await s.seek(tick);
+        if (holdSeeks > 0) await new Promise((done) => setTimeout(done, holdSeeks));
+        // Back to live came while this seek ran: what it found is no longer wanted.
+        if (!current()) return;
+        try {
+          place(result);
+        } catch (err) {
+          // The state on screen may be half drawn; the next seek starts from a fresh one.
+          shownResult = null;
+          throw err;
+        }
+      } catch (err) {
+        if (!current()) return;
+        note(whyNot(err));
+        if (err instanceof SeekError && err.reason === 'unretained') void refreshRange();
+        if (err instanceof GatewayError && err.code === 'closed') dropHistory();
+        if (scrubLatest.pending === null && scrubTarget === tick) scrubTarget = null;
+        return;
+      }
+      if (scrubLatest.pending === null && scrubTarget === tick) scrubTarget = null;
+    });
+    /** Where the handle is, to step from: the target if one is on its way. */
+    const handleAt = () => scrubTarget ?? pastTick ?? Math.floor(liveState!.latest);
+    const go = (tick: number, moving: boolean) => {
+      if (!range) return;
+      const tip = tipTick();
+      const to = clampTick({ oldest: range.oldest, newest: tip }, tick);
+      // The tip is the live city: a step or a release within a city minute of it is going back to it.
+      if (hasLive && !moving && to >= tip - LIVE_SNAP_TICKS) return goLive();
+      scrubTarget = to;
+      preview(to);
+      scrubLatest.want(to, moving);
+    };
+    let refresher: ReturnType<typeof setInterval> | null = null;
+    const bar = createTimeline(document.getElementById('scrub')!, {
+      onMove: (tick, phase) => go(tick, phase === 'drag'),
+      onStep: (direction, big) => {
+        if (range) go(stepTick({ oldest: range.oldest, newest: tipTick() }, handleAt(), direction, big), false);
+      },
+      onLive: goLive,
+      // Reaching for the bar is what reads the span, once; the history sessions are not opened for a viewer who never does.
+      onEngage: (on) => {
+        if (on) void refreshRange();
+      },
+    });
+    // The oldest moment moves as retention does, so the span is read again while the handle is dragged or the past is
+    // shown. Hovering does not, so the history sessions can close when idle.
+    const syncRefresh = (watching: boolean) => {
+      if (watching === (refresher !== null)) return;
+      if (refresher) clearInterval(refresher);
+      refresher = null;
+      if (!watching) return;
+      void refreshRange();
+      refresher = setInterval(() => void refreshRange(), 5000);
+    };
+    const timelineEl = document.getElementById('timeline')!;
+    const past = document.getElementById('past')!;
+    const pastAgo = document.getElementById('past-ago')!;
+    document.getElementById('back-live')!.addEventListener('click', goLive);
+    let barShown = false;
+    let wasPast: boolean | null = null;
+    let agoShown = '';
+    timelineFrame = (tick) => {
+      const tip = tipTick();
+      // Until the span is read the bar has just the live tip.
+      const usable = range === null ? hasLive : tip > range.oldest;
+      if (usable !== barShown) {
+        barShown = usable;
+        bar.show(usable);
+        timelineEl.toggleAttribute('data-scrub', usable);
+      }
+      const inPast = pastTick !== null || scrubTarget !== null;
+      syncRefresh(bar.dragging || inPast);
+      const at = Math.min(scrubTarget ?? pastTick ?? tick, tip);
+      if (usable) bar.update({ oldest: range?.oldest ?? tip - 1, newest: tip, at, live: !inPast });
+      if (inPast !== wasPast) {
+        const first = wasPast === null;
+        wasPast = inPast;
+        past.classList.toggle('hidden', !inPast);
+        // The live pill is shown by the connection's own status; going past hides it, coming back restores it.
+        if (inPast) pill.classList.add('hidden');
+        else if (!first) pill.classList.remove('hidden');
+      }
+      if (inPast) {
+        const text = usable ? agoText(tip - at) : 'Earlier';
+        if (text !== agoShown) pastAgo.textContent = agoShown = text;
+      }
+    };
+    // A page opened in the past already has its history open, and no live tip to show the bar with.
+    if (!hasLive) {
+      void (async () => {
+        await new Promise<void>((done) => frameWaiters.push(done));
+        void refreshRange();
+      })();
+    }
     window.__metro = {
       async prepare() {
         await (await seeker())?.warm();
@@ -411,7 +585,8 @@ async function main() {
           fold(next, result);
           const seekMs = performance.now() - started;
           swap(next, result.tick);
-          showPast(result);
+          shownResult = result;
+          if (!result.exact) note('That exact moment is missing; showing the closest one before it.');
           await new Promise<void>((done) => frameWaiters.push(done));
           const drawnMs = performance.now() - started;
           // Cars and walkers are made a share a frame, so the city fills in over the frames after the first.
@@ -438,6 +613,12 @@ async function main() {
         }
       },
       live: () => summary(liveState!),
+      shown: () => ({ ...summary(state!), past: pastTick, live: state === liveState }),
+      historyOpen: () => history !== null,
+      refresh: refreshRange,
+      holdSeeks: (ms) => {
+        holdSeeks = ms;
+      },
     };
   }
   let intro: ReturnType<typeof startIntro> | null = null;
@@ -459,12 +640,13 @@ async function main() {
       if (!Number.isNaN(tick)) {
         state.retire(Math.floor(tick));
         traffic.update(tick, still ? 0 : dt, state.active());
-        const time = cityTime(tick);
+        const time = cityTime(scrubTarget ?? tick);
         if (frozenHour === null && !(Math.abs(time.hour - shownHour) <= 0.004)) {
           shownHour = hour = time.hour;
           setTime(hour, post!.bloom);
           day.textContent = `Day ${time.day}`;
         }
+        timelineFrame?.(tick);
         Object.assign(window.__live, {
           tick,
           speed: state.speed,

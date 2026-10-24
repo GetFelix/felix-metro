@@ -77,7 +77,7 @@ const targets = [newest - 100, Math.floor(newest / 2), 7];
 const folded = {};
 for (const t of targets) {
   const r = await page.evaluate((tick) => window.__metro.seek(tick), t);
-  const pill = await page.locator('#pill').textContent();
+  const pill = await page.locator('#past').textContent();
   const shown = await page.evaluate(() => window.__live.tick);
   console.log(
     `seek to tick ${t}: ${r.ms.toFixed(0)} ms from the call to the first frame, ${r.seekMs.toFixed(0)} ms of it finding and folding, every car placed by ${r.settledMs.toFixed(0)} ms (${r.reads} reads in all, reads took ${r.stats.readMs.toFixed(0)} ms summed and ${r.stats.slowestMs.toFixed(0)} ms at the slowest, ${r.stats.pageSize} records a page), districts at [${r.ticks}], offsets [${r.offsets}], ${r.buildings} buildings, "${pill}"`,
@@ -87,7 +87,7 @@ for (const t of targets) {
   if (r.ticks.length === 0 || r.ticks.some((x) => x !== t)) await fail(`districts folded to [${r.ticks}], not ${t}`);
   if (r.offsets.some((o) => !Number.isInteger(o) || o < 0)) await fail(`offsets [${r.offsets}] are not offsets`);
   if (shown !== t) await fail(`the page shows tick ${shown}, not ${t}`);
-  if (!/^Earlier/.test(pill ?? '')) await fail(`the page does not say it is showing the past: "${pill}"`);
+  if (!(await page.locator('#past').isVisible())) await fail(`the page does not say it is showing the past: "${pill}"`);
   // The first seek of a tick may be cold in the cache; two more of the same tick are warm, and their median is held.
   const repeats = [r.seekMs];
   for (let i = 0; i < 2; i++) repeats.push((await page.evaluate((tick) => window.__metro.seek(tick), t)).seekMs);

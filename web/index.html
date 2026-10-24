@@ -299,6 +299,124 @@
           500 11px 'JetBrains Mono',
           monospace;
       }
+      .timeline[data-scrub] .track,
+      .timeline[data-scrub] .ticks {
+        display: none;
+      }
+      .past {
+        margin-left: 12px;
+        font:
+          500 12px Inter,
+          sans-serif;
+        color: var(--amber);
+        white-space: nowrap;
+      }
+      .past button {
+        padding: 3px 8px;
+        border: 0;
+        border-radius: 999px;
+        background: rgba(255, 96, 56, 0.18);
+        color: var(--coral);
+        font: inherit;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      .past button:hover {
+        background: rgba(255, 96, 56, 0.3);
+      }
+      .past button:focus-visible,
+      .scrub:focus-visible {
+        outline: 2px solid var(--cyan);
+        outline-offset: 2px;
+      }
+      .scrub {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        touch-action: none;
+        user-select: none;
+        cursor: pointer;
+        border-radius: 8px;
+      }
+      .bands {
+        position: relative;
+        height: 18px;
+        overflow: hidden;
+        border-radius: 6px;
+        background: rgba(255, 255, 255, 0.04);
+      }
+      .band {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        left: calc((var(--from) - var(--oldest)) / var(--span) * 100%);
+        width: calc((var(--to) - var(--from)) / var(--span) * 100%);
+        box-sizing: border-box;
+        border-left: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.06);
+      }
+      .band:nth-child(even) {
+        background: rgba(255, 255, 255, 0.12);
+      }
+      .day {
+        position: absolute;
+        top: 3px;
+        left: max(6px, calc((var(--from) - var(--oldest)) / var(--span) * 100% + 6px));
+        color: var(--muted);
+        font:
+          500 11px 'JetBrains Mono',
+          monospace;
+        white-space: nowrap;
+        pointer-events: none;
+      }
+      .strip {
+        position: relative;
+        height: 22px;
+      }
+      .strip .rail {
+        background: linear-gradient(90deg, var(--violet) var(--p), rgba(255, 255, 255, 0.14) var(--p));
+      }
+      .marks {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+      }
+      .mark {
+        position: absolute;
+        top: 6px;
+        height: 10px;
+        width: 1px;
+        left: calc((var(--t) - var(--oldest)) / var(--span) * 100%);
+        background: rgba(255, 255, 255, 0.28);
+      }
+      .mark.major {
+        top: 2px;
+        height: 18px;
+        background: rgba(255, 255, 255, 0.5);
+      }
+      .strip .knob {
+        top: 3px;
+      }
+      .scrub[data-mode='past'] .knob {
+        background: var(--amber);
+      }
+      .scrub[data-mode='live'] .knob {
+        background: var(--coral);
+        box-shadow: 0 0 14px var(--coral);
+      }
+      .tip {
+        position: absolute;
+        right: -5px;
+        top: 5px;
+        width: 12px;
+        height: 12px;
+        padding: 0;
+        border: 2px solid var(--coral);
+        border-radius: 50%;
+        background: var(--void);
+        cursor: pointer;
+      }
       .hidden {
         display: none;
       }
@@ -337,9 +455,14 @@
       <ul class="cities hidden" id="cities" aria-label="Cities"></ul>
     </div>
     <div class="chip clock">
-      <span id="day">Day 3</span><b id="clock">18:30</b><i class="pill hidden" id="pill">LIVE</i>
+      <span id="day">Day 3</span><b id="clock">18:30</b><i class="pill hidden" id="pill">LIVE</i
+      ><span class="past hidden" id="past"
+        ><span id="past-ago"></span><span aria-hidden="true"> · </span
+        ><button type="button" id="back-live">Back to live</button></span
+      >
     </div>
     <div class="chip timeline" id="timeline">
+      <div class="scrub hidden" id="scrub"></div>
       <div class="track" id="track" style="--p: 77%">
         <div class="rail"></div>
         <div class="knob"></div>

@@ -340,7 +340,7 @@ result says it is not exact; a tick past the newest is refused as not yet happen
 keyframe moves the start to the next hour boundary still kept, and a seek is `unretained` before it. Records are cached per
 district for about two city hours and keyframes for four city days, so a second seek in the same hour reads only the
 ticks past what is held. After folding, every district must be at `T`, or the seek fails. `?at=<tick>` opens the page at a
-tick with no live connection until the timeline exists, and `window.__metro.seek(tick)` does the same in an open page,
+tick with no live connection (the timeline's "Back to live" opens the page again without it), and `window.__metro.seek(tick)` does the same in an open page,
 which is what CI measures against the one-second budget.
 
 At most 240 tick records per district separate a keyframe from `T`. That is a
@@ -352,8 +352,24 @@ forward catches up to live without the client doing anything special. Playback
 faster than real time reads ahead with `read` and does not subscribe until it
 is close to the tail.
 
-**Scrubbing** draws the nearest keyframe while the handle moves and fills in
-events once it stops.
+**Scrubbing** draws the nearest keyframe on hand while the handle moves, with
+the sun and the clock at the handle's hour, and fills in events once it rests.
+One seek runs at a time, always for the newest target, and each result is drawn
+as it completes, so scrubbing faster than a seek takes still shows the city
+moving; a seek is never cancelled by the next move. A target ahead of the city
+on screen in the same hour folds only the records after the last one it holds;
+any move back refolds from the keyframe. The newest record of each district is
+trusted for a second between seeks. The bar spans the first hour that can be
+started from to the live tip, with days as bands and a tick for every hour.
+Arrow keys step 15 city minutes, `Shift` or the page keys an hour, `Home` goes to
+the oldest moment and `End` back to live; a release or step within a city
+minute of the tip, or Back to live while a seek is still running, ends in the
+live city, and the result of that seek is dropped. A seek's result that would
+bring the page to an hour whose keyframe is already on screen is dropped too.
+The history sessions are opened when the bar is first hovered, focused or
+touched, not at page load; the span is read again every 5 s only while the
+handle is dragged or the past is shown, and the sessions close after 30 s idle. The pill in the clock reads how long
+before the live tip the city on screen is, in city time.
 
 ## Building
 
