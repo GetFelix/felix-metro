@@ -102,6 +102,9 @@ for (let attempt = 1; attempt <= ATTEMPTS && compared < MIN_COMPARED; attempt++)
 
   // Pause holds the tick, play takes it up again.
   await page.evaluate(() => window.__metro.play());
+  // The playhead moves on a timer between frames, so the first frame after the pause draws what it reached; hold starts there.
+  const fc = await page.evaluate(() => window.__fc);
+  await page.waitForFunction((n) => window.__fc >= n + 2, fc, { polling: 100, timeout: MINUTE });
   const held = await page.evaluate(() => window.__live.tick);
   await page.waitForTimeout(1500);
   const still = await page.evaluate(() => window.__live.tick);
