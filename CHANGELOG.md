@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-24
+
 ### Changed
 
 - Built on Felix 0.6.1: the sim's `felix-client` and `felix-wire` pins, the dev stack and CI images.

@@ -7,7 +7,7 @@ A 3D city simulator that runs in the browser, built on
 is stored in durable Felix streams, so you can scrub back to any earlier moment
 and play forward from there.
 
-> **Status:** a live city runs end to end. The sim steps it, the browser draws it live, and a city picker switches between cities. Opening the city at an earlier moment works (`/?at=<tick>#harbor` draws it there, paused); the timeline bar scrubs the city back through the hours it still holds (drag the handle, or step with `←` and `→`, `Shift` for an hour); Space plays forward from there at the city's speed and Back to live races to the live city and joins it with no gap and no reload; following a resident and building are not built yet. The [style frame](prototype/style-frame.html) shows the look. The plan is in
+> **Status:** a live city runs end to end. The sim steps it, the browser draws it live, and a city picker switches between cities. Opening the city at an earlier moment works (`/?at=<tick>#harbor` draws it there, paused); the timeline bar scrubs the city back through the hours it still holds (drag the handle, or step with `←` and `→`, `Shift` for an hour); Space plays forward from there at the city's speed and Back to live races to the live city and joins it with no gap and no reload. Builders change the city through its command stream: the sim applies `build` and `demolish`, each building rises in a scaffold or falls in dust, and `dev/builder-bot.mjs` grows a neighbourhood on each city's development area. Following a resident and the page's own building tools are not built yet. The [style frame](prototype/style-frame.html) shows the look. The plan is in
 > [docs/design.md](docs/design.md) and the work is tracked in
 > [milestones](https://github.com/GetFelix/felix-metro/milestones).
 
@@ -81,15 +81,15 @@ that pulls the published images instead of building them. You need Docker or Pod
 described below. The compose bundle runs Felix 0.6.1.
 
 ```sh
-curl -fsSL https://github.com/GetFelix/felix-metro/releases/download/v0.1.0/felix-metro-compose-0.1.0.tar.gz | tar xz
-cd felix-metro-compose-0.1.0
+curl -fsSL https://github.com/GetFelix/felix-metro/releases/download/v0.2.0/felix-metro-compose-0.2.0.tar.gz | tar xz
+cd felix-metro-compose-0.2.0
 ./up.sh
 ```
 
 It starts the same stack as `dev/up.sh` and returns once the cities are serving. The web
 app is at <http://127.0.0.1:8088>. `./speed.sh` and `./city.sh` work as the `dev/` ones
 do. `SHA256SUMS` on the release lists a checksum for each download, and
-`felix-metro-web-v0.1.0.tar.gz` is the built web app alone.
+`felix-metro-web-v0.2.0.tar.gz` is the built web app alone.
 
 ## Run it locally
 
