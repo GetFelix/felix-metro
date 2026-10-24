@@ -218,4 +218,11 @@ describe('CityState', () => {
     );
     expect([...keyed.built]).toEqual([...events.built].sort((a, b) => a[0] - b[0]));
   });
+
+  it('ignores a command event with a result code it does not know', () => {
+    const state = new CityState(city, trips, 2);
+    const unknown = { type: 'command', principal: '00', name: 'x', id: 1, result: 250 } as unknown as TickEvent;
+    expect(() => state.apply(record(0, 1, [unknown, { type: 'built', lot: 1, kind: 7, rotation: 0 }]))).not.toThrow();
+    expect(state.built.get(1)).toEqual({ kind: 7, rotation: 0 });
+  });
 });

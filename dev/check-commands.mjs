@@ -9,8 +9,9 @@
 //   node dev/check-commands.mjs [city]   (default: CHECK_CITY, else pinecrest)
 //
 // Reads ticks with a small decoder of the record layout in docs/design.md, so it
-// needs no wasm build; a tick that carries a keyframe is skipped, and the check
-// publishes again when its answer was in one.
+// needs no wasm build. It reads the events of keyframe records too, and the
+// check fails when a command's result never shows up. Between the build and the
+// demolish it waits for the district's next keyframe, which must list the lot.
 const GATEWAY = process.env.GATEWAY_URL ?? "ws://127.0.0.1:8787/ws";
 const IDP = process.env.IDP_URL ?? "http://127.0.0.1:9400";
 const DISTRICTS = Number(process.env.DISTRICTS ?? 4);
@@ -44,14 +45,42 @@ function varint(bytes, at) {
   }
 }
 
-/** A tick record's header and events, or `keyframe: true` with no events when the record carries one. */
+function delta(bytes, at, prev) {
+  const z = varint(bytes, at);
+  return prev + (z % 2 === 1 ? -(z + 1) / 2 : z / 2);
+}
+
+/** Walks the keyframe at `at.i`, returning the lots it lists as differing from the generated city. */
+function keyframe(bytes, at) {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const buildings = new Map();
+  let lot = 0;
+  for (let n = varint(bytes, at); n > 0; n--) {
+    lot = delta(bytes, at, lot);
+    buildings.set(lot, view.getUint16(at.i, true));
+    at.i += 3;
+  }
+  for (let n = varint(bytes, at); n > 0; n--) {
+    delta(bytes, at, 0);
+    at.i += 1;
+  }
+  for (let n = varint(bytes, at); n > 0; n--) {
+    delta(bytes, at, 0);
+    at.i += 1; // the resident's frame tag
+    at.i += varint(bytes, at);
+  }
+  for (let n = 0; n < 4; n++) varint(bytes, at);
+  return buildings;
+}
+
+/** A tick record's header, its keyframe's building diff (or null) and its events. */
 function decode(bytes) {
   if (bytes[0] !== 1) return null;
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  const out = { district: view.getUint16(5, true), tick: view.getUint32(7, true), keyframe: (bytes[12] & 1) !== 0, events: [] };
-  if (out.keyframe) return out;
+  const out = { district: view.getUint16(5, true), tick: view.getUint32(7, true), keyframe: null, events: [] };
   const count = view.getUint16(29, true);
   const at = { i: 31 };
+  if ((bytes[12] & 1) !== 0) out.keyframe = keyframe(bytes, at);
   for (let n = 0; n < count; n++) {
     const tag = bytes[at.i++];
     const length = varint(bytes, at);
@@ -144,7 +173,7 @@ class Session {
     return Promise.race([answer, sleep(10_000).then(() => ({ type: "error", code: "timeout" }))]);
   }
 
-  /** Publishes the commands and waits for each id's `command` event; null when one never showed or was in a keyframe. */
+  /** Publishes the commands and waits for each id's `command` event; fails when one never shows. */
   async send(commands) {
     const before = this.records.length;
     const sentAt = this.newest;
@@ -163,7 +192,10 @@ class Session {
       }
       await sleep(100);
     }
-    if (seen.size < ids.size) return null;
+    if (seen.size < ids.size) {
+      const missing = [...ids].filter((id) => !seen.has(id));
+      fail(`no command event for ${missing.length} of ${ids.size} commands, first id ${missing[0]}`);
+    }
     for (const s of seen.values()) {
       if (s.record.tick - sentAt > MAX_TICKS) fail(`command ${s.id} took ${s.record.tick - sentAt} ticks (sent after tick ${sentAt})`);
     }
@@ -206,10 +238,6 @@ const taken = [];
 for (let first = 0; first < 400 && !built; first += 8) {
   const lots = Array.from({ length: 8 }, (_, i) => first + i);
   const seen = await mayor.send(lots.map((lot) => [1000 + lot, build(lot)]));
-  if (!seen) {
-    first -= 8; // the answer was in a keyframe, or lost: ask again
-    continue;
-  }
   for (const lot of lots) {
     const command = seen.get(1000 + lot);
     if (command.result === APPLIED) {
@@ -230,33 +258,40 @@ const cases = [
   ["a build past the last lot", build(4_000_000_000), UNKNOWN, 0],
   ["a road", placeRoad(0, 1), UNSUPPORTED, 0],
 ];
-for (let attempt = 0; ; attempt++) {
-  const seen = await mayor.send(cases.map(([, command], i) => [2000 + attempt * 10 + i, command]));
-  if (!seen) {
-    if (attempt >= 3) fail("a refused command was not recorded");
-    continue;
-  }
+{
+  const seen = await mayor.send(cases.map(([, command], i) => [2000 + i, command]));
   cases.forEach(([what, , result, district], i) => {
-    const e = seen.get(2000 + attempt * 10 + i);
+    const e = seen.get(2000 + i);
     if (e.result !== result) fail(`${what}: result ${e.result}, wanted ${result}`);
     if (e.record.district !== district) fail(`${what}: recorded in district ${e.record.district}, wanted ${district}`);
     if (e.principal !== built.command.principal) fail(`${what}: the sender changed`);
     if (e.record.events.some((x) => ["built", "demolished", "road"].includes(x.type))) fail(`${what}: changed something`);
     console.log(`${city}: ${what} refused with ${result} in district ${e.record.district}`);
   });
-  break;
+}
+
+// The district's next keyframe shows the build: it is a diff against the generated city, so the lot must be listed.
+{
+  const district = built.command.record.district;
+  const after = built.command.record.tick;
+  const deadline = Date.now() + 240_000;
+  let frame;
+  while (!(frame = mayor.records.find((r) => r.district === district && r.keyframe && r.tick > after)) && Date.now() < deadline) {
+    await sleep(500);
+  }
+  if (!frame) fail(`no keyframe in district ${district} after tick ${after}`);
+  if (!frame.keyframe.has(built.lot)) fail(`the keyframe at tick ${frame.tick} does not list the built lot ${built.lot}`);
+  console.log(`${city}: keyframe at tick ${frame.tick} lists lot ${built.lot}`);
 }
 
 // Take what was built down again, so the city is as the next check expects. Each one is a demolish that must apply.
-for (let attempt = 0; attempt < 3; attempt++) {
-  const seen = await mayor.send(taken.map((lot) => [3000 + attempt * 100 + lot, demolish(lot)]));
-  if (!seen) continue;
+{
+  const seen = await mayor.send(taken.map((lot) => [3000 + lot, demolish(lot)]));
   for (const lot of taken) {
-    const e = seen.get(3000 + attempt * 100 + lot);
+    const e = seen.get(3000 + lot);
     if (e.result !== APPLIED) fail(`demolishing lot ${lot}: result ${e.result}`);
     if (!e.record.events.some((x) => x.type === "demolished" && x.lot === lot)) fail(`lot ${lot}: no demolished event`);
   }
-  break;
 }
 mayor.close();
 console.log(`${city}: commands applied, attributed and refused as expected`);

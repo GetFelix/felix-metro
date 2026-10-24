@@ -158,7 +158,8 @@ It signs in as `mayor` (`GET /token?sub=mayor` on the dev IdP, no `Origin` heade
 publishes `build` commands until one takes, and checks that the district of that lot
 records the command with its sender and the `built` event within a tick. It then sends
 commands the sim must refuse and checks each is recorded with its reason and changes
-nothing. A `viewer` cannot publish.
+nothing. It then waits for the district's next keyframe (up to a minute at the default speed)
+and checks it lists the built lot, and demolishes what it built. A `viewer` cannot publish.
 
 The sim runs at 4 ticks a second. Its speed endpoint accepts only loopback, so it is
 not published; `dev/speed.sh` runs `curl` inside the sim's container:
