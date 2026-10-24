@@ -360,7 +360,7 @@ ends.
 
 Space and the pill's Play button play and pause from the past on screen. **Back to live** does not cut: the city's time
 races forward with the cars moving, at the city's own pace plus a steady gain that closes the distance in about three
-seconds (at most 960 ticks a second in all), and when the playhead is within a tick of the live state's newest tick the
+seconds (at most 960 ticks a second in all), paced by the wall clock so a slow frame covers the ticks it owes, and when the playhead is within a tick of the live state's newest tick the
 page hands over. Within a second of the tip it hands over at once. Space and Play do nothing during the race, when no
 control is shown. If the sim restarts mid-playback (a new epoch numbers its ticks from the start again) the playback
 ends and the page shows the live city. The playback's session is closed when the page is left. The live state has taken every

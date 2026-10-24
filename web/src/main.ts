@@ -54,8 +54,11 @@ declare global {
     __metro?: {
       /** Open the history connection ahead of the first seek. */
       prepare(): Promise<void>;
-      /** Draw the city at `tick`; resolves after the first frame that shows it. */
-      seek(tick: number): Promise<{
+      /** Draw the city at `tick`; resolves after the first frame that shows it, or with `draw` false as soon as it is on screen. */
+      seek(
+        tick: number,
+        draw?: boolean,
+      ): Promise<{
         tick: number;
         requested: number;
         exact: boolean;
@@ -91,6 +94,11 @@ declare global {
         head: number | null;
         started: number | null;
         joined: number | null;
+        /** The live tip when it joined. */
+        tipAtJoin: number | null;
+        /** The live tip now, and the records queued ahead of the playhead per district. */
+        tail: number | null;
+        queued: number[];
         applied: [number, number, string][];
       };
     };
@@ -438,20 +446,38 @@ async function main() {
     /** Bumped when playback ends or the page leaves the past, so a start still opening its session can tell. */
     let playMark = 0;
     let opening = false;
-    const replay: { started: number | null; joined: number | null; applied: [number, number, string][] } = {
+    const replay: {
+      started: number | null;
+      joined: number | null;
+      tip: number | null;
+      applied: [number, number, string][];
+    } = {
       started: null,
       joined: null,
+      tip: null,
       applied: [],
     };
     // The playback's own session is closed by hand, so the gateway sees its subscriptions end.
-    addEventListener('pagehide', () => stopPlayback());
+    addEventListener('pagehide', () => {
+      playMark++;
+      playback?.close();
+      playback = null;
+    });
+    /** The seek a stopped playback started from, to give back if the scrub that stopped it comes to nothing. */
+    let resumeFrom: SeekResult | null = null;
     const stopPlayback = () => {
       playMark++;
       if (!playback) return;
       playback.close();
       playback = null;
       // The state is further on than the seek that made it.
+      resumeFrom = shownResult;
       shownResult = null;
+    };
+    /** A scrub that ended without drawing anything leaves the past on screen: let Play start from it again. */
+    const keepPlayable = () => {
+      if (shownResult === null && !playback && pastTick !== null) shownResult = resumeFrom;
+      resumeFrom = null;
     };
     /** Play from the past on screen; null when it cannot be, or when the page moved on while the session opened. */
     const openPlayback = async (): Promise<Playback | null> => {
@@ -492,6 +518,7 @@ async function main() {
     /** Show the live city at once, in place of the past. */
     const snapLive = () => {
       stopPlayback();
+      resumeFrom = null;
       swap(liveState!, null);
       shownResult = null;
     };
@@ -591,16 +618,19 @@ async function main() {
         const result = await s.seekOrNewest(tick);
         if (holdSeeks > 0) await new Promise((done) => setTimeout(done, holdSeeks));
         // Back to live came while this seek ran: what it found is no longer wanted.
-        if (!current()) return;
+        if (!current()) return keepPlayable();
         try {
           place(result);
+          resumeFrom = null;
         } catch (err) {
           // The state on screen may be half drawn; the next seek starts from a fresh one.
           shownResult = null;
+          resumeFrom = null;
           throw err;
         }
       } catch (err) {
-        if (!current()) return;
+        if (!current()) return keepPlayable();
+        keepPlayable();
         note(whyNot(err));
         if (err instanceof SeekError && err.reason === 'unretained') void refreshRange();
         if (err instanceof GatewayError && err.code === 'closed') dropHistory();
@@ -703,6 +733,7 @@ async function main() {
         // The live clock carries on from the tick drawn, so the cars under way do not jump.
         handOver(p, clockTicks);
         replay.joined = Math.floor(p.head);
+        replay.tip = liveState!.latest;
         snapLive();
         return null;
       }
@@ -720,7 +751,7 @@ async function main() {
       async prepare() {
         await (await seeker())?.warm();
       },
-      async seek(tick) {
+      async seek(tick, draw = true) {
         const started = performance.now();
         stopPlayback();
         try {
@@ -733,12 +764,7 @@ async function main() {
           swap(next, result.tick);
           shownResult = result;
           if (!result.exact) note('That exact moment is missing; showing the closest one before it.');
-          await new Promise<void>((done) => frameWaiters.push(done));
-          const drawnMs = performance.now() - started;
-          // Cars and walkers are made a share a frame, so the city fills in over the frames after the first.
-          let frames = 0;
-          while (traffic.waiting > 0 && frames++ < 600) await new Promise<void>((done) => frameWaiters.push(done));
-          return {
+          const report = (drawnMs: number) => ({
             tick: result.tick,
             requested: result.requested,
             exact: result.exact,
@@ -751,7 +777,14 @@ async function main() {
             settledMs: performance.now() - started,
             reads: opened.stats.reads,
             stats: { ...opened.stats },
-          };
+          });
+          if (!draw) return report(seekMs);
+          await new Promise<void>((done) => frameWaiters.push(done));
+          const drawnMs = performance.now() - started;
+          // Cars and walkers are made a share a frame, so the city fills in over the frames after the first.
+          let frames = 0;
+          while (traffic.waiting > 0 && frames++ < 600) await new Promise<void>((done) => frameWaiters.push(done));
+          return report(drawnMs);
         } catch (err) {
           if (!(err instanceof DOMException && err.name === 'AbortError')) note(whyNot(err));
           if (err instanceof GatewayError && err.code === 'closed') dropHistory();
@@ -759,7 +792,7 @@ async function main() {
         }
       },
       live: () => summary(liveState!),
-      shown: () => ({ ...summary(state!), past: pastTick, live: state === liveState }),
+      shown: () => ({ ...summary(state!), past: pastTick, live: state === liveState, speed: state!.speed }),
       historyOpen: () => history !== null,
       refresh: refreshRange,
       holdSeeks: (ms) => {
@@ -772,6 +805,9 @@ async function main() {
         head: playback?.head ?? null,
         started: replay.started,
         joined: replay.joined,
+        tipAtJoin: replay.tip,
+        tail: liveState?.latest ?? null,
+        queued: playback?.queued ?? [],
         applied: replay.applied,
       }),
     };
@@ -792,7 +828,7 @@ async function main() {
     for (const p of people) p.mixer.update(dt);
     if (state && traffic && liveInfo) {
       // The clock runs on real time even when frames are slow, so it stays with the sim.
-      const played = playFrame?.(still ? 0 : Math.min(1, frameMs / 1000)) ?? null;
+      const played = playFrame?.(still ? 0 : frameMs / 1000) ?? null;
       const tick =
         played ?? pastTick ?? clockTicks.advance(Math.min(1, frameMs / 1000), state.latest, state.speed, link.down);
       if (!Number.isNaN(tick)) {

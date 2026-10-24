@@ -50,7 +50,9 @@ await page.evaluate(() => window.__metro.prepare());
 await page.evaluate(() => {
   window.__frames = [];
   const record = () => {
+    window.__fc = (window.__fc ?? 0) + 1;
     window.__frames.push({
+      t: performance.now(),
       joined: window.__metro.playback().joined !== null,
       tick: window.__live.tick,
       where: window.__live.where().map((w) => [w.resident, w.x, w.z]),
@@ -147,8 +149,7 @@ for (let attempt = 1; attempt <= ATTEMPTS && compared < MIN_COMPARED; attempt++)
   // The page now shows the live city, and joined at its tip.
   if (done.shown.past !== null || !done.shown.live) await fail('after the join the page is not showing the live state');
   if (done.shown.sig !== done.liveNow.sig) await fail('after the join the city is not the live one');
-  if (Math.min(...done.liveNow.ticks) - joined > 160)
-    await fail(`joined at ${joined}, the live tip is ${Math.min(...done.liveNow.ticks)}`);
+  if (done.tipAtJoin - joined > 5) await fail(`joined at ${joined}, the live tip was ${done.tipAtJoin} at that moment`);
   if (await page.locator('#past').isVisible()) await fail('the past pill is still showing after the join');
 
   // Nothing under way jumped at the join: the tick never went back, and no resident moved much further between the
@@ -162,7 +163,12 @@ for (let attempt = 1; attempt <= ATTEMPTS && compared < MIN_COMPARED; attempt++)
     frames.findIndex((f) => f.tick <= started + HOUR_TICKS),
   );
   const lo = Math.max(1, landed + 1, j - 12);
-  if (j < landed + 3) await fail(`the join was found at frame ${j} of the record, the seek landed at ${landed}`);
+  // Enough frames between the seek and the join to see the join in; a slow software renderer draws too few to ask for 8.
+  const span = frames[j] && frames[landed] ? (frames[j].t - frames[landed].t) / 1000 : 0;
+  const fps = span > 0 ? (j - landed) / span : 0;
+  const need = fps >= 4 ? 8 : 3;
+  console.log(`the join was found ${j - landed} frames after the seek landed (${fps.toFixed(1)} fps, ${need} needed)`);
+  if (j < landed + need) await fail(`the join was found at frame ${j} of the record, the seek landed at ${landed}`);
   for (let i = lo; i < Math.min(frames.length, j + 4); i++) {
     if (frames[i].tick < frames[i - 1].tick - 1e-6)
       await fail(`the tick went back from ${frames[i - 1].tick} to ${frames[i].tick} at the join`);
@@ -185,39 +191,94 @@ for (let attempt = 1; attempt <= ATTEMPTS && compared < MIN_COMPARED; attempt++)
 if (compared < MIN_COMPARED)
   await fail(`fewer than ${MIN_COMPARED} resident steps were compared around the join in any attempt`);
 
-/** Seek to `from`, then click Back to live and say how many seconds the page took to show the live city. */
-const backToLive = async (from, bound) => {
-  const seeked = await page.evaluate((t) => window.__metro.seek(t), from);
-  if (!(await page.evaluate(() => window.__metro.play()))) await fail('there was nothing to play from the past');
-  await page.waitForTimeout(300);
-  await page.evaluate(() => window.__metro.play());
+const tipOf = () => Math.min(...window.__metro.live().ticks);
+
+/**
+ * Seek to `from`, then click Back to live and say how many seconds the page took to show the live city. The live tip and
+ * the playhead are read just before the click, since the tip moves while the seek and the playback open. During the
+ * catch-up the gap, head, tail, queues and frame rate are logged once a second.
+ */
+const backToLive = async (from, bound, { play = true, within = Infinity, draw = true } = {}) => {
+  const seeked = await page.evaluate(([t, d]) => window.__metro.seek(t, d), [from, draw]);
+  if (play) {
+    if (!(await page.evaluate(() => window.__metro.play()))) await fail('there was nothing to play from the past');
+    await page.waitForTimeout(300);
+    await page.evaluate(() => window.__metro.play());
+  }
+  const before = await page.evaluate(() => ({
+    tip: Math.min(...window.__metro.live().ticks),
+    head: window.__metro.playback().head ?? window.__metro.shown().past,
+    speed: window.__metro.shown().speed,
+    frames: window.__fc,
+  }));
+  const gap = before.tip - before.head;
+  if (gap > within) return { skipped: true, gap };
   const began = Date.now();
   await page.click('#back-live');
-  await page
-    .waitForFunction(() => window.__metro.shown().live, null, { polling: 50, timeout: bound * 1000 })
-    .catch(async () => {
+  let lastLog = began;
+  let lastFrames = before.frames;
+  for (;;) {
+    const now = await page.evaluate(() => ({
+      live: window.__metro.shown().live,
+      playback: window.__metro.playback(),
+      frames: window.__fc,
+    }));
+    if (now.live) break;
+    const elapsed = Date.now() - began;
+    if (Date.now() - lastLog >= 1000) {
+      const p = now.playback;
+      const fps = ((now.frames - lastFrames) * 1000) / (Date.now() - lastLog);
+      console.log(
+        `  catch-up ${(elapsed / 1000).toFixed(1)} s: gap ${(p.tail - p.head).toFixed(0)}, head ${p.head?.toFixed(0)}, tail ${p.tail}, queued ${JSON.stringify(p.queued)}, ${fps.toFixed(1)} fps`,
+      );
+      lastLog = Date.now();
+      lastFrames = now.frames;
+    }
+    if (elapsed > bound * 1000) {
       const where = await page.evaluate(() => ({
-        playback: window.__metro.playback(),
+        playback: { ...window.__metro.playback(), applied: undefined },
         shown: window.__metro.shown(),
         live: window.__metro.live().ticks,
       }));
-      await fail(`Back to live from tick ${seeked.tick} had not arrived after ${bound} s: ${JSON.stringify(where)}`);
-    });
-  return (Date.now() - began) / 1000;
+      await fail(
+        `Back to live from tick ${seeked.tick} (${gap} ticks behind at the click) had not arrived after ${bound} s: ${JSON.stringify(where)}`,
+      );
+    }
+    await page.waitForTimeout(50);
+  }
+  return { seconds: (Date.now() - began) / 1000, gap, speed: before.speed };
 };
 
-// Near the tip, which moves away while the page closes on it.
+// Near the tip, which moves away while the page closes on it: the design is about 3 s, 5 with the session and frame slack.
 for (const back of [8, 40]) {
-  const live = Math.floor(await page.evaluate(() => window.__live.tick));
-  const seconds = await backToLive(live - back, 12);
-  console.log(`back to live from ${back} ticks back took ${seconds.toFixed(1)} s`);
+  const live = Math.floor(await page.evaluate(tipOf));
+  const { seconds, gap } = await backToLive(live - back, 5);
+  console.log(`back to live from ${back} ticks back (${gap} behind at the click) took ${seconds.toFixed(1)} s`);
+}
+
+// A click within a second of the tip shows the live city at once. The seek takes a while, so the tip is read after it
+// lands, with no wait for the city to fill in, and a seek is tried again until it lands that close; the gaps tried are logged.
+{
+  let snapped = null;
+  const gaps = [];
+  for (let i = 0; i < 8 && !snapped; i++) {
+    const live = Math.floor(await page.evaluate(tipOf));
+    const speed = await page.evaluate(() => window.__metro.shown().speed);
+    const result = await backToLive(live - 1, 1, { play: false, draw: false, within: Math.max(4, speed) - 1 });
+    gaps.push(result.gap);
+    if (!result.skipped) snapped = result;
+  }
+  if (!snapped) await fail(`no seek landed within a second of the tip to test the snap: gaps ${JSON.stringify(gaps)}`);
+  console.log(
+    `back to live inside the snap window: ${snapped.gap} behind, took ${snapped.seconds.toFixed(2)} s (gaps tried ${JSON.stringify(gaps)})`,
+  );
 }
 
 // From many city hours back, as far as the sim has run: the time is logged, and only a very slow one fails.
 const live = Math.floor(await page.evaluate(() => window.__live.tick));
 const far = Math.max(0, live - 12 * HOUR_TICKS);
 if (live - far > 3 * HOUR_TICKS) {
-  const seconds = await backToLive(far, 15);
+  const { seconds } = await backToLive(far, 15);
   console.log(
     `back to live from ${((live - far) / HOUR_TICKS).toFixed(1)} city hours back took ${seconds.toFixed(1)} s`,
   );

@@ -32,6 +32,9 @@ const CATCH_UP_SECONDS = 3;
 const MAX_CATCH_UP_TPS = 960;
 const MIN_CLOSING_TPS = 8;
 
+/** The most wall-clock seconds one frame moves an ordinary playback, so a stalled tab does not leap. A catch-up is not capped. */
+const MAX_PLAY_DT = 1;
+
 const slot = (district: number) => `p${String(district).padStart(2, '0')}`;
 
 interface Queued {
@@ -210,6 +213,11 @@ export class Playback {
     return Math.min(MAX_CATCH_UP_TPS, own + this.closing);
   }
 
+  /** Records waiting ahead of the playhead, per district. */
+  get queued(): number[] {
+    return this.pumps.map((p) => p.queue.length);
+  }
+
   /** Whether the playhead has reached the live tip's render delay: time to hand over. */
   get atTip(): boolean {
     return this.head >= this.options.tail() - JOIN_LAG;
@@ -218,7 +226,9 @@ export class Playback {
   /** Move the playhead on `dt` seconds and take the records it has come to. */
   advance(dt: number): void {
     if (this.failure) return;
-    const target = this.paused ? this.head : this.head + dt * this.speed();
+    // A catch-up keeps to wall-clock time: a slow frame covers the ticks it owes, or the race takes longer on a slow device.
+    const step = this.catchingUp ? dt : Math.min(dt, MAX_PLAY_DT);
+    const target = this.paused ? this.head : this.head + step * this.speed();
     this.apply(Math.floor(target) + APPLY_AHEAD);
     // Not past what every district has, so a district still reading holds the others back.
     this.head = Math.max(this.head, Math.min(target, this.state.latest));
@@ -231,8 +241,11 @@ export class Playback {
         // A restarted sim numbers its ticks from the start again, below the playhead, which cannot follow it.
         const had = this.state.epochOf(record.district);
         if (had >= 0 && record.epoch > had) {
-          this.restarted = true;
-          this.failure ??= new Error('the city restarted');
+          // An earlier failure keeps its reason.
+          if (!this.failure) {
+            this.restarted = true;
+            this.failure = new Error('the city restarted');
+          }
           this.options.onFail?.(this.failure);
           return;
         }

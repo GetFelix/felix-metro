@@ -250,6 +250,44 @@ describe('Playback', () => {
     expect(seconds).toBeLessThan(3.5);
   });
 
+  it('paces a catch-up by wall-clock time, however long a frame took', async () => {
+    const moved = async (seconds: number) => {
+      const { p } = start(new FakeLog(700), 200);
+      await settle();
+      p.catchUp();
+      const at = p.head;
+      p.advance(seconds);
+      return p.head - at;
+    };
+    const one = await moved(1);
+    const slow = await moved(2);
+    expect(one).toBeGreaterThan(50);
+    expect(slow).toBeGreaterThan(1.9 * one);
+  });
+
+  it('caps what one frame moves an ordinary playback', async () => {
+    const { p } = start(new FakeLog(700), 200);
+    await settle();
+    const at = p.head;
+    p.advance(30);
+    expect(p.head - at).toBeLessThanOrEqual(10 + 1e-9);
+  });
+
+  it('keeps the first failure as the reason when a restart follows it', async () => {
+    const log = new FakeLog(300);
+    const { p } = start(log, 250);
+    await settle();
+    const first = new Error('read failed');
+    p.failure = first;
+    p.restarted = false;
+    log.epoch = 2;
+    const parsed = JSON.parse(new TextDecoder().decode(record(251, 0, 10, 2)));
+    (p as unknown as { pumps: { queue: unknown[] }[] }).pumps[0]!.queue.unshift({ offset: 0, record: parsed });
+    (p as unknown as { apply(limit: number): void }).apply(1000);
+    expect(p.failure).toBe(first);
+    expect(p.restarted).toBe(false);
+  });
+
   it('stops, as restarted, when a new epoch numbers its ticks from the start again', async () => {
     const log = new FakeLog(300);
     const { p, failures } = start(log, 250);
