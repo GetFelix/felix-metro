@@ -14,6 +14,7 @@
 - A commanded speed is the city's speed: the operator endpoint reports it, and it holds
   until someone sets another. A paused city holds a bounded queue of commands and
   records the overflow as refused (result 9) once it resumes.
+- The sim keeps retrying to follow a city's command stream at startup instead of running without builders after one refusal.
 - `place road`, `zone` and `fork` are refused as unsupported for now.
 - The page's fold follows `road` events and a keyframe's road list.
 - `dev/check-commands.mjs` publishes commands as a mayor from a plain client; the

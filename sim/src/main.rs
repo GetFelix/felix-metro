@@ -75,15 +75,8 @@ async fn main() -> Result<()> {
                     }
                 },
             };
-            // A city whose command stream is missing still runs, just without builders.
-            let commands = match follow_commands(Arc::clone(&client), &connection, &spec.name).await
-            {
-                Ok(commands) => Some(commands),
-                Err(err) => {
-                    error!(city = %spec.name, error = %format!("{err:#}"), "builders cannot reach the city");
-                    None
-                }
-            };
+            let commands =
+                follow_commands(Arc::clone(&client), connection.clone(), spec.name.clone());
             announce_later(
                 Arc::clone(&client),
                 connection,
@@ -96,7 +89,7 @@ async fn main() -> Result<()> {
                 speed_out: Some(control),
                 ..Settings::default()
             };
-            run_city_with(&spec.name, city, settings, log, commands)
+            run_city_with(&spec.name, city, settings, log, Some(commands))
                 .await
                 .map(|_| spec.name)
         });

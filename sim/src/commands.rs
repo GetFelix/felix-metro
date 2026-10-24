@@ -3,14 +3,13 @@
 
 use std::sync::Arc;
 
-use anyhow::{Context, Result};
 use felix_client::ClusterClient;
 use felix_metro_core::record::{
     Command, CommandRecord, Event, REFUSED_BAD_SPEED, REFUSED_BUSY, REFUSED_MALFORMED,
     REFUSED_UNSUPPORTED, RESULT_APPLIED, principal_hash, split_stamp,
 };
 use tokio::sync::mpsc;
-use tracing::warn;
+use tracing::{info, warn};
 
 use crate::control::check_speed;
 use crate::felix::Connection;
@@ -63,20 +62,30 @@ pub fn commands_stream(city: &str) -> String {
 
 /// Follows a city's command stream from its tail, so a restart does not run
 /// what was asked while the sim was down. Commands arrive on the channel in
-/// stream order.
-pub async fn follow(
+/// stream order. The subscription opens in the background and is retried until
+/// it does, because a broker still electing its leaders refuses it at startup;
+/// commands sent before it opens are not seen.
+pub fn follow(
     client: Arc<ClusterClient>,
-    connection: &Connection,
-    city: &str,
-) -> Result<mpsc::Receiver<Incoming>> {
-    let stream = commands_stream(city);
-    let mut subscription = client
-        .subscribe_shard(&connection.tenant, &connection.namespace, &stream, 0, None)
-        .await
-        .with_context(|| format!("follow {stream}"))?;
+    connection: Connection,
+    city: String,
+) -> mpsc::Receiver<Incoming> {
+    let stream = commands_stream(&city);
     let (send, receive) = mpsc::channel(1024);
-    let city = city.to_owned();
     tokio::spawn(async move {
+        let mut subscription = loop {
+            match client
+                .subscribe_shard(&connection.tenant, &connection.namespace, &stream, 0, None)
+                .await
+            {
+                Ok(subscription) => break subscription,
+                Err(err) => {
+                    warn!(city, error = %format!("{err:#}"), "cannot follow the command stream yet");
+                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                }
+            }
+        };
+        info!(city, "following the command stream");
         loop {
             match subscription.next_event().await {
                 Ok(Some(event)) => {
@@ -99,7 +108,7 @@ pub async fn follow(
             }
         }
     });
-    Ok(receive)
+    receive
 }
 
 /// Commands a paused city holds to run once it resumes.

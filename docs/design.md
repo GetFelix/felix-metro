@@ -271,14 +271,17 @@ change it wins, a commanded speed stays until someone sets another, and a
 
 On a restart the sim begins again at tick 0 with the generated city: what
 builders built (`World.built`) is not persisted, and the log's older epoch
-still shows it. The command follower starts at the stream's tail, so commands
-sent while the sim was down are not run. While running, the Felix client's
-subscription survives a lost connection or a moved shard by resubscribing at the
-offset after the last command it delivered (or at the tail it first joined, if
-none yet), so nothing is skipped or repeated. An error it reports once, such as
-falling behind, is its last: the follower logs it, waits a second and asks
-again, and if the subscription then reports the stream closed the follower
-stops and the city runs without builders until the sim restarts.
+still shows it. The command follower starts at the stream's tail, so commands sent while the
+sim was down are not run. It opens the subscription in the background and
+retries every second until the broker accepts it (a broker still electing
+leaders refuses at startup), so commands sent before it opens are not seen.
+Once open, the Felix client's subscription survives a lost connection or a
+moved shard by resubscribing at the offset after the last command it delivered
+(or at the tail it first joined, if none yet), so nothing is skipped or
+repeated. An error it reports is the last thing that subscription yields: the
+follower logs it, waits a second and asks the same subscription again, and if
+it then reports the stream closed the follower stops and the city runs without
+builders until the sim restarts.
 
 | Result | Meaning |
 |---|---|

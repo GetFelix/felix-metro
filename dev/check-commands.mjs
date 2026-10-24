@@ -232,6 +232,21 @@ const mayor = await joined("mayor");
 mayor.follow();
 while (mayor.newest < 0) await sleep(200);
 
+// The sim opens its command subscription in the background, so commands sent before it is up are not seen.
+// A command past the last lot is refused and changes nothing, which makes it a harmless probe: send one
+// until its result comes back.
+{
+  const deadline = Date.now() + 120_000;
+  for (let n = 0; ; n++) {
+    const answer = await mayor.publish(commandBytes(500 + n, build(4_000_000_000)));
+    if (answer.type !== "ack") fail(`the readiness probe was refused: ${answer.code}`);
+    const until = Date.now() + 5000;
+    while (Date.now() < until && !mayor.records.some((r) => r.events.some((e) => e.type === "command" && e.id === 500 + n))) await sleep(100);
+    if (mayor.records.some((r) => r.events.some((e) => e.type === "command" && e.id >= 500 && e.id <= 500 + n))) break;
+    if (Date.now() > deadline) fail("the sim never answered a command");
+  }
+}
+
 // Some lots hold a building, so probe for ground that is free: a batch at a time, until one of them takes the build.
 let built = null;
 const taken = [];
