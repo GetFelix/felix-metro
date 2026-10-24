@@ -17,7 +17,7 @@ anyhow = "=1.0.104"
 felix-client = "=0.6.0-preview.9"
 felix-metro-core = { path = "../core" }
 felix-wire = "=0.6.0-preview.9"
-tokio = { version = "=1.53.1", features = ["rt-multi-thread", "macros", "net", "time"] }
+tokio = { version = "=1.53.1", features = ["rt-multi-thread", "macros", "net", "time", "io-util", "sync"] }
 tracing = "=0.1.44"
 tracing-subscriber = { version = "=0.3.23", features = ["env-filter"] }
 

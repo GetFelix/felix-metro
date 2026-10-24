@@ -3,7 +3,9 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use felix_metro_core::City;
-use felix_metro_core::record::TickRecord;
+use felix_metro_core::record::{Event, TickRecord};
+
+use tokio::sync::watch;
 
 use super::*;
 
@@ -35,6 +37,8 @@ struct Memory {
     /// `(district, offset)` of every append, in the order they happened.
     order: Arc<Mutex<Vec<(u16, u64)>>>,
     script: Script,
+    /// Called with `(district, offset)` after each append.
+    hook: Arc<dyn Fn(u16, u64) + Send + Sync>,
 }
 
 impl Memory {
@@ -45,7 +49,26 @@ impl Memory {
             sends: Arc::default(),
             order: Arc::default(),
             script: Arc::new(script),
+            hook: Arc::new(|_, _| {}),
         }
+    }
+
+    /// A healthy log that sets the speed after district 0 commits the given
+    /// offsets. The runner reads the speed only once every district has
+    /// answered, so each change lands on the tick after.
+    fn steered(changes: &[(u64, u8)], speed: watch::Sender<u8>) -> Memory {
+        let changes = changes.to_vec();
+        let mut log = Memory::healthy();
+        log.hook = Arc::new(move |district, offset| {
+            if district == 0 {
+                for (at, to) in &changes {
+                    if *at == offset {
+                        speed.send_replace(*to);
+                    }
+                }
+            }
+        });
+        log
     }
 
     fn healthy() -> Memory {
@@ -69,10 +92,12 @@ impl Memory {
             };
         }
         shard.push(record);
+        drop(shards);
         self.order.lock().unwrap().push((district, expected));
         if keyframe {
             self.keyframes.lock().unwrap().insert(district, expected);
         }
+        (self.hook)(district, expected);
         Write::Written
     }
 }
@@ -322,7 +347,7 @@ async fn a_refusal_that_clears_is_ridden_out() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn a_speed_of_zero_is_refused() {
+async fn a_city_that_starts_paused_with_no_way_to_resume_is_refused() {
     let mut s = settings(5);
     s.ticks_per_second = 0;
     assert!(
@@ -330,6 +355,215 @@ async fn a_speed_of_zero_is_refused() {
             .await
             .is_err()
     );
+}
+
+#[tokio::test(start_paused = true)]
+async fn only_pause_and_the_three_speeds_are_accepted() {
+    for n in [1, 5, 15, 17, 255] {
+        let mut s = settings(5);
+        s.ticks_per_second = n;
+        assert!(
+            run_city("harbor", city(), s, Memory::healthy())
+                .await
+                .is_err(),
+            "{n}"
+        );
+    }
+    let (tx, rx) = watch::channel(4u8);
+    let mut s = settings(5);
+    s.speed = Some(rx);
+    tx.send_replace(9);
+    assert!(
+        run_city("harbor", city(), s, Memory::healthy())
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn each_speed_runs_at_its_rate_with_one_record_per_tick_per_district() {
+    for (speed, period_ms) in [(4u8, 250u64), (8, 125), (16, 62)] {
+        let log = Memory::healthy();
+        let mut s = settings(41);
+        s.ticks_per_second = speed;
+        let start = Instant::now();
+        run_city("harbor", city(), s, log.clone()).await.unwrap();
+        assert_whole(&log, 41);
+        // The first tick is due at once. 1 s / 16 is 62.5 ms, which the
+        // timer rounds down to a whole millisecond.
+        let periods = 40 * period_ms;
+        let took = start.elapsed().as_millis() as u64;
+        assert!(took.abs_diff(periods) <= 40, "{speed} Hz took {took} ms");
+        for district in 0..4 {
+            for r in log.records(district) {
+                assert_eq!(r.header.speed, speed);
+                assert!(!r.events.iter().any(|e| matches!(e, Event::Speed { .. })));
+            }
+        }
+    }
+}
+
+/// Speed header and `speed` events of one district, by tick.
+fn speeds(log: &Memory, district: u16) -> Vec<(u32, u8, Option<u8>)> {
+    log.records(district)
+        .iter()
+        .map(|r| {
+            let event = r.events.iter().find_map(|e| match e {
+                Event::Speed { ticks_per_second } => Some(*ticks_per_second),
+                _ => None,
+            });
+            (r.header.tick, r.header.speed, event)
+        })
+        .collect()
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_change_lands_on_the_next_tick_in_every_district_and_on_no_other() {
+    let (tx, rx) = watch::channel(4u8);
+    let log = Memory::steered(&[(9, 8), (19, 16), (29, 4)], tx);
+    let mut s = settings(40);
+    s.speed = Some(rx);
+    let start = Instant::now();
+    run_city("harbor", city(), s, log.clone()).await.unwrap();
+    assert_whole(&log, 40);
+    for district in 0..4 {
+        for (tick, speed, event) in speeds(&log, district) {
+            let expect = match tick {
+                0..=9 => 4,
+                10..=19 => 8,
+                20..=29 => 16,
+                _ => 4,
+            };
+            let change = matches!(tick, 10 | 20 | 30).then_some(expect);
+            assert_eq!(
+                (speed, event),
+                (expect, change),
+                "district {district} tick {tick}"
+            );
+        }
+    }
+    // Each stretch runs at its own rate, and the first tick after a change
+    // waits one period of the new rate.
+    let took = start.elapsed().as_millis() as u64;
+    assert!(took.abs_diff(6625) <= 60, "took {took} ms");
+}
+
+#[tokio::test(start_paused = true)]
+async fn pause_commits_no_ticks_and_resume_continues_without_a_burst() {
+    let (tx, rx) = watch::channel(8u8);
+    let log = Memory::steered(&[(9, 0)], tx.clone());
+    let resume = tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_secs(60)).await;
+        tx.send_replace(16);
+    });
+    let mut s = settings(30);
+    s.ticks_per_second = 8;
+    s.speed = Some(rx);
+    let start = Instant::now();
+    let probe = log.clone();
+    let watcher = tokio::spawn(async move {
+        // Well inside the pause: the log must not have moved.
+        tokio::time::sleep(Duration::from_secs(30)).await;
+        probe.records(0).len()
+    });
+    run_city("harbor", city(), s, log.clone()).await.unwrap();
+    resume.await.unwrap();
+    assert_eq!(watcher.await.unwrap(), 11, "ticks 0 to 10, then nothing");
+    assert_whole(&log, 30);
+    for district in 0..4 {
+        for (tick, speed, event) in speeds(&log, district) {
+            let expect = match tick {
+                0..=9 => (8, None),
+                10 => (0, Some(0)),
+                11 => (16, Some(16)),
+                _ => (16, None),
+            };
+            assert_eq!((speed, event), expect, "district {district} tick {tick}");
+        }
+    }
+    // Tick 11 at the resume, then 18 more at 16 Hz: a burst to catch up
+    // would end much sooner.
+    let took = start.elapsed().as_millis() as u64;
+    assert!(took.abs_diff(61_100) <= 100, "took {took} ms");
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_city_can_start_paused_and_then_run() {
+    let (tx, rx) = watch::channel(0u8);
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        tx.send_replace(8);
+    });
+    let log = Memory::healthy();
+    let mut s = settings(10);
+    s.ticks_per_second = 0;
+    s.speed = Some(rx);
+    let start = Instant::now();
+    run_city("harbor", city(), s, log.clone()).await.unwrap();
+    assert_whole(&log, 10);
+    assert_eq!(speeds(&log, 0)[0], (0, 8, Some(8)));
+    assert!(start.elapsed() >= Duration::from_secs(5));
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_log_and_the_city_are_the_same_at_any_speed_and_a_seek_finds_its_tick() {
+    let slow = Memory::healthy();
+    run_city("harbor", city(), settings(500), slow.clone())
+        .await
+        .unwrap();
+
+    let (tx, rx) = watch::channel(4u8);
+    let steered = Memory::steered(&[(99, 16), (199, 0), (300, 8), (399, 4)], tx.clone());
+    let resume = tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_secs(120)).await;
+        tx.send_replace(8);
+    });
+    let mut s = settings(500);
+    s.speed = Some(rx);
+    run_city("harbor", city(), s, steered.clone())
+        .await
+        .unwrap();
+    resume.await.unwrap();
+
+    for district in 0..4u16 {
+        let (a, b) = (slow.records(district), steered.records(district));
+        assert_eq!(a.len(), b.len());
+        for (x, y) in a.iter().zip(&b) {
+            // Only the speed and its events differ.
+            assert_eq!(x.keyframe, y.keyframe);
+            let rest = |r: &TickRecord| -> Vec<Event> {
+                r.events
+                    .iter()
+                    .filter(|e| !matches!(e, Event::Speed { .. }))
+                    .cloned()
+                    .collect()
+            };
+            assert_eq!(
+                rest(x),
+                rest(y),
+                "district {district} tick {}",
+                x.header.tick
+            );
+            assert_eq!(x.header.keyframe_offset, y.header.keyframe_offset);
+        }
+        // Seek the way a viewer will, by tick number alone: guess an offset,
+        // read it, and correct by the difference. Speed is never consulted.
+        for target in [0u32, 99, 100, 199, 200, 201, 300, 301, 399, 400, 499] {
+            let mut guess = 0u64;
+            for _ in 0..4 {
+                let shard = steered.shards.lock().unwrap();
+                let at = TickRecord::decode(&shard[&district][guess as usize]).unwrap();
+                if at.header.tick == target {
+                    break;
+                }
+                guess = (guess as i64 + i64::from(target) - i64::from(at.header.tick)) as u64;
+            }
+            let shard = steered.shards.lock().unwrap();
+            let found = TickRecord::decode(&shard[&district][guess as usize]).unwrap();
+            assert_eq!(found.header.tick, target, "district {district}");
+            assert_eq!(guess, u64::from(target));
+        }
+    }
 }
 
 #[tokio::test(start_paused = true)]

@@ -8,7 +8,8 @@
 //! - `METRO_TEST_BROKER` (default `127.0.0.1:5000`), `METRO_TEST_SERVER_NAME`
 //!   (`localhost`), `METRO_TEST_CA_FILE`, `METRO_TEST_TOKEN_FILE` (required)
 //! - `METRO_TEST_TENANT` (`metro`), `METRO_TEST_NAMESPACE` (`default`) and
-//!   `METRO_TEST_CITY` (`harbor`, 2 by 2 districts)
+//!   `METRO_TEST_CITY` (`harbor`, 2 by 2 districts) and `METRO_TEST_SPEED_CITY`
+//!   (`speedway`, also 2 by 2, for the speed test, which needs its own empty stream)
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -18,6 +19,9 @@ use felix_metro_core::{City, TICKS_PER_DAY};
 use felix_metro_sim::{
     Connection, FelixLog, Settings, connect, district_keys, events_stream, run_city,
 };
+use felix_metro_sim::{Log, Write};
+use std::time::Duration;
+use tokio::sync::watch;
 
 const DISTRICTS_PER_SIDE: u16 = 2;
 const DISTRICTS: usize = 4;
@@ -216,5 +220,153 @@ async fn a_city_runs_a_day_with_every_tick_in_every_district() {
             .unwrap();
         assert_eq!(state.version, Some(newest), "district {district}");
         assert_eq!(state.value.as_deref(), Some(&newest.to_le_bytes()[..]));
+    }
+}
+
+/// A log that sets the city's speed after district 0 commits given offsets.
+/// The runner reads the speed once every district has answered, so a change
+/// lands on the tick after.
+#[derive(Clone)]
+struct Steered {
+    inner: FelixLog,
+    changes: Arc<Vec<(u64, u8)>>,
+    speed: watch::Sender<u8>,
+    resume_after: Duration,
+}
+
+impl Log for Steered {
+    async fn commit(
+        &self,
+        district: u16,
+        expected: u64,
+        record: Vec<u8>,
+        keyframe: bool,
+    ) -> anyhow::Result<Write> {
+        let written = self
+            .inner
+            .commit(district, expected, record, keyframe)
+            .await?;
+        if district == 0 && written == Write::Written {
+            for (_, to) in self.changes.iter().filter(|(at, _)| *at == expected) {
+                self.speed.send_replace(*to);
+                if *to == 0 {
+                    // A pause needs someone to end it.
+                    let (speed, after) = (self.speed.clone(), self.resume_after);
+                    tokio::spawn(async move {
+                        tokio::time::sleep(after).await;
+                        speed.send_replace(4);
+                    });
+                }
+            }
+        }
+        Ok(written)
+    }
+
+    async fn read(&self, district: u16, offset: u64) -> anyhow::Result<Option<Vec<u8>>> {
+        self.inner.read(district, offset).await
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs a Felix broker; CI runs it"]
+async fn a_city_runs_through_pause_and_every_speed_with_no_gap() {
+    let connection = connection();
+    let city_name = var("METRO_TEST_SPEED_CITY").unwrap_or_else(|| "speedway".into());
+    let stream = events_stream(&city_name);
+    let client = Arc::new(connect(&connection).await.expect("connect to Felix"));
+    let inner = FelixLog::open(Arc::clone(&client), &connection, &city_name, DISTRICTS)
+        .await
+        .expect("open the city's stream");
+    let (speed, rx) = watch::channel(4u8);
+    let pause = Duration::from_millis(500);
+    let log = Steered {
+        inner,
+        // 4 Hz to tick 7, 8 Hz to 15, 16 Hz to 31, paused after 32, then 4 Hz.
+        changes: Arc::new(vec![(7, 8), (15, 16), (31, 0)]),
+        speed,
+        resume_after: pause,
+    };
+    let city = City::generate(&city_name, DISTRICTS_PER_SIDE).unwrap();
+    let ticks = 40;
+    let settings = Settings {
+        speed: Some(rx),
+        stop_at: Some(ticks),
+        ..Settings::default()
+    };
+    run_city(&city_name, city, settings, log)
+        .await
+        .expect("the run");
+
+    let mut by_district: HashMap<u16, Vec<TickRecord>> = HashMap::new();
+    for shard in 0..DISTRICTS as u32 {
+        let mut from = 0;
+        loop {
+            let page = client
+                .read(
+                    &connection.tenant,
+                    &connection.namespace,
+                    &stream,
+                    shard,
+                    from,
+                    None,
+                    1000,
+                )
+                .await
+                .unwrap();
+            if page.records.is_empty() {
+                break;
+            }
+            for record in &page.records {
+                let tick = TickRecord::decode(&record.payload).expect("a tick record");
+                by_district
+                    .entry(tick.header.district)
+                    .or_default()
+                    .push(tick);
+            }
+            from = page.next_offset;
+        }
+    }
+    assert_eq!(by_district.len(), DISTRICTS);
+    for district in 0..DISTRICTS as u16 {
+        let rows = &by_district[&district];
+        assert_eq!(rows.len(), ticks as usize, "district {district}");
+        for (i, record) in rows.iter().enumerate() {
+            let tick = i as u32;
+            assert_eq!(
+                record.header.tick, tick,
+                "district {district}: no gap or repeat"
+            );
+            let (speed, change) = match tick {
+                0..=7 => (4, None),
+                8 => (8, Some(8)),
+                9..=15 => (8, None),
+                16 => (16, Some(16)),
+                17..=31 => (16, None),
+                32 => (0, Some(0)),
+                33 => (4, Some(4)),
+                _ => (4, None),
+            };
+            let event = record.events.iter().find_map(|e| match e {
+                Event::Speed { ticks_per_second } => Some(*ticks_per_second),
+                _ => None,
+            });
+            assert_eq!(
+                (record.header.speed, event),
+                (speed, change),
+                "district {district} tick {tick}"
+            );
+        }
+        // The clock stood still for the pause: tick 33 came after it, and
+        // resuming did not squeeze the ticks after it together.
+        let wall = |t: usize| rows[t].header.wall_us;
+        assert!(
+            wall(33) - wall(32) >= 300_000,
+            "district {district}: {} us between the pause and the resume",
+            wall(33) - wall(32)
+        );
+        assert!(
+            wall(39) - wall(33) >= 1_000_000,
+            "district {district}: ticks 33 to 39 at 4 Hz"
+        );
     }
 }

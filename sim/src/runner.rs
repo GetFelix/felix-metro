@@ -6,11 +6,13 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use felix_metro_core::City;
-use felix_metro_core::record::{Header, TickRecord};
+use felix_metro_core::record::{Event, Header, TickRecord};
+use tokio::sync::watch;
 use tokio::task::JoinSet;
 use tokio::time::{Instant, MissedTickBehavior};
 use tracing::{info, warn};
 
+use crate::control::check_speed;
 use crate::latency::Window;
 use crate::world::World;
 
@@ -50,8 +52,12 @@ pub trait Log: Clone + Send + Sync + 'static {
 #[derive(Clone, Debug)]
 pub struct Settings {
     pub epoch: u32,
-    /// The city's speed: ticks per second, written in every header.
+    /// The city's speed when the run starts: 0 (paused), 4, 8 or 16 ticks per
+    /// second, written in every header. 0 needs `speed`, or the run never moves.
     pub ticks_per_second: u8,
+    /// Changes the speed while the run is going. The runner reads it between
+    /// ticks, so a change lands on the next tick.
+    pub speed: Option<watch::Receiver<u8>>,
     /// Wait out each tick's period. Tests turn this off to run a day in seconds.
     pub paced: bool,
     /// Stop before stepping this tick. `None` runs until stopped.
@@ -74,6 +80,7 @@ impl Default for Settings {
         Settings {
             epoch: 0,
             ticks_per_second: 4,
+            speed: None,
             paced: true,
             stop_at: None,
             commit_timeout: Duration::from_secs(5),
@@ -107,10 +114,16 @@ struct Shard {
 /// tick is never skipped: when a commit is slow the clock runs late. Fails if
 /// the log has a record this run did not write, which means another sim is
 /// live (or this one is restarting over its own history).
+///
+/// A speed change is applied before the next tick is stepped: that tick's
+/// header carries the new speed and each district's record a `speed` event.
+/// Changing to 0 commits that tick as the last one, then the clock waits; a
+/// resume continues at the next tick with no catch-up burst.
 pub async fn run_city<L: Log>(name: &str, city: City, settings: Settings, log: L) -> Result<Done> {
-    // Speed 0 would pace at 1 Hz and write 0 in the headers; pausing is a command.
-    if settings.ticks_per_second == 0 {
-        bail!("ticks_per_second must be 1 to 255");
+    let mut speed = check_speed(settings.ticks_per_second)?;
+    let mut control = settings.speed.clone();
+    if speed == 0 && control.is_none() {
+        bail!("the city starts paused and nothing can resume it");
     }
     let mut world = World::new(city);
     info!(
@@ -120,10 +133,10 @@ pub async fn run_city<L: Log>(name: &str, city: City, settings: Settings, log: L
         ticks_per_second = settings.ticks_per_second,
         "city starts"
     );
-    let period = Duration::from_secs(1) / u32::from(settings.ticks_per_second);
-    let mut timer = tokio::time::interval(period);
-    // A late tick is not made up with a burst: the next one is a period after it.
-    timer.set_missed_tick_behavior(MissedTickBehavior::Delay);
+    let mut period = tick_period(speed);
+    let mut timer = new_timer(period, true);
+    // Set once the tick that carried speed 0 is committed.
+    let mut parked = speed == 0;
     let mut shards = vec![Shard::default(); world.districts()];
     let mut retries = 0u64;
     let mut report = Report::new(Instant::now());
@@ -134,6 +147,31 @@ pub async fn run_city<L: Log>(name: &str, city: City, settings: Settings, log: L
                 ticks: tick,
                 retries,
             });
+        }
+        let mut changed = None;
+        if parked {
+            let Some(control) = control.as_mut() else {
+                bail!("the city is paused and nothing can resume it");
+            };
+            let resumed = *control
+                .wait_for(|s| *s != 0)
+                .await
+                .context("the speed control was dropped while the city was paused")?;
+            speed = check_speed(resumed)?;
+            period = tick_period(speed);
+            // The first tick back is due at once.
+            timer = new_timer(period, true);
+            changed = Some(speed);
+        } else if let Some(control) = control.as_mut() {
+            let wanted = check_speed(*control.borrow_and_update())?;
+            if wanted != speed {
+                speed = wanted;
+                changed = Some(speed);
+                if speed != 0 {
+                    period = tick_period(speed);
+                    timer = new_timer(period, false);
+                }
+            }
         }
         if settings.paced {
             timer.tick().await;
@@ -151,12 +189,16 @@ pub async fn run_city<L: Log>(name: &str, city: City, settings: Settings, log: L
                     epoch: settings.epoch,
                     district: district as u16,
                     tick,
-                    speed: settings.ticks_per_second,
+                    speed,
                     keyframe_offset,
                     wall_us,
                 },
                 keyframe: step.keyframe,
-                events: step.events,
+                events: changed
+                    .map(|ticks_per_second| Event::Speed { ticks_per_second })
+                    .into_iter()
+                    .chain(step.events)
+                    .collect(),
             };
             let bytes = record
                 .encode()
@@ -186,6 +228,7 @@ pub async fn run_city<L: Log>(name: &str, city: City, settings: Settings, log: L
             retries += u64::from(attempts - 1);
             report.retried += u64::from(attempts - 1);
         }
+        parked = speed == 0;
         let took = started.elapsed();
         report.latency.record(took);
         if took > period {
@@ -200,6 +243,24 @@ pub async fn run_city<L: Log>(name: &str, city: City, settings: Settings, log: L
             report.log(name, now);
         }
     }
+}
+
+/// The time between ticks at `speed`. Paused counts as 1 Hz, which only keeps
+/// the lateness check from dividing by zero.
+fn tick_period(speed: u8) -> Duration {
+    Duration::from_secs(1) / u32::from(speed.max(1))
+}
+
+/// A timer whose first tick is due at once or one period from now.
+fn new_timer(period: Duration, immediate: bool) -> tokio::time::Interval {
+    let mut timer = if immediate {
+        tokio::time::interval(period)
+    } else {
+        tokio::time::interval_at(Instant::now() + period, period)
+    };
+    // A late tick is not made up with a burst: the next one is a period after it.
+    timer.set_missed_tick_behavior(MissedTickBehavior::Delay);
+    timer
 }
 
 /// How a commit is sent again.
