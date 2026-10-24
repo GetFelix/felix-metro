@@ -249,7 +249,7 @@ export class Seeker {
 
   /** The newest record. The state read says how long the log was when it answered, which two reads confirm. */
   private async newest(d: number, signal: AbortSignal): Promise<Known> {
-    const { asOf } = await keyframePointer(this.cancellable(d, signal), d, this.districts, false);
+    const { asOf } = await keyframePointer(this.cancellable(signal), d, this.districts, false);
     if (asOf !== null && asOf > 0) {
       const [last, past] = await Promise.all([this.at(d, asOf - 1, signal), this.at(d, asOf, signal)]);
       if (last && last.offset === asOf - 1 && !past) return last;
@@ -265,7 +265,7 @@ export class Seeker {
   }
 
   /** The session as the pointer lookup reads it: its reads share and stop with the seek, and a trimmed start says so. */
-  private cancellable(d: number, signal: AbortSignal): History {
+  private cancellable(signal: AbortSignal): History {
     return {
       stateGet: (stream, key, entity) =>
         new Promise((resolve, reject) => {

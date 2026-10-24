@@ -329,7 +329,7 @@ To draw tick `T`:
 In the browser, `web/src/seek.ts` does this on a connection of its own, so a seek never waits behind the live
 subscriptions. One `Seeker` lives for the page: its session and caches carry from seek to seek, a newer seek cancels
 an older one (its queued reads leave the gateway's queue), identical reads in flight are shared, and the districts are
-read concurrently over a few connections, the pages of a range together once the first has said how big a page is. A seek returns each district's records from its keyframe and the offset of the tick's record, which
+read concurrently over several connections taken in turn, the pages of a range together once the first has said how big a page is. A seek returns each district's records from its keyframe and the offset of the tick's record, which
 is where a live subscription resumes, plus one.
 
 The log is ordered by `(epoch, tick)`. A restarted sim takes the next epoch, so the newest epoch that reaches a tick is the
