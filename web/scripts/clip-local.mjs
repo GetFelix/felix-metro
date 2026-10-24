@@ -1,16 +1,29 @@
 // Records the clip on this machine's GPU: the v0.1.0 release bundle's backend in Podman (nothing is built), this
 // checkout's page from the Vite dev server, a visible Edge window, then ffmpeg. Everything it starts is stopped again.
 // Usage: node scripts/clip-local.mjs [city] [seconds] [out dir]     (from web/, after `npm run core`)
-//   CLIP_SIM=native   runs this checkout's sim (cargo run -p felix-metro-sim) against the bundle's broker instead of the
+//   CLIP_SIM=native   runs this checkout's sim (built with cargo, run directly) against the bundle's broker instead of the
 //                     bundle's sim image, for a sim that has changed since the release.
 //   CLIP_WORK=dir     where the bundle and logs go (default: the system temp dir).
 //   CLIP_BROWSER=msedge|chrome   the browser to draw in (default msedge).
 //   CLIP_VERSION=0.1.0           the release bundle to take.
 //   CLIP_REUSE=1      use the backend already running from the bundle in CLIP_WORK, and leave it running.
+//   CLIP_GATEWAY_PORT=18787   host port for the bundle's gateway (the bundle's 8787), reached through Vite's proxy.
+//   CLIP_SIM_PORT=18090       host port for the native sim's control address (its default is 8090).
 // The bundle's host ports 5000/udp, 8080 and 8443 are moved to 5100, 28080 and 18443 so it can run beside another Felix
-// stack. The page opens at http://127.0.0.1:5173, the bundle's gateway answers /oidc and /ws through Vite's proxy.
+// stack. The page opens at http://127.0.0.1:5173 and the run stops if that port is taken.
+import net from 'node:net';
 import { execFileSync, spawn } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  openSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import os from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -24,6 +37,8 @@ const repo = join(web, '..');
 const bundle = join(work, `felix-metro-compose-${version}`);
 const native = process.env.CLIP_SIM === 'native';
 const reuse = !!process.env.CLIP_REUSE;
+const gatewayPort = process.env.CLIP_GATEWAY_PORT ?? '18787';
+const simPort = process.env.CLIP_SIM_PORT ?? '18090';
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 mkdirSync(work, { recursive: true });
 mkdirSync(out, { recursive: true });
@@ -56,28 +71,50 @@ try {
   if (!existsSync(bundle)) {
     log(`fetching the ${version} bundle`);
     const url = `https://github.com/GetFelix/felix-metro/releases/download/v${version}/felix-metro-compose-${version}.tar.gz`;
-    sh('bash', ['-c', `curl -fsSL '${url}' | tar xz -C '${work}'`]);
-    const file = join(bundle, 'compose.yml');
-    const moved = readFileSync(file, 'utf8')
-      .replace('127.0.0.1:5000:5000/udp', '127.0.0.1:5100:5000/udp')
-      .replace('127.0.0.1:8080:8080', '127.0.0.1:28080:8080')
-      .replace('127.0.0.1:8443:8443', '127.0.0.1:18443:8443');
-    writeFileSync(file, moved);
-    const up = join(bundle, 'up.sh');
-    writeFileSync(up, readFileSync(up, 'utf8').replace('127.0.0.1:8080/ready', '127.0.0.1:28080/ready'));
+    // Extract and patch in a scratch dir, then rename into place, so a failed run never leaves a half bundle behind.
+    const scratch = mkdtempSync(join(work, 'bundle-'));
+    try {
+      sh('bash', ['-c', `set -o pipefail; curl -fsSL '${url}' | tar xz -C '${scratch}'`]);
+      const dir = join(scratch, `felix-metro-compose-${version}`);
+      const patch = (name, edits) => {
+        let text = readFileSync(join(dir, name), 'utf8');
+        for (const [from, to] of edits) {
+          if (!text.includes(from)) throw new Error(`${name} of the ${version} bundle has no "${from}" to patch`);
+          text = text.replace(from, to);
+        }
+        writeFileSync(join(dir, name), text);
+      };
+      patch('compose.yml', [
+        ['127.0.0.1:5000:5000/udp', '127.0.0.1:5100:5000/udp'],
+        ['127.0.0.1:8080:8080', '127.0.0.1:28080:8080'],
+        ['127.0.0.1:8443:8443', '127.0.0.1:18443:8443'],
+        ['127.0.0.1:8787:8787', `127.0.0.1:${gatewayPort}:8787`],
+      ]);
+      patch('up.sh', [
+        ['127.0.0.1:8080/ready', '127.0.0.1:28080/ready'],
+        ['127.0.0.1:8787/oidc', `127.0.0.1:${gatewayPort}/oidc`],
+      ]);
+      renameSync(dir, bundle);
+    } finally {
+      rmSync(scratch, { recursive: true, force: true });
+    }
   }
 
   log('starting the backend');
-  if (!reuse) sh(join(bundle, 'up.sh'), [], { cwd: bundle });
+  if (!reuse && !native) sh(join(bundle, 'up.sh'), [], { cwd: bundle });
+  if (!reuse && native) await startWithoutSim();
 
   let speedCmd = join(bundle, 'speed.sh');
   if (native) {
-    // The sim container is replaced by this checkout's sim, which finds the bundle's broker on its moved port.
-    sh('podman', ['compose', '-f', join(bundle, 'compose.yml'), 'stop', 'sim'], { cwd: bundle });
-    const sim = spawn('cargo', ['run', '--release', '-p', 'felix-metro-sim'], {
+    // The bundle's sim container never starts, so the logs are empty for this checkout's sim; it finds the broker on its moved port.
+    // Built first and run directly: killing `cargo run` would leave the sim it spawned running.
+    const cargoEnv = { ...process.env, CARGO_TARGET_DIR: join(repo, 'target') };
+    sh('cargo', ['build', '--release', '-p', 'felix-metro-sim', '--bin', 'sim'], { cwd: repo, env: cargoEnv });
+    const sim = spawn(join(repo, 'target', 'release', 'sim'), [], {
       cwd: repo,
       env: {
         ...process.env,
+        SIM_CONTROL_ADDR: `127.0.0.1:${simPort}`,
         SIM_FELIX_BROKERS: '127.0.0.1:5100',
         SIM_FELIX_CA_FILE: join(bundle, 'state', 'broker-cert.pem'),
         SIM_FELIX_TOKEN_FILE: join(bundle, 'state', 'sim.token'),
@@ -89,21 +126,27 @@ try {
       },
       stdio: ['ignore', openLog('sim.log'), openLog('sim.log')],
     });
+    sim.on('exit', (code) => {
+      if (!stopped) log(`the sim exited (${code}); see sim.log`), stop(), process.exit(1);
+    });
+    sim.on('error', (e) => (log('the sim did not start:', e.message), stop(), process.exit(1)));
     children.push(sim);
     speedCmd = join(work, 'speed-native.sh');
     writeFileSync(
       speedCmd,
-      '#!/usr/bin/env bash\ncurl -fsS -X PUT -d "$2" "http://127.0.0.1:8090/cities/$1/speed"; echo\n',
+      `#!/usr/bin/env bash\ncurl -fsS -X PUT -d "$2" "http://127.0.0.1:${simPort}/cities/$1/speed"; echo\n`,
     );
     chmodSync(speedCmd, 0o755);
   }
 
   log('starting the page');
+  if (await portTaken(5173)) throw new Error('127.0.0.1:5173 is already in use; stop that server and run again');
   const vite = spawn(
     join(web, 'node_modules', '.bin', 'vite'),
     ['--port', '5173', '--strictPort', '--host', '127.0.0.1'],
     {
       cwd: web,
+      env: { ...process.env, FELIX_GATEWAY_PORT: gatewayPort },
       stdio: ['ignore', openLog('vite.log'), openLog('vite.log')],
     },
   );
@@ -116,10 +159,12 @@ try {
       )
     )
       break;
+    if (vite.exitCode !== null) throw new Error('vite exited; see vite.log');
     if (i > 60) throw new Error('the page did not come up; see vite.log');
     await new Promise((r) => setTimeout(r, 1000));
   }
 
+  if (vite.exitCode !== null) throw new Error('vite exited; see vite.log');
   log('recording');
   const clipOut = join(out, 'clip-out');
   sh('node', [join(web, 'scripts', 'clip.mjs'), 'http://127.0.0.1:5173', city, seconds, clipOut], {
@@ -187,6 +232,35 @@ try {
   log(`wrote ${mp4}`);
 } finally {
   stop();
+}
+
+// up.sh waits for a probe that needs the bundle's sim, so a native run starts the other services itself.
+async function startWithoutSim() {
+  const file = join(bundle, 'compose.yml');
+  const compose = (...a) => sh('podman', ['compose', '-f', file, ...a], { cwd: bundle });
+  try {
+    compose('down', '--volumes', '--remove-orphans');
+  } catch {}
+  rmSync(join(bundle, 'state'), { recursive: true, force: true });
+  mkdirSync(join(bundle, 'state'));
+  compose('up', '--detach', 'idp', 'controlplane', 'seed', 'broker', 'finalize', 'gateway');
+  for (let i = 0; ; i++) {
+    const ready = await fetch(`http://127.0.0.1:${gatewayPort}/oidc`).then(
+      (r) => existsSync(join(bundle, 'state', 'finalized')) && existsSync(join(bundle, 'state', 'sim.token')),
+      () => false,
+    );
+    if (ready) return;
+    if (i > 120) throw new Error('the backend did not come up');
+    await new Promise((r) => setTimeout(r, 2000));
+  }
+}
+
+function portTaken(port) {
+  return new Promise((resolve) => {
+    const probe = net.createServer();
+    probe.once('error', () => resolve(true));
+    probe.listen(port, '127.0.0.1', () => probe.close(() => resolve(false)));
+  });
 }
 
 function openLog(name) {

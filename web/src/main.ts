@@ -781,6 +781,7 @@ async function main() {
         const canvas = renderer.domElement;
         const drawn = performance.now();
         const finishAt = performance.now();
+        renderer.getContext().finish();
         const finishMs = performance.now() - finishAt;
         if (picture) {
           still ??= document.createElement('img');

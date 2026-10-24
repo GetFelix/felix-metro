@@ -52,16 +52,16 @@ there. [docs/design.md](docs/design.md) has the details.
 
 ## Status
 
-| M   | Milestone           | State                                                          |
-| --- | ------------------- | -------------------------------------------------------------- |
+| M   | Milestone           | State                                                                                                                                        |
+| --- | ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
 | 0   | The look, locked    | In progress: style frame, assets, daylight, post-processing and quality tiers done; instanced traffic, the UI shell and camera controls open |
-| 1   | A live city         | Done                                                           |
-| 2   | Time travel         | In progress: keyframes, seeking and the timeline scrubber done |
-| 3   | Follow a life       | Planned                                                        |
-| 4   | Build               | Planned                                                        |
-| 5   | Branching timelines | Planned                                                        |
-| 6   | Scale and failover  | Planned                                                        |
-| 7   | Self-hosting        | Planned                                                        |
+| 1   | A live city         | Done                                                                                                                                         |
+| 2   | Time travel         | In progress: keyframes, seeking and the timeline scrubber done                                                                               |
+| 3   | Follow a life       | Planned                                                                                                                                      |
+| 4   | Build               | Planned                                                                                                                                      |
+| 5   | Branching timelines | Planned                                                                                                                                      |
+| 6   | Scale and failover  | Planned                                                                                                                                      |
+| 7   | Self-hosting        | Planned                                                                                                                                      |
 
 What runs today: the sim, the dev stack and a browser page that shows a city live, with
 cars and walkers moving in time with the sim and the sun following the tick. The page
@@ -92,6 +92,11 @@ morning and, once the page has Play, played forward and back to live (skipped wi
 line until then). `density.json` and `shots.csv` count the cars and walkers drawn. Everything
 the script starts is stopped when it ends. The sim has to be native (`CLIP_SIM=native`)
 for any sim change that is not in the release bundle's image.
+
+The bundle's ports are moved so it runs beside another Felix stack: broker 5100/udp, 28080,
+18443, and the gateway on `CLIP_GATEWAY_PORT` (default 18787, which Vite proxies through
+`FELIX_GATEWAY_PORT`). The native sim's control address is `CLIP_SIM_PORT` (default 18090).
+The run stops if 5173 is already in use.
 
 The Clip workflow (`.github/workflows/clip.yml`, run by hand) does the same on a CI runner in
 software GL, as a fallback; it fails when no mp4 is written. `cargo run --release --example
