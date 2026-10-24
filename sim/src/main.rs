@@ -6,7 +6,8 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use felix_metro_core::City;
-use felix_metro_sim::{FelixLog, Settings, connect, run_city};
+use felix_metro_sim::{FelixLog, Settings, connect, run_city, serve_speed_control};
+use tokio::sync::watch;
 use tokio::task::JoinSet;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
@@ -30,6 +31,7 @@ async fn main() -> Result<()> {
     );
 
     let mut cities = JoinSet::new();
+    let mut controls = std::collections::HashMap::new();
     for spec in &config.cities {
         let city = City::generate(&spec.name, spec.districts_per_side)
             .with_context(|| format!("generate {}", spec.name))?;
@@ -40,13 +42,24 @@ async fn main() -> Result<()> {
             city.districts.len(),
         )
         .await?;
+        let (control, speed) = watch::channel(config.ticks_per_second);
+        controls.insert(spec.name.clone(), control);
         let settings = Settings {
             ticks_per_second: config.ticks_per_second,
+            speed: Some(speed),
             ..Settings::default()
         };
         let name = spec.name.clone();
         cities.spawn(async move { run_city(&name, city, settings, log).await.map(|_| name) });
     }
+    let listener = tokio::net::TcpListener::bind(config.control_addr)
+        .await
+        .with_context(|| format!("bind the speed endpoint {}", config.control_addr))?;
+    info!(addr = %config.control_addr, "speed endpoint");
+    cities.spawn(async move {
+        serve_speed_control(listener, controls).await?;
+        Ok("the speed endpoint".to_owned())
+    });
     // A city's clock only stops on an error, which ends the process: a sim that
     // lost one city would keep committing the others out of step with it.
     if let Some(done) = cities.join_next().await {

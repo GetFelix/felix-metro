@@ -22,7 +22,27 @@ cargo run -p felix-metro-sim
 | `SIM_FELIX_CA_FILE` | platform store | PEM certificates to trust for the broker |
 | `SIM_FELIX_TOKEN_FILE` | required | the sim's Felix token |
 | `SIM_TENANT`, `SIM_NAMESPACE` | `metro`, `default` | |
-| `SIM_TICKS_PER_SECOND` | `4` | the city's speed; a tick is 15 seconds of city time at any speed |
+| `SIM_TICKS_PER_SECOND` | `4` | the city's speed at start: 0 (paused), 4, 8 or 16; a tick is 15 seconds of city time at any speed |
+| `SIM_CONTROL_ADDR` | `127.0.0.1:8090` | where the speed endpoint listens; loopback only, it has no authentication |
+
+## Speed
+
+The speed is a target rate in ticks per second: 0 (paused), 4, 8 or 16. Change it while
+the sim runs:
+
+```sh
+curl -X PUT -d 16 http://127.0.0.1:8090/cities/harbor/speed   # 4x
+curl -X PUT -d 0  http://127.0.0.1:8090/cities/harbor/speed   # pause
+curl http://127.0.0.1:8090/cities/harbor/speed
+```
+
+The change lands on the next tick: its header carries the new speed and every district's
+record for it holds a `speed` event. A pause commits that tick as the last one, then no
+records are written until a resume, which continues at the next tick with no burst. A
+city started with `SIM_TICKS_PER_SECOND=0` waits for its first resume. The endpoint is
+for operators; the builders' `speed` command will replace it.
+
+The endpoint binds loopback only, so in a container it is reached with `exec` or a port-forward from inside the container's network namespace, not through published ports.
 
 ## Entity keys
 

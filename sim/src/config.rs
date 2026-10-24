@@ -1,6 +1,6 @@
 use anyhow::{Context, Result, bail};
 
-use felix_metro_sim::Connection;
+use felix_metro_sim::{Connection, check_speed};
 
 /// A city to run: `name` or `name:districts`, where `districts` is how many
 /// districts a side has. The name is also the seed.
@@ -23,8 +23,12 @@ pub(crate) struct Config {
     pub(crate) connection: Connection,
     /// `SIM_CITIES`: comma or space separated `name[:districts]`.
     pub(crate) cities: Vec<CitySpec>,
-    /// `SIM_TICKS_PER_SECOND`: the city's speed, 1 to 255. Default 4.
+    /// `SIM_TICKS_PER_SECOND`: the city's speed at start, 0 (paused), 4, 8 or
+    /// 16. Default 4.
     pub(crate) ticks_per_second: u8,
+    /// `SIM_CONTROL_ADDR`: where the speed endpoint listens. Default
+    /// `127.0.0.1:8090`; it has no authentication, so only loopback is accepted.
+    pub(crate) control_addr: std::net::SocketAddr,
 }
 
 impl Config {
@@ -76,11 +80,20 @@ impl Config {
                 .trim()
                 .parse()
                 .ok()
-                .filter(|n| *n > 0)
-                .with_context(|| {
-                    format!("SIM_TICKS_PER_SECOND: {value:?} is not a number from 1 to 255")
-                })?,
+                .and_then(|n| check_speed(n).ok())
+                .with_context(|| format!("SIM_TICKS_PER_SECOND: {value:?} is not 0, 4, 8 or 16"))?,
             None => 4,
+        };
+        let control_addr = match var("SIM_CONTROL_ADDR") {
+            Some(value) => value
+                .trim()
+                .parse::<std::net::SocketAddr>()
+                .ok()
+                .filter(|a| a.ip().is_loopback())
+                .with_context(|| {
+                    format!("SIM_CONTROL_ADDR: {value:?} is not a loopback host:port")
+                })?,
+            None => std::net::SocketAddr::from(([127, 0, 0, 1], 8090)),
         };
         Ok(Self {
             connection: Connection {
@@ -95,6 +108,7 @@ impl Config {
             },
             cities,
             ticks_per_second,
+            control_addr,
         })
     }
 }
@@ -134,6 +148,18 @@ mod tests {
         assert_eq!(config.connection.namespace, "default");
         assert_eq!(config.connection.ca_file, None);
         assert_eq!(config.ticks_per_second, 4);
+        assert_eq!(config.control_addr, "127.0.0.1:8090".parse().unwrap());
+    }
+
+    #[test]
+    fn a_city_may_start_paused() {
+        let config = config(&[
+            ("SIM_CITIES", "a"),
+            ("SIM_FELIX_TOKEN_FILE", "/t"),
+            ("SIM_TICKS_PER_SECOND", "0"),
+        ])
+        .unwrap();
+        assert_eq!(config.ticks_per_second, 0);
     }
 
     #[test]
@@ -149,8 +175,11 @@ mod tests {
             ("SIM_CITIES", "a.b"),
             ("SIM_CITIES", "a:0"),
             ("SIM_CITIES", "a:x"),
-            ("SIM_TICKS_PER_SECOND", "0"),
+            ("SIM_TICKS_PER_SECOND", "1"),
+            ("SIM_TICKS_PER_SECOND", "12"),
             ("SIM_TICKS_PER_SECOND", "256"),
+            ("SIM_CONTROL_ADDR", "0.0.0.0:8090"),
+            ("SIM_CONTROL_ADDR", "8090"),
         ] {
             let mut vars = vec![("SIM_CITIES", "a"), ("SIM_FELIX_TOKEN_FILE", "/t")];
             // A later entry replaces an earlier one with the same name.

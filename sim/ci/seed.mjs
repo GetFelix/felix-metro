@@ -15,7 +15,7 @@ const STATE = env("METRO_STATE_DIR", "/state");
 const TENANT = env("METRO_TENANT", "metro");
 const NAMESPACE = env("METRO_NAMESPACE", "default");
 // City names with their districts: harbor 4 is a city of 4 districts.
-const CITIES = env("METRO_CITIES", "harbor:4").split(/[\s,]+/).filter(Boolean);
+const CITIES = env("METRO_CITIES", "harbor:4,speedway:4").split(/[\s,]+/).filter(Boolean);
 const AUDIENCE = "felix-metro";
 const RETENTION_SECONDS = 7 * 24 * 60 * 60;
 
