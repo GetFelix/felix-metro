@@ -156,14 +156,20 @@ for (let attempt = 1; attempt <= ATTEMPTS && compared < MIN_COMPARED; attempt++)
   const frames = done.frames;
   // The first frame that joined after one that had not: the record may start with an earlier attempt's join.
   const j = frames.findIndex((f, i) => f.joined && i > 0 && !frames[i - 1].joined);
-  if (j < 3) await fail(`the join was found at frame ${j} of the record`);
-  for (let i = Math.max(1, j - 12); i < Math.min(frames.length, j + 4); i++) {
+  // Frames from the seek's landing on: the ones before it show the live tick the seek jumped away from.
+  const landed = Math.max(
+    0,
+    frames.findIndex((f) => f.tick <= started + HOUR_TICKS),
+  );
+  const lo = Math.max(1, landed + 1, j - 12);
+  if (j < landed + 3) await fail(`the join was found at frame ${j} of the record, the seek landed at ${landed}`);
+  for (let i = lo; i < Math.min(frames.length, j + 4); i++) {
     if (frames[i].tick < frames[i - 1].tick - 1e-6)
       await fail(`the tick went back from ${frames[i - 1].tick} to ${frames[i].tick} at the join`);
   }
   // No resident moves further between two frames than the fastest road allows for the ticks between them.
   let comparedHere = 0;
-  for (let i = Math.max(1, j - 12); i < Math.min(frames.length, j + 4); i++) {
+  for (let i = lo; i < Math.min(frames.length, j + 4); i++) {
     const allowed = MAX_TILES_PER_TICK * Math.max(0, frames[i].tick - frames[i - 1].tick) + 0.2;
     for (const [resident, step] of steps(frames, i, i)) {
       comparedHere++;
