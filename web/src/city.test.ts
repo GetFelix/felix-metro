@@ -1,5 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { CityState, NO_BUILDING, type Journey, type TickEvent, type TickRecord, type Trips } from './city';
+import {
+  CityState,
+  NO_BUILDING,
+  ROAD_ADDED,
+  ROAD_CLOSED,
+  ROAD_OPENED,
+  ROAD_REMOVED,
+  type Journey,
+  type TickEvent,
+  type TickRecord,
+  type Trips,
+} from './city';
 import type { City } from './layout';
 
 const city = {
@@ -169,5 +180,49 @@ describe('CityState', () => {
     const state = new CityState(city, trips, 2);
     state.apply(record(0, 1, [{ type: 'speed', ticksPerSecond: 16 }]));
     expect(state.speed).toBe(16);
+  });
+
+  it('follows road events, and a keyframe replaces what its district knew', () => {
+    const state = new CityState(city, trips, 2);
+    state.apply(record(0, 1, [{ type: 'road', segment: 4, change: ROAD_CLOSED }]));
+    state.apply(record(0, 2, [{ type: 'road', segment: 9, change: ROAD_ADDED }]));
+    state.apply(record(1, 2, [{ type: 'road', segment: 20, change: ROAD_REMOVED }]));
+    expect([...state.roads]).toEqual([
+      [4, ROAD_CLOSED],
+      [9, ROAD_ADDED],
+      [20, ROAD_REMOVED],
+    ]);
+    state.apply(record(0, 3, [{ type: 'road', segment: 4, change: ROAD_OPENED }]));
+    expect(state.roads.has(4)).toBe(false);
+    // District 0's keyframe lists only what differs now, so segment 9 goes and district 1's entry stays.
+    state.apply(record(0, 4, [], { buildings: [], roads: [[7, ROAD_CLOSED]] }));
+    expect([...state.roads].sort((a, b) => a[0] - b[0])).toEqual([
+      [7, ROAD_CLOSED],
+      [20, ROAD_REMOVED],
+    ]);
+  });
+
+  it('shows a command the same from events as from the keyframe after it', () => {
+    const events = new CityState(city, trips, 2);
+    events.apply(record(0, 1, [{ type: 'built', lot: 1, kind: 7, rotation: 2 }]));
+    events.apply(record(0, 2, [{ type: 'demolished', lot: 0, kind: 3, rotation: 0 }]));
+    const keyed = new CityState(city, trips, 2);
+    keyed.apply(
+      record(0, 240, [], {
+        buildings: [
+          [0, NO_BUILDING, 0],
+          [1, 7, 2],
+        ],
+        roads: [],
+      }),
+    );
+    expect([...keyed.built]).toEqual([...events.built].sort((a, b) => a[0] - b[0]));
+  });
+
+  it('ignores a command event with a result code it does not know', () => {
+    const state = new CityState(city, trips, 2);
+    const unknown = { type: 'command', principal: '00', name: 'x', id: 1, result: 250 } as unknown as TickEvent;
+    expect(() => state.apply(record(0, 1, [unknown, { type: 'built', lot: 1, kind: 7, rotation: 0 }]))).not.toThrow();
+    expect(state.built.get(1)).toEqual({ kind: 7, rotation: 0 });
   });
 });

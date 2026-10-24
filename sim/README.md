@@ -41,9 +41,33 @@ The change lands on the next tick: its header carries the new speed and every di
 record for it holds a `speed` event. A pause commits that tick as the last one, then no
 records are written until a resume, which continues at the next tick with no burst. A
 city started with `SIM_TICKS_PER_SECOND=0` waits for its first resume. The endpoint is
-for operators; the builders' `speed` command will replace it.
+for operators. A builder's `speed` command does the same through the command stream.
 
 The endpoint binds loopback only, so in a container it is reached with `exec` or a port-forward from inside the container's network namespace, not through published ports.
+
+## Commands
+
+The sim follows `metro.commands.<city>` from its tail when the city starts. The gateway
+prefixes each record with the publisher's principal (`stamp_sender`); the sim hashes it
+(FNV-1a, 64 bits) and keeps the hash with the command, so the log never holds the
+principal itself.
+
+Commands are read in stream order and applied before the next tick is stepped, up to 256
+a tick, so that tick's records carry them and its keyframe shows the result. Each is
+recorded as a `command` event (hash, builder name, id, result) in the district it touched,
+followed by `built` or `demolished`. A refusal has a result code and nothing else, and the
+city steps exactly as if it had not been sent. A command with no district, such as a
+malformed record or an unknown lot, is recorded in district 0.
+
+| Command | Applied when | Refused with |
+|---|---|---|
+| `build` | the lot is bare or holds only trees and props, no resident goes there, the kind is a building and the rotation 0 to 3 | unknown lot, bad kind, occupied, in use |
+| `demolish` | the lot has a building no resident's schedule uses | unknown lot, empty, in use |
+| `speed` | 0, 4, 8 or 16; a paused city resumes on a nonzero one | bad speed |
+| `place road`, `zone`, `fork` | not yet | unsupported |
+
+The result codes are in `core/src/record.rs`. A paused city holds the commands it reads
+until a `speed` command or the operator resumes it.
 
 ## The registry
 

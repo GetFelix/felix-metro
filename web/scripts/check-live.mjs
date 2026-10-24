@@ -5,9 +5,11 @@
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { chromium } from 'playwright';
+import { withTrace } from './url.mjs';
 
-const [appUrl, out] = process.argv.slice(2);
+const [pageUrl, out] = process.argv.slice(2);
 if (!out) throw new Error('usage: check-live.mjs <page url> <out dir>');
+const appUrl = withTrace(pageUrl);
 mkdirSync(out, { recursive: true });
 const MINUTE = 60_000;
 

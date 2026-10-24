@@ -664,3 +664,27 @@ fn json_names_every_field_and_escapes_text() {
     );
     assert_eq!(decode_json(&c.encode().unwrap()).unwrap(), c.to_json());
 }
+
+#[test]
+fn a_stamp_splits_into_the_principal_and_the_record() {
+    assert_eq!(
+        split_stamp(b"\x00\x03ana\x01\x02"),
+        Some(("ana", &b"\x01\x02"[..]))
+    );
+    assert_eq!(split_stamp(b"\x00\x00"), Some(("", &b""[..])));
+}
+
+#[test]
+fn a_bad_stamp_is_none() {
+    assert_eq!(split_stamp(b""), None);
+    assert_eq!(split_stamp(b"\x00"), None);
+    assert_eq!(split_stamp(b"\x00\x05ana"), None);
+    assert_eq!(split_stamp(b"\x00\x02\xff\xfe"), None);
+}
+
+#[test]
+fn the_principal_hash_is_fnv_1a_and_pinned() {
+    assert_eq!(principal_hash(""), 0xcbf2_9ce4_8422_2325);
+    assert_eq!(principal_hash("a"), 0xaf63_dc4c_8601_ec8c);
+    assert_ne!(principal_hash("mayor"), principal_hash("viewer"));
+}

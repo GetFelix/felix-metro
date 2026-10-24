@@ -7,7 +7,7 @@ A 3D city simulator that runs in the browser, built on
 is stored in durable Felix streams, so you can scrub back to any earlier moment
 and play forward from there.
 
-> **Status:** a live city runs end to end. The sim steps it, the browser draws it live, and a city picker switches between cities. Opening the city at an earlier moment works (`/?at=<tick>#harbor` draws it there, paused); the timeline bar scrubs the city back through the hours it still holds (drag the handle, or step with `←` and `→`, `Shift` for an hour); playing forward from there, following a resident and building are not built yet. The [style frame](prototype/style-frame.html) shows the look. The plan is in
+> **Status:** a live city runs end to end. The sim steps it, the browser draws it live, and a city picker switches between cities. Opening the city at an earlier moment works (`/?at=<tick>#harbor` draws it there, paused); the timeline bar scrubs the city back through the hours it still holds (drag the handle, or step with `←` and `→`, `Shift` for an hour); Space plays forward from there at the city's speed and Back to live races to the live city and joins it with no gap and no reload; following a resident and building are not built yet. The [style frame](prototype/style-frame.html) shows the look. The plan is in
 > [docs/design.md](docs/design.md) and the work is tracked in
 > [milestones](https://github.com/GetFelix/felix-metro/milestones).
 
@@ -52,16 +52,16 @@ there. [docs/design.md](docs/design.md) has the details.
 
 ## Status
 
-| M   | Milestone           | State                                                                                                                                        |
-| --- | ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| 0   | The look, locked    | In progress: style frame, assets, daylight, post-processing and quality tiers done; instanced traffic, the UI shell and camera controls open |
-| 1   | A live city         | Done                                                                                                                                         |
-| 2   | Time travel         | In progress: keyframes, seeking and the timeline scrubber done                                                                               |
-| 3   | Follow a life       | Planned                                                                                                                                      |
-| 4   | Build               | Planned                                                                                                                                      |
-| 5   | Branching timelines | Planned                                                                                                                                      |
-| 6   | Scale and failover  | Planned                                                                                                                                      |
-| 7   | Self-hosting        | Planned                                                                                                                                      |
+| M   | Milestone           | State                                                                                                                                                     |
+| --- | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0   | The look, locked    | In progress: style frame, assets, daylight, post-processing and quality tiers done; instanced traffic, the UI shell and camera controls open              |
+| 1   | A live city         | Done                                                                                                                                                      |
+| 2   | Time travel         | In progress: keyframes, seeking, the timeline scrubber and rewind then follow done                                                                        |
+| 3   | Follow a life       | Planned                                                                                                                                                   |
+| 4   | Build               | In progress: the sim applies build, demolish and speed commands and records who sent them; placement tools in the page, roads and zones are not built yet |
+| 5   | Branching timelines | Planned                                                                                                                                                   |
+| 6   | Scale and failover  | Planned                                                                                                                                                   |
+| 7   | Self-hosting        | Planned                                                                                                                                                   |
 
 What runs today: the sim, the dev stack and a browser page that shows a city live, with
 cars and walkers moving in time with the sim and the sun following the tick. The page
@@ -70,8 +70,9 @@ city. If the connection drops, a `Reconnecting…` pill shows, the city keeps mo
 the page reads what it missed from the log and carries on in order. If retention has
 already dropped what it missed, it restarts that district from the newest keyframe left.
 A city the gateway refuses (a misspelled name, or no access) shows a message instead of
-retrying. The city name in the top left opens a list of every city. Scrubbing back in time, following a resident and
-building are not built yet.
+retrying. The city name in the top left opens a list of every city. Following a resident and the page's own
+building tools are not built yet; a command published to the city's command stream by any client with a
+builder's token is applied by the sim and shows up in the page.
 
 ## Recording the clip
 
@@ -88,8 +89,8 @@ CLIP_SIM=native node scripts/clip-local.mjs ...    # this checkout's sim in plac
 The page draws frame by frame only under `?capture&trace`, with the camera and the city's
 tick following a path the script sets, so the clip is smooth however long a frame takes. The
 shots are the street at rush hour, the evening coming on, the timeline dragged back to the
-morning and, once the page has Play, played forward and back to live (skipped with a log
-line until then). `density.json` and `shots.csv` count the cars and walkers drawn. Everything
+morning, played forward and back to live. A playback is stepped one video frame at a time
+in capture mode, so the clip does not depend on how long a frame takes to draw. `density.json` and `shots.csv` count the cars and walkers drawn. Everything
 the script starts is stopped when it ends. The sim has to be native (`CLIP_SIM=native`)
 for any sim change that is not in the release bundle's image.
 
@@ -174,6 +175,20 @@ To watch ticks arrive the way a browser gets them, through the gateway (needs No
 ```sh
 node dev/check-ticks.mjs harbor pinecrest
 ```
+
+To build the way a mayor does, from a plain client with no browser (needs Node 22), publish
+commands through the gateway and watch them come back as events:
+
+```sh
+node dev/check-commands.mjs pinecrest
+```
+
+It signs in as `mayor` (`GET /token?sub=mayor` on the dev IdP, no `Origin` header),
+publishes `build` commands until one takes, and checks that the district of that lot
+records the command with its sender and the `built` event within a tick. It then sends
+commands the sim must refuse and checks each is recorded with its reason and changes
+nothing. It then waits for the district's next keyframe (up to a minute at the default speed)
+and checks it lists the built lot, and demolishes what it built. A `viewer` cannot publish.
 
 The sim runs at 4 ticks a second. Its speed endpoint accepts only loopback, so it is
 not published; `dev/speed.sh` runs `curl` inside the sim's container:

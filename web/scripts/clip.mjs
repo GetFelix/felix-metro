@@ -271,6 +271,9 @@ const canPlay = (await page.locator('#play').count()) > 0;
 if (canPlay) {
   await page.locator('#play').click();
   await step(T.play, () => page.waitForTimeout(40));
+  // The page steps the playback one video frame at a time, so the live tip must not run away from the catch-up
+  // while frames are slow to draw.
+  speed(1);
   await page.locator('#back-live').click();
   await step(T.live, () => page.waitForTimeout(40));
 } else {

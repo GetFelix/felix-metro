@@ -7,8 +7,8 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use felix_metro_core::City;
 use felix_metro_sim::{
-    Connection, FelixLog, Settings, StartRequest, announce_later, connect, run_city,
-    serve_speed_control,
+    Connection, FelixLog, Settings, StartRequest, announce_later, connect, follow_commands,
+    run_city_with, serve_speed_control,
 };
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinSet;
@@ -48,7 +48,7 @@ async fn main() -> Result<()> {
         }));
     for (spec, held) in all {
         let (control, speed) = watch::channel(config.ticks_per_second);
-        controls.insert(spec.name.clone(), control);
+        controls.insert(spec.name.clone(), control.clone());
         let (client, connection, spec) =
             (Arc::clone(&client), config.connection.clone(), spec.clone());
         let ticks_per_second = config.ticks_per_second;
@@ -75,6 +75,8 @@ async fn main() -> Result<()> {
                     }
                 },
             };
+            let commands =
+                follow_commands(Arc::clone(&client), connection.clone(), spec.name.clone());
             announce_later(
                 Arc::clone(&client),
                 connection,
@@ -84,9 +86,10 @@ async fn main() -> Result<()> {
             let settings = Settings {
                 ticks_per_second,
                 speed: Some(speed),
+                speed_out: Some(control),
                 ..Settings::default()
             };
-            run_city(&spec.name, city, settings, log)
+            run_city_with(&spec.name, city, settings, log, Some(commands))
                 .await
                 .map(|_| spec.name)
         });

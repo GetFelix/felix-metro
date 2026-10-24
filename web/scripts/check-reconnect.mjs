@@ -10,8 +10,10 @@ import { execSync } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { chromium } from 'playwright';
+import { withTrace } from './url.mjs';
 
-const [appUrl, out] = process.argv.slice(2);
+const [pageUrl, out] = process.argv.slice(2);
+const appUrl = withTrace(pageUrl);
 const { GATEWAY_STOP, GATEWAY_START, GATEWAY_RECREATE } = process.env;
 if (!out || !GATEWAY_STOP || !GATEWAY_START || !GATEWAY_RECREATE) {
   throw new Error(
