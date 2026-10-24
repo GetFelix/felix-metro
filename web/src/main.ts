@@ -703,6 +703,7 @@ async function main() {
     let path: Path = { position: [], target: [], ticks: [] };
     let base: number | null = null;
     let lastMs: number | null = null;
+    let still: HTMLImageElement | null = null;
     const view = new THREE.Vector3();
     const inView = (x: number, z: number) => {
       view.set(x, 0.1, z).project(camera);
@@ -735,6 +736,15 @@ async function main() {
         // Cars and walkers get their models a share a frame; update on, without drawing, until all of them have one.
         for (let i = 0; i < 600 && traffic && traffic.waiting > 0; i++) draw(performance.now(), 0, 0, false);
         draw(performance.now(), 0, 0);
+        // A screenshot of a WebGL canvas waits on the compositor, which software GL makes take minutes. The canvas is read
+        // out now and shown as a picture under the overlay, so the page can be screenshotted without it.
+        const canvas = renderer.domElement;
+        still ??= document.createElement('img');
+        still.style.cssText = 'position:absolute;top:0;left:0;display:block;z-index:0;width:100vw;height:100vh';
+        still.src = canvas.toDataURL('image/jpeg', 0.95);
+        await still.decode();
+        if (!still.isConnected) canvas.after(still);
+        canvas.style.visibility = 'hidden';
         const where = traffic?.where() ?? [];
         const cars = where.filter((w) => w.car);
         const walkers = where.filter((w) => !w.car);
