@@ -3,7 +3,7 @@
 // a tick is found by reads that correct an estimate, its header names the keyframe it folds from, and the records from
 // that keyframe to the tick are read in ranges and folded in order.
 import type { CityState, TickRecord } from './city';
-import { GatewayError, type Gateway, type Page } from './gateway';
+import { GatewayError, pastEnd, type Gateway, type Page } from './gateway';
 import { keyframePointer, parse } from './live';
 import { TICKS_PER_HOUR } from './clock';
 
@@ -332,6 +332,8 @@ export class Seeker {
       try {
         return await this.flight(d, start, Math.max(end, start + 1), signal);
       } catch (err) {
+        // A probe beyond the newest record finds nothing; the state read can be a little ahead of what a read sees.
+        if (!strict && pastEnd(err)) return { records: [], nextOffset: start };
         if (!(err instanceof GatewayError) || err.code !== 'trimmed' || err.oldest === undefined) throw err;
         if (err.oldest <= this.oldest[d]!) throw err;
         this.trimTo(d, err.oldest);

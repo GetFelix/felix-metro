@@ -35,6 +35,10 @@ class FakeHistory {
   private flying = new Set<string>();
   /** Identical reads that were in flight together. */
   twins = 0;
+  /** Reads past the last record fail, as the gateway's do, instead of answering empty. */
+  pastEndIsAnError = true;
+  /** What `state_get` says the log length is, when ahead of what reads show. */
+  asOfExtra = 0;
   /** The most reads in flight together for one shard. */
   widest = 0;
   private open = new Map<number, number>();
@@ -91,6 +95,12 @@ class FakeHistory {
         ]);
       }
       if (from < this.oldest) throw new GatewayError('trimmed', 'gone', this.oldest);
+      if (this.pastEndIsAnError && from >= this.logs[shard]!.length) {
+        throw new GatewayError(
+          'read_failed',
+          `offset ${from} is past the end of the stream; tail is ${this.logs[shard]!.length - 1}`,
+        );
+      }
       const log = this.logs[shard]!;
       const stop = Math.min(end ?? log.length, log.length, from + PAGE);
       const records = [];
@@ -111,7 +121,7 @@ class FakeHistory {
     const at = log.map((r) => r.keyframe !== null).lastIndexOf(true);
     const payload = new Uint8Array(8);
     new DataView(payload.buffer).setBigUint64(0, BigInt(at), true);
-    return { payload, version: null, asOf: log.length };
+    return { payload, version: null, asOf: log.length + this.asOfExtra };
   }
 }
 
@@ -396,6 +406,14 @@ describe('seek', () => {
     const g = new FakeHistory(1, ticks(600));
     g.logs[0]![350] = { ...g.logs[0]![350]!, district: 3 };
     await expect(seeker(g, 1).seek(400)).rejects.toMatchObject({ reason: 'broken' });
+  });
+
+  it('carries on when the state read is ahead of the log reads can see', async () => {
+    const h = new FakeHistory(2, ticks(600));
+    h.asOfExtra = 10;
+    const s = seeker(h);
+    expect((await folded(s, 7)).ticks).toEqual([7, 7]);
+    expect(await s.retained()).toEqual({ oldest: 0, newest: 599 });
   });
 
   it('refuses a fold that did not reach the tick', async () => {

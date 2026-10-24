@@ -83,6 +83,9 @@ export interface StateValue {
   asOf: number;
 }
 
+/** The gateway refuses a read that starts after the log's last record, and says so in words only. */
+export const pastEnd = (err: unknown): boolean => err instanceof GatewayError && /past the end/.test(err.message);
+
 /** An error the gateway answered with. */
 export class GatewayError extends Error {
   override name = 'GatewayError';
@@ -213,7 +216,8 @@ export class Gateway {
           return { records, nextOffset: json.next_offset as number };
         });
       } catch (err) {
-        if (!(err instanceof GatewayError) || err.code !== 'read_failed' || attempt >= READ_RETRIES) throw err;
+        if (!(err instanceof GatewayError) || err.code !== 'read_failed' || attempt >= READ_RETRIES || pastEnd(err))
+          throw err;
         await new Promise((r) => setTimeout(r, READ_RETRY_MS * 2 ** attempt));
       }
     }
