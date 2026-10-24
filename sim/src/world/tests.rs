@@ -421,7 +421,7 @@ fn report_load() {
 #[test]
 fn step_time_at_rush() {
     let city = City::generate("harbor", 2).unwrap();
-    let places = Places::with_per_home(&city, 58);
+    let places = Places::with_per_home(&city, 64);
     let mut world = World::with_places(city, &places);
     let per_district = world.residents() / world.districts();
     assert!(per_district > 1000, "{per_district} residents a district");

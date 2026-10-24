@@ -14,6 +14,7 @@ pub(super) const LOT: u64 = 9;
 pub(super) const NAME: u64 = 10;
 pub(super) const STREETS: u64 = 11;
 pub(super) const RING: u64 = 12;
+pub(super) const DEVELOPMENT: u64 = 13;
 
 const GAMMA: u64 = 0x9e37_79b9_7f4a_7c15;
 

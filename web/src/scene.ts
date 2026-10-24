@@ -11,6 +11,7 @@ import type { Tier } from './params';
 import { settingsFor } from './quality';
 import { clockwise, facingAngle, lotLook, roadModel, type City } from './layout';
 import { KINDS } from './kinds';
+const TREE_FIRST = 38; // kinds from here are trees and plaza props: no building
 import { NO_BUILDING, type Building } from './city';
 import type { Fleet } from './traffic';
 import { ConstructionFx, type LotAccess } from './construction-fx';
@@ -47,6 +48,8 @@ interface Walker extends Mover {
   mixer: THREE.AnimationMixer;
 }
 
+const PLOT = new THREE.PlaneGeometry(0.96, 0.96);
+const PLOT_MATERIAL = new THREE.MeshStandardMaterial({ color: PALETTE.dirt, roughness: 1 });
 const EXTENT = 11;
 export function move(list: Mover[], dt: number, carLike: boolean) {
   for (const a of list) {
@@ -376,6 +379,7 @@ export async function createCity(
       objects: THREE.Object3D[];
     }
     const lotObjects = new Map<number, Drawn>();
+    const site = new Set(c.development);
     // The building coming down on a lot just demolished; the lot itself is already empty.
     const ghostObjects = new Map<number, Drawn>();
     function drawLot(
@@ -397,6 +401,17 @@ export async function createCity(
       (ghost ? ghostObjects : lotObjects).set(lot.id, mine);
       const x = wx(lot.x),
         z = wx(lot.z);
+      if (site.has(lot.id) && (kind === NO_BUILDING || kind >= TREE_FIRST)) {
+        // The development area is bare earth, so a new building has a plot to rise on.
+        const plot = new THREE.Mesh(PLOT, PLOT_MATERIAL);
+        plot.rotation.x = -Math.PI / 2;
+        plot.position.set(x, 0.006, z);
+        plot.receiveShadow = true;
+        scene.add(plot);
+        mine.jobs.push(Promise.resolve(plot));
+        mine.objects.push(plot);
+        return;
+      }
       const paved = lot.zone === 'downtown' || lot.zone === 'commercial' || lot.zone === 'industrial';
       if (kind === NO_BUILDING) {
         if (paved) put('roads', 'tile-low', x, z);
