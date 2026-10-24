@@ -1,5 +1,5 @@
 # What the gateway lets a browser session reach in one city. dev/seed.mjs
-# creates these streams for cities `harbor` and `pinecrest`.
+# creates these streams for cities `harbor`, `pinecrest` and `lakeside`.
 
 [scope]
 field = "city"
@@ -17,4 +17,13 @@ actions = ["publish"]
 # The sim learns who built what from the gateway's stamp.
 stamp_sender = true
 # A viewer has no publish right here and still joins.
+optional = true
+
+# The list of cities, the same in every scope.
+[[scope.streams]]
+alias = "cities"
+name = "metro.cities"
+shared = true
+actions = ["subscribe"]
+# A sign-in whose roles lack it still joins and just has no city list.
 optional = true

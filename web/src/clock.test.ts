@@ -62,4 +62,22 @@ describe('TickClock', () => {
     clock.advance(0.016, 10, 4);
     expect(clock.advance(0.016, 20, 4)).toBeLessThan(11);
   });
+
+  it('runs on past the newest tick while the connection is down, then waits for the records', () => {
+    const clock = new TickClock();
+    clock.advance(0, 100, 4);
+    for (let i = 0; i < 300; i++) clock.advance(1 / 60, 100, 4, true);
+    expect(clock.now).toBeCloseTo(99 + 20, 5);
+    // The records come back: it holds until the newest tick passes it, and never moves backwards.
+    const held = clock.now;
+    expect(clock.advance(1 / 60, 110, 4)).toBe(held);
+    expect(clock.advance(1 / 60, 150, 4)).toBeGreaterThanOrEqual(held);
+  });
+
+  it('stops running on its own after a minute without records', () => {
+    const clock = new TickClock();
+    clock.advance(0, 100, 4);
+    for (let i = 0; i < 70 * 60; i++) clock.advance(1 / 60, 100, 4, true);
+    expect(clock.now).toBeCloseTo(99 + 60 * 4, 0);
+  });
 });

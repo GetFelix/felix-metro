@@ -1,8 +1,10 @@
 use std::collections::HashMap;
+use std::sync::Arc;
+use std::time::Duration;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::watch;
+use tokio::sync::{Notify, watch};
 
 use super::*;
 
@@ -35,7 +37,11 @@ async fn put_sets_the_speed_and_bad_requests_change_nothing() {
     let (tx, rx) = watch::channel(4u8);
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    tokio::spawn(serve(listener, HashMap::from([("harbor".to_owned(), tx)])));
+    tokio::spawn(serve(
+        listener,
+        HashMap::from([("harbor".to_owned(), tx)]),
+        HashMap::new(),
+    ));
 
     assert!(
         request(addr, "GET", "/cities/harbor/speed", "")
@@ -74,14 +80,22 @@ async fn put_sets_the_speed_and_bad_requests_change_nothing() {
 #[tokio::test]
 async fn a_non_loopback_address_is_refused() {
     let listener = TcpListener::bind("0.0.0.0:0").await.unwrap();
-    assert!(serve(listener, HashMap::new()).await.is_err());
+    assert!(
+        serve(listener, HashMap::new(), HashMap::new())
+            .await
+            .is_err()
+    );
 }
 
 async fn city_at(speed: u8) -> (SocketAddr, watch::Receiver<u8>) {
     let (tx, rx) = watch::channel(speed);
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    tokio::spawn(serve(listener, HashMap::from([("harbor".to_owned(), tx)])));
+    tokio::spawn(serve(
+        listener,
+        HashMap::from([("harbor".to_owned(), tx)]),
+        HashMap::new(),
+    ));
     (addr, rx)
 }
 
@@ -147,4 +161,29 @@ async fn a_client_that_stalls_is_cut_off() {
         .expect("the server hung on a stalled client")
         .unwrap();
     assert!(out.starts_with("HTTP/1.1 408"), "{out}");
+}
+
+#[tokio::test]
+async fn post_starts_a_city_held_back_and_nothing_else() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let start = Arc::new(Notify::new());
+    let starts = HashMap::from([("lakeside".to_owned(), Arc::clone(&start))]);
+    tokio::spawn(serve(listener, HashMap::new(), starts));
+
+    for (method, path, status) in [
+        ("GET", "/cities/lakeside/start", "405"),
+        ("POST", "/cities/harbor/start", "404"),
+    ] {
+        let reply = request(addr, method, path, "").await;
+        assert!(reply.starts_with(&format!("HTTP/1.1 {status}")), "{reply}");
+    }
+    let waiting = tokio::time::timeout(Duration::from_millis(100), start.notified());
+    assert!(waiting.await.is_err(), "a refused request started the city");
+
+    let reply = request(addr, "POST", "/cities/lakeside/start", "").await;
+    assert!(reply.starts_with("HTTP/1.1 200"), "{reply}");
+    tokio::time::timeout(Duration::from_secs(1), start.notified())
+        .await
+        .expect("the city was not started");
 }

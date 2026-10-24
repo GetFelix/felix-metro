@@ -135,6 +135,9 @@ for (const city of CITIES) {
   const build = `role:metro-${name}-build`;
   await grant(watch, events, "stream.subscribe");
   await grant(build, events, "stream.subscribe");
+  // Every role may follow the list of cities, which the gateway hands to every scope.
+  await grant(watch, "metro.cities", "stream.subscribe");
+  await grant(build, "metro.cities", "stream.subscribe");
   await grant(build, commands, "stream.publish");
   for (const [role, names] of [
     [watch, WATCHERS],

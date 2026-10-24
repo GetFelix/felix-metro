@@ -8,6 +8,13 @@ export const FEATURES = ['binary_events', 'slots', 'shards', 'state', 'read'] as
 /** A session may have this many reads waiting at once; the gateway refuses a fifth. */
 const READS_IN_FLIGHT = 4;
 
+/**
+ * The gateway counts a read as finished only after it has answered, so a fifth read sent as an answer arrives is refused
+ * with `read_failed` though four were waiting. Such a read is sent again after a short wait, this many times at most.
+ */
+const READ_RETRIES = 3;
+const READ_RETRY_MS = 50;
+
 /** One event frame from the gateway. */
 export interface EventFrame {
   /** The subscription, as its `subscribed` numbered it. */
@@ -189,15 +196,22 @@ export class Gateway {
    * Read the records of `shard` from `from` up to, not including, `end`: one page, as the broker's cap allows. Read
    * the next page from its `nextOffset`. At most four reads are on the wire at once; the rest wait their turn.
    */
-  read(stream: string, shard: number, from: number, end?: number): Promise<Page> {
-    return this.limited(async () => {
-      const json = await this.request({ type: 'read', stream, shard, from, ...(end === undefined ? {} : { end }) });
-      const records = (json.records as { offset: number; payload: string }[]).map((r) => ({
-        offset: r.offset,
-        payload: unbase64(r.payload),
-      }));
-      return { records, nextOffset: json.next_offset as number };
-    });
+  async read(stream: string, shard: number, from: number, end?: number): Promise<Page> {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await this.limited(async () => {
+          const json = await this.request({ type: 'read', stream, shard, from, ...(end === undefined ? {} : { end }) });
+          const records = (json.records as { offset: number; payload: string }[]).map((r) => ({
+            offset: r.offset,
+            payload: unbase64(r.payload),
+          }));
+          return { records, nextOffset: json.next_offset as number };
+        });
+      } catch (err) {
+        if (!(err instanceof GatewayError) || err.code !== 'read_failed' || attempt >= READ_RETRIES) throw err;
+        await new Promise((r) => setTimeout(r, READ_RETRY_MS * 2 ** attempt));
+      }
+    }
   }
 
   /**

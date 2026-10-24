@@ -23,6 +23,10 @@ pub(crate) struct Config {
     pub(crate) connection: Connection,
     /// `SIM_CITIES`: comma or space separated `name[:districts]`.
     pub(crate) cities: Vec<CitySpec>,
+    /// `SIM_ON_DEMAND`: cities whose streams exist but that stay idle, and
+    /// unlisted, until `POST /cities/<name>/start` on the speed endpoint. Same
+    /// format as `SIM_CITIES`; none by default.
+    pub(crate) on_demand: Vec<CitySpec>,
     /// `SIM_TICKS_PER_SECOND`: the city's speed at start, 0 (paused), 4, 8 or
     /// 16. Default 4.
     pub(crate) ticks_per_second: u8,
@@ -46,34 +50,22 @@ impl Config {
                 .collect()
         };
         let brokers = list(var("SIM_FELIX_BROKERS").unwrap_or_else(|| "127.0.0.1:5000".into()));
-        let mut cities = Vec::new();
-        for item in list(var("SIM_CITIES").context("SIM_CITIES is required")?) {
-            let (name, side) = match item.split_once(':') {
-                Some((name, side)) => (name, Some(side)),
-                None => (item.as_str(), None),
-            };
-            if name.is_empty()
-                || !name
-                    .chars()
-                    .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
-            {
-                bail!("SIM_CITIES: {name:?} may use only letters, digits, '-' and '_'");
-            }
-            let districts_per_side = match side {
-                Some(side) => side
-                    .parse()
-                    .ok()
-                    .filter(|n| *n > 0)
-                    .with_context(|| format!("SIM_CITIES: {side:?} is not a district count"))?,
-                None => DEFAULT_SIDE,
-            };
-            cities.push(CitySpec {
-                name: name.to_owned(),
-                districts_per_side,
-            });
-        }
+        let cities = parse_cities(
+            "SIM_CITIES",
+            list(var("SIM_CITIES").context("SIM_CITIES is required")?),
+        )?;
         if cities.is_empty() {
             bail!("SIM_CITIES names no city");
+        }
+        let on_demand = parse_cities(
+            "SIM_ON_DEMAND",
+            var("SIM_ON_DEMAND").map(list).unwrap_or_default(),
+        )?;
+        if let Some(twice) = on_demand
+            .iter()
+            .find(|c| cities.iter().any(|d| d.name == c.name))
+        {
+            bail!("SIM_ON_DEMAND: {} is also in SIM_CITIES", twice.name);
         }
         let ticks_per_second = match var("SIM_TICKS_PER_SECOND") {
             Some(value) => value
@@ -107,10 +99,42 @@ impl Config {
                 namespace: var("SIM_NAMESPACE").unwrap_or_else(|| "default".into()),
             },
             cities,
+            on_demand,
             ticks_per_second,
             control_addr,
         })
     }
+}
+
+/// `name[:districts]` items, from the variable `var`.
+fn parse_cities(var: &str, items: Vec<String>) -> Result<Vec<CitySpec>> {
+    let mut cities = Vec::new();
+    for item in items {
+        let (name, side) = match item.split_once(':') {
+            Some((name, side)) => (name, Some(side)),
+            None => (item.as_str(), None),
+        };
+        if name.is_empty()
+            || !name
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        {
+            bail!("{var}: {name:?} may use only letters, digits, '-' and '_'");
+        }
+        let districts_per_side = match side {
+            Some(side) => side
+                .parse()
+                .ok()
+                .filter(|n| *n > 0)
+                .with_context(|| format!("{var}: {side:?} is not a district count"))?,
+            None => DEFAULT_SIDE,
+        };
+        cities.push(CitySpec {
+            name: name.to_owned(),
+            districts_per_side,
+        });
+    }
+    Ok(cities)
 }
 
 #[cfg(test)]
@@ -170,11 +194,25 @@ mod tests {
     }
 
     #[test]
+    fn cities_held_back_are_listed_apart_from_the_ones_that_run() {
+        let config = config(&[
+            ("SIM_CITIES", "harbor"),
+            ("SIM_ON_DEMAND", "lakeside:3 dunes"),
+            ("SIM_FELIX_TOKEN_FILE", "/t"),
+        ])
+        .unwrap();
+        assert_eq!(config.cities, [city("harbor", 2)]);
+        assert_eq!(config.on_demand, [city("lakeside", 3), city("dunes", 2)]);
+    }
+
+    #[test]
     fn refuses_what_would_change_a_stream_name_or_the_speed() {
         for (name, value) in [
             ("SIM_CITIES", "a.b"),
             ("SIM_CITIES", "a:0"),
             ("SIM_CITIES", "a:x"),
+            ("SIM_ON_DEMAND", "a"),
+            ("SIM_ON_DEMAND", "b:0"),
             ("SIM_TICKS_PER_SECOND", "1"),
             ("SIM_TICKS_PER_SECOND", "12"),
             ("SIM_TICKS_PER_SECOND", "256"),

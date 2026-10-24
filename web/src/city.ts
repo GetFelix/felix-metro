@@ -82,6 +82,8 @@ export class CityState {
   onLot: ((lot: number, building: Building | null) => void) | null = null;
   /** Told when a voyage is replaced or ends, just before its journey is freed. */
   onVoyageEnd: ((voyage: Voyage) => void) | null = null;
+  /** Told what became of every record handed to {@link apply}, for checking the order a district was followed in. */
+  onRecord: ((district: number, tick: number, result: 'applied' | 'seen' | 'gap') => void) | null = null;
 
   constructor(
     private readonly city: City,
@@ -103,6 +105,12 @@ export class CityState {
    * and the caller reads what is missing and applies it in order.
    */
   apply(record: TickRecord, allowGap = false): 'applied' | 'seen' | 'gap' {
+    const result = this.fold(record, allowGap);
+    this.onRecord?.(record.district, record.tick, result);
+    return result;
+  }
+
+  private fold(record: TickRecord, allowGap: boolean): 'applied' | 'seen' | 'gap' {
     const d = record.district;
     if (d >= this.ticks.length) return 'seen';
     const newEpoch = record.epoch > this.epochs[d]!;

@@ -15,3 +15,32 @@ export function createCamera(dom: HTMLElement, span = 1, centre = new THREE.Vect
   controls.update();
   return { camera, controls };
 }
+
+/** How long the opening drift from above takes. */
+const INTRO_MS = 2000;
+
+/**
+ * Start the camera high and pulled back and let it settle onto the framing it has now, ending early when the person
+ * takes the controls. Call `step` every frame with the time; it returns false once the drift is over.
+ */
+export function startIntro(
+  camera: THREE.PerspectiveCamera,
+  controls: OrbitControls,
+  now: number,
+): { step(now: number): boolean } {
+  const target = controls.target.clone();
+  const final = camera.position.clone().sub(target);
+  const start = new THREE.Vector3(final.x * 1.5, final.y * 2.4, final.z * 1.5);
+  let over = false;
+  controls.addEventListener('start', () => (over = true));
+  const place = (e: number) => camera.position.copy(target).add(start.clone().lerp(final, e));
+  place(0);
+  return {
+    step(t) {
+      if (over) return false;
+      const p = Math.min(1, (t - now) / INTRO_MS);
+      place(1 - (1 - p) ** 3);
+      return p < 1;
+    },
+  };
+}

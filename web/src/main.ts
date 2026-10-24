@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { createCamera } from './camera';
+import { createCamera, startIntro } from './camera';
 import { createHud } from './hud';
 import { parseParams, type Tier } from './params';
 import { createPost, passesFor } from './post';
@@ -12,6 +12,9 @@ import { beforeSignIn, fetchOidc } from './auth';
 import { CityState, type Building } from './city';
 import { TickClock, cityTime } from './clock';
 import { connectLive } from './live';
+import { createLoader, type Loader } from './loader';
+import { createPicker } from './picker';
+import { displayName } from './registry';
 import { Traffic } from './traffic';
 
 declare global {
@@ -31,6 +34,8 @@ declare global {
       /** Put the camera low beside the first car drawn. */
       closeUp(): boolean;
     };
+    /** What became of each record the page took, as `[district, tick, result]`; only under ?trace. */
+    __trace?: [number, number, string][];
     __quality?: {
       history: readonly Tier[];
       memory: { tier: Tier; textures: number; geometries: number }[];
@@ -38,9 +43,15 @@ declare global {
   }
 }
 
+/** Whether the connection is down; the clock runs on its own meanwhile. */
+interface Link {
+  down: boolean;
+}
+
 /**
- * Sign in at the gateway and follow the city's log; `null` when nothing here answers like a gateway, or the city
- * cannot be joined, so the page still draws the city, without its people.
+ * Sign in at the gateway and follow the city's log; `null` when nothing here answers like a gateway, so the page
+ * still draws the city, without its people. A gateway that is there but cannot be reached right now is not that: the
+ * page shows `Reconnecting…` and keeps trying, and the city fills in when it gets through.
  */
 async function follow(
   city: City,
@@ -49,32 +60,40 @@ async function follow(
   districts: number,
   gateway: string | null,
   pill: HTMLElement,
-): Promise<CityState | null> {
+  loader: Loader,
+  trace: boolean,
+): Promise<{ state: CityState; link: Link } | null> {
   const url = gateway ?? `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`;
   const state = new CityState(city, metro, districts * districts);
-  try {
-    const oidc = await fetchOidc(gateway ? url.replace(/^ws/, 'http').replace(/\/ws$/, '/') : location.origin + '/');
-    if (!oidc) return null;
-    await connectLive({
-      url,
-      oidc,
-      city: name,
-      state,
-      onStatus: (status) => {
-        pill.textContent = status === 'live' ? 'LIVE' : 'Reconnecting…';
-        pill.classList.toggle('late', status !== 'live');
-      },
-    });
-  } catch (err) {
-    console.warn('the live city is not available', err);
-    pill.textContent = 'Offline';
-    pill.classList.add('late');
-    pill.classList.remove('hidden');
-    return null;
+  const link: Link = { down: false };
+  const oidc = await fetchOidc(gateway ? url.replace(/^ws/, 'http').replace(/\/ws$/, '/') : location.origin + '/');
+  if (!oidc) return null;
+  if (trace) {
+    window.__trace = [];
+    state.onRecord = (d, t, r) => window.__trace!.push([d, t, r]);
   }
-  pill.classList.remove('hidden');
-  return state;
+  const picker = createPicker(name, DEFAULT_DISTRICTS);
+  const live = await connectLive({
+    url,
+    oidc,
+    city: name,
+    state,
+    onDistrict: (d) => loader.ready(d),
+    onCities: (cities) => picker.update(cities),
+    onStatus: (status) => {
+      link.down = status !== 'live';
+      pill.textContent = link.down ? 'Reconnecting…' : 'LIVE';
+      pill.classList.toggle('late', link.down);
+      pill.classList.remove('hidden');
+    },
+  });
+  // Closing the sockets by hand, not leaving it to the browser, so the gateway sees the city's subscriptions end.
+  addEventListener('pagehide', () => live.close());
+  return { state, link };
 }
+
+/** Districts on a side when `?districts` does not say. */
+const DEFAULT_DISTRICTS = 2;
 
 async function main() {
   const returned = beforeSignIn();
@@ -90,8 +109,19 @@ async function main() {
     districts,
     live: wantLive,
     gateway,
+    trace,
   } = parseParams(returned?.search ?? location.search, returned?.hash ?? location.hash);
   if (!ui) document.querySelectorAll('.chip').forEach((e) => e.classList.add('hidden'));
+  // Switching city is a new page: its sockets close with the old one and nothing of it is left to tear down.
+  addEventListener('hashchange', () => {
+    if (parseParams(location.search, location.hash).seed !== seed) location.reload();
+  });
+  const loaderRoot = document.getElementById('loader')!;
+  const showLoader = layout === 'city' && wantLive && ui;
+  const loader: Loader = showLoader
+    ? createLoader(loaderRoot, districts, seed)
+    : { ready: () => {}, done: () => loaderRoot.classList.add('hidden') };
+  if (!showLoader) loaderRoot.classList.add('hidden');
 
   let post: ReturnType<typeof createPost> | null = null;
   let hour = 18.5;
@@ -101,13 +131,19 @@ async function main() {
   const renderer = createRenderer(quality.tier);
   let city: City | null = null;
   let state: CityState | null = null;
+  let link: Link = { down: false };
   const pill = document.getElementById('pill')!;
   if (layout === 'city') {
     await init();
     city = parseCity(generate(seed, districts));
     document.title = `Felix Metro: ${seed}`;
-    document.getElementById('subtitle')!.textContent = seed;
-    if (wantLive) state = await follow(city, new Metro(seed, districts), seed, districts, gateway, pill);
+    document.getElementById('subtitle')!.textContent = displayName(seed);
+    if (wantLive) {
+      const joined = await follow(city, new Metro(seed, districts), seed, districts, gateway, pill, loader, trace);
+      state = joined?.state ?? null;
+      link = joined?.link ?? link;
+      if (!joined) for (let d = 0; d < districts * districts; d++) loader.ready(d);
+    }
   }
   const span = city ? Math.max(1, city.tiles / 17) : 1;
   const { camera, controls } = city
@@ -180,8 +216,10 @@ async function main() {
       },
     };
   }
+  let intro: ReturnType<typeof startIntro> | null = null;
   function frame() {
     const now = performance.now();
+    if (intro && !intro.step(now)) intro = null;
     const frameMs = now - last;
     last = now;
     quality.tick(frameMs);
@@ -193,7 +231,7 @@ async function main() {
     for (const p of people) p.mixer.update(dt);
     if (state && traffic && window.__live) {
       // The clock runs on real time even when frames are slow, so it stays with the sim.
-      const tick = clockTicks.advance(Math.min(1, frameMs / 1000), state.latest, state.speed);
+      const tick = clockTicks.advance(Math.min(1, frameMs / 1000), state.latest, state.speed, link.down);
       if (!Number.isNaN(tick)) {
         state.retire(Math.floor(tick));
         traffic.update(tick, still ? 0 : dt, state.active());
@@ -221,9 +259,12 @@ async function main() {
   }
   move(cars, 0, true);
   move(people, 0, false);
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (city && !still && frozenHour === null && !reduced) intro = startIntro(camera, controls, performance.now());
   frame();
   document.body.dataset.ready = '1';
   window.__ready = true;
+  loader.done(state !== null && showLoader);
 
   addEventListener('resize', () => {
     camera.aspect = innerWidth / innerHeight;
@@ -234,6 +275,7 @@ async function main() {
 
 main().catch((err) => {
   console.error('the city could not start', err);
+  document.getElementById('loader')?.classList.add('hidden');
   const note = document.createElement('p');
   note.style.cssText = 'position:fixed;inset:auto 16px 16px;margin:0;color:#fff;font:14px sans-serif';
   note.textContent = 'The city could not start. Reload to try again.';
