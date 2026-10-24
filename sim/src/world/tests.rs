@@ -312,3 +312,77 @@ fn state_at_is_the_keyframe_the_step_commits() {
         .collect();
     assert_eq!(state_at(city(), 480), committed);
 }
+
+/// Prints what a city day writes, per district: `cargo test -p felix-metro-sim --release
+/// report_load -- --ignored --nocapture`.
+#[test]
+#[ignore = "prints a measurement"]
+fn report_load() {
+    let (_, ticks) = day("harbor", 2);
+    let seconds = f64::from(TICKS_PER_DAY) / 4.0;
+    let mut events = [0usize; 4];
+    let mut keyframes = [0usize; 4];
+    let mut busiest = [0usize; 4];
+    let mut count = [0usize; 4];
+    for (tick, step) in ticks.iter().enumerate() {
+        for (d, t) in step.iter().enumerate() {
+            let record = TickRecord {
+                header: Header {
+                    epoch: 1,
+                    district: d as u16,
+                    tick: tick as u32,
+                    speed: 4,
+                    keyframe_offset: 0,
+                    wall_us: 0,
+                },
+                keyframe: None,
+                events: t.events.clone(),
+            };
+            let bytes = record.encode().unwrap().len();
+            events[d] += bytes;
+            count[d] += t.events.len();
+            busiest[d] = busiest[d].max(bytes);
+            if let Some(k) = &t.keyframe {
+                let with = TickRecord {
+                    keyframe: Some(k.clone()),
+                    ..record
+                };
+                keyframes[d] += with.encode().unwrap().len() - bytes;
+            }
+        }
+    }
+    for d in 0..4 {
+        println!(
+            "district {d}: {} events, {} B events ({:.1} B/s), {} B keyframes ({:.1} B/s), largest keyframe {} B, worst tick {} B",
+            count[d],
+            events[d],
+            events[d] as f64 / seconds,
+            keyframes[d],
+            keyframes[d] as f64 / seconds,
+            keyframes[d] / 24,
+            busiest[d]
+        );
+    }
+    let all: usize = events.iter().chain(&keyframes).sum();
+    let empty = TickRecord {
+        header: Header {
+            epoch: 1,
+            district: 0,
+            tick: 0,
+            speed: 4,
+            keyframe_offset: 0,
+            wall_us: 0,
+        },
+        keyframe: None,
+        events: Vec::new(),
+    };
+    let header = empty.encode().unwrap().len() * 4 * TICKS_PER_DAY as usize;
+    let payload = all - header;
+    println!(
+        "city: {:.1} B/s at 4 ticks/s; headers {} B each district a day, payload {:.1} B/s, {:.2} B/s a resident",
+        all as f64 / seconds,
+        header / 4,
+        payload as f64 / seconds,
+        payload as f64 / seconds / 174.0
+    );
+}

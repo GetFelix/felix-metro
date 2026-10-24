@@ -82,7 +82,7 @@ Seeds are parts of 1 to 32 characters of `a-z`, `0-9` and `-`, joined by `~` for
 
 ### Residents, schedules and routes
 
-`core` also draws the people. A city has two residents for each suburban lot with a door, and resident `i` is fixed by the seed and `i`: an archetype (office worker, shift worker, shopkeeper, student, retiree or night worker), a home, and a workplace that is the nearest of three random picks from the places that suit the archetype. Times are jittered per resident, and people leave early enough by a rough travel estimate to arrive at their usual time.
+`core` also draws the people. A city has six residents for each suburban lot with a door, and resident `i` is fixed by the seed and `i`: an archetype (office worker, shift worker, shopkeeper, student, retiree or night worker), a home, and a workplace that is the nearest of three random picks from the places that suit the archetype. Times are jittered per resident, and people leave early enough by a rough travel estimate to arrive at their usual time. Office and shop workers arrive within half an hour of 08:00 and leave within half an hour of 17:15, and office workers walk or drive to the shops at lunch, so the roads fill in two bursts a day rather than a trickle. Shops and parks are the nearest of eight random picks, so errands are mostly short enough to walk, and half the retirees go out in the afternoon rush instead of the morning. In the harbor city at 2 by 2 districts that is 522 residents; the road holds up to 104 cars and 16 walkers at once, 9 cars on the busiest segment, and the 08:00 and 17:15 frames show about 30 cars in the busiest district. `cargo run --release -p felix-metro-core --example density -- harbor 2` prints these.
 
 A day is a cycle of blocks, each a lot and the tick of the day they leave it. The last block's trip returns to the first, so the day closes. A night worker's day starts at work, because they are still there at midnight. A trip leaves at its scheduled tick, or on arrival if the last one ran late.
 
@@ -142,7 +142,7 @@ writes decisions instead, and the client works out positions:
 A route is its segment ids from the road graph (`u32`) and one speed byte per
 segment, a percentage of the segment class's speed. A trip of 12 segments is 36
 bytes, so a resident making five or six trips a city day, in a city of 20,000
-residents, writes under 5 KB/s of events at normal speed.
+residents, writes under 5 KB/s of events at normal speed. Measured on the harbor city, a resident costs 0.15 B/s of events at 4 ticks a second, which is 3 KB/s at 20,000, plus the 31-byte header of each district's record every tick (2 KB/s for 16 districts).
 
 ### Byte layouts
 
@@ -236,8 +236,8 @@ Because buildings and roads are diffs against the city the seed generates, the
 keyframe of a city nobody has built in carries none of them, and the cost is
 the residents.
 
-20,000 residents at about 16 bytes each is about 320 KB per city hour, about
-5 KB/s. Events and keyframes together come to about 10 KB/s, or under 1 GB a day.
+20,000 residents at about 10 bytes each (measured: a district of 200 residents writes a 1.8 KB keyframe) is about 200 KB per city hour, about
+3.4 KB/s. Events, keyframes and record headers together come to about 8.4 KB/s, or under 1 GB a day.
 The counts are what the stats sparkline plots.
 
 ### Commands and the registry

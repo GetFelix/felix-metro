@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### The city
+
+- Rush hour is busier. A city has six residents per home instead of two, office
+  and shop workers keep to a half-hour window around 08:00 and 17:15, office
+  workers go out to the shops at lunch, errands pick the nearest of eight
+  places so more are walked, and half the retirees go out in the afternoon.
+  The harbor city at 2 by 2 districts has 522 residents (was 174) and up to 104
+  cars on the road at once (was 18). A seed generates different residents and
+  schedules than before; there is no compatibility with logs written earlier.
+
 ## [0.1.0] - 2026-10-24
 
 The first release: a generated city that runs live in the browser on Felix. It

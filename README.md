@@ -17,7 +17,7 @@ and play forward from there.
 
 ## What you will be able to do
 
-- Watch a generated city go about its day in 3D: residents commute, shop and go home, and the sun rises and sets
+- Watch a generated city go about its day in 3D: residents commute, shop and go home, and the sun rises and sets. Rush hour at 08:00 and 17:15 puts a few dozen cars and a handful of walkers on a district's streets (about 520 residents in the harbor city at 2 by 2; `cargo run --release -p felix-metro-core --example density -- harbor 2` prints the counts). The log stays near 8 KB/s at 20,000 residents.
 - Drag the timeline back to any moment the log holds and see the city exactly as it was
 - Let go and watch it play forward and catch up to live
 - Follow one resident or car through their day

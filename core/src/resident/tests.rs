@@ -168,11 +168,11 @@ fn nothing_to_pick_is_none() {
     let mut rng = Rng::new("x");
     let home = places.homes[0];
     assert_eq!(
-        pick(&city, &places, &mut rng, &[], &[], home, &[home]),
+        pick::<3>(&city, &places, &mut rng, &[], &[], home, &[home]),
         None
     );
     assert_eq!(
-        pick(&city, &places, &mut rng, &[home], &[home], home, &[home]),
+        pick::<3>(&city, &places, &mut rng, &[home], &[home], home, &[home]),
         None
     );
 }
@@ -228,10 +228,10 @@ fn legs_that_join_no_doors_are_no_trip() {
         r.trip_from_route(&city, trip.depart, &[], trip.mode)
             .is_none()
     );
-    legs.reverse();
+    // Reversed, they would join the doors of the trip back, which a day with a lunch has.
     if legs.len() > 1 {
         assert!(
-            r.trip_from_route(&city, trip.depart, &legs, trip.mode)
+            r.trip_from_route(&city, trip.depart, &legs[..legs.len() - 1], trip.mode)
                 .is_none()
         );
     }
@@ -240,4 +240,32 @@ fn legs_that_join_no_doors_are_no_trip() {
         r.trip_from_route(&city, trip.depart, &legs, trip.mode)
             .is_none()
     );
+}
+
+/// Cars and walkers on the road of harbor at tick `tick` of its first day, on empty roads.
+fn on_the_road(tick: u32) -> (u32, u32) {
+    let city = City::generate("harbor", 2).unwrap();
+    let places = Places::new(&city);
+    let (mut cars, mut walkers) = (0, 0);
+    for index in 0..places.population() {
+        let r = Resident::new(&city, &places, index).unwrap();
+        for trip in r.day_trips(&city, 0, &Congestion::FREE, 0).unwrap() {
+            if (trip.depart..=trip.arrive()).contains(&tick) {
+                match trip.mode {
+                    Mode::Drive => cars += 1,
+                    Mode::Walk => walkers += 1,
+                }
+            }
+        }
+    }
+    (cars, walkers)
+}
+
+#[test]
+fn rush_hour_fills_the_streets() {
+    for (name, tick) in [("08:00", 8 * 240), ("17:15", 17 * 240 + 60)] {
+        let (cars, walkers) = on_the_road(tick);
+        assert!(cars >= 40, "{name}: {cars} cars");
+        assert!(walkers >= 2, "{name}: {walkers} walkers");
+    }
 }
