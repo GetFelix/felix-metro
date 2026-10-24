@@ -40,6 +40,7 @@ async fn put_sets_the_speed_and_bad_requests_change_nothing() {
         listener,
         HashMap::from([("harbor".to_owned(), tx)]),
         HashMap::new(),
+        HashMap::new(),
     ));
 
     assert!(
@@ -80,7 +81,7 @@ async fn put_sets_the_speed_and_bad_requests_change_nothing() {
 async fn a_non_loopback_address_is_refused() {
     let listener = TcpListener::bind("0.0.0.0:0").await.unwrap();
     assert!(
-        serve(listener, HashMap::new(), HashMap::new())
+        serve(listener, HashMap::new(), HashMap::new(), HashMap::new())
             .await
             .is_err()
     );
@@ -93,6 +94,7 @@ async fn city_at(speed: u8) -> (SocketAddr, watch::Receiver<u8>) {
     tokio::spawn(serve(
         listener,
         HashMap::from([("harbor".to_owned(), tx)]),
+        HashMap::new(),
         HashMap::new(),
     ));
     (addr, rx)
@@ -168,7 +170,7 @@ async fn post_starts_a_city_held_back_and_nothing_else() {
     let addr = listener.local_addr().unwrap();
     let (requests, mut starting) = mpsc::channel(1);
     let starts = HashMap::from([("lakeside".to_owned(), requests)]);
-    tokio::spawn(serve(listener, HashMap::new(), starts));
+    tokio::spawn(serve(listener, HashMap::new(), starts, HashMap::new()));
 
     for (method, path, status) in [
         ("GET", "/cities/lakeside/start", "405"),
@@ -199,7 +201,7 @@ async fn a_city_that_cannot_start_is_a_500_and_can_be_asked_again() {
     let addr = listener.local_addr().unwrap();
     let (requests, mut starting) = mpsc::channel(1);
     let starts = HashMap::from([("lakeside".to_owned(), requests)]);
-    tokio::spawn(serve(listener, HashMap::new(), starts));
+    tokio::spawn(serve(listener, HashMap::new(), starts, HashMap::new()));
 
     let first =
         tokio::spawn(async move { request(addr, "POST", "/cities/lakeside/start", "").await });
@@ -221,4 +223,33 @@ async fn a_city_that_cannot_start_is_a_500_and_can_be_asked_again() {
     drop(starting);
     let again = request(addr, "POST", "/cities/lakeside/start", "").await;
     assert!(again.starts_with("HTTP/1.1 200"), "{again}");
+}
+
+#[tokio::test]
+async fn warmup_says_warming_until_the_city_goes_live() {
+    let (tx, rx) = watch::channel(true);
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(serve(
+        listener,
+        HashMap::new(),
+        HashMap::new(),
+        HashMap::from([("harbor".to_owned(), rx)]),
+    ));
+    assert!(
+        request(addr, "GET", "/cities/harbor/warmup", "")
+            .await
+            .ends_with("\nwarming\n")
+    );
+    tx.send_replace(false);
+    assert!(
+        request(addr, "GET", "/cities/harbor/warmup", "")
+            .await
+            .ends_with("\nlive\n")
+    );
+    assert!(
+        request(addr, "GET", "/cities/nowhere/warmup", "")
+            .await
+            .starts_with("HTTP/1.1 404")
+    );
 }

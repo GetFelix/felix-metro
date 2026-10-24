@@ -65,7 +65,9 @@ function keyframe(bytes, at) {
   for (let n = varint(bytes, at); n > 0; n--) {
     delta(bytes, at, 0);
     at.i += 1; // the resident's frame tag
-    at.i += varint(bytes, at);
+    // Read the length first: `at.i += varint(...)` takes at.i before the varint moves it.
+    const length = varint(bytes, at);
+    at.i += length;
   }
   for (let n = 0; n < 4; n++) varint(bytes, at);
   return buildings;

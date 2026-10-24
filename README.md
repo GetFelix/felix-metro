@@ -112,10 +112,11 @@ over each time. Stop it with `docker compose -f dev/compose.yml down --volumes`
 
 Open <http://127.0.0.1:8088/#harbor>: the page signs in as `viewer` at the stand-in
 provider, follows the city through the gateway and draws its residents driving and
-walking in time with the sim, with the sun following the tick. A city starts at
-midnight, so for traffic run `dev/speed.sh harbor 16` and give it a few minutes
-(the morning commute is around 06:00). Without a gateway the page draws the
-city alone.
+walking in time with the sim, with the sun following the tick. A new city
+first commits a day and a half of ticks in a few seconds (`SIM_WARMUP_HOURS`, 40 by default),
+so it opens in the late afternoon of its second day with a day behind it to scrub through and
+the evening commute under way; `dev/up.sh` returns once that is done. Run `dev/speed.sh harbor 16`
+to move faster. Without a gateway the page draws the city alone.
 
 Click the city name in the top left to switch cities, or open `/#pinecrest` (any name
 in the list) directly. Choosing a city opens its page afresh, so the old city's

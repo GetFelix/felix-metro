@@ -30,6 +30,10 @@ pub(crate) struct Config {
     /// `SIM_TICKS_PER_SECOND`: the city's speed at start, 0 (paused), 4, 8 or
     /// 16. Default 4.
     pub(crate) ticks_per_second: u8,
+    /// `SIM_WARMUP_HOURS`: city hours of ticks a new city commits at once
+    /// before it goes live. Default 40, which makes live begin at 16:00 on day
+    /// 2; 0 starts at midnight. A city with history never warms up.
+    pub(crate) warmup_hours: u32,
     /// `SIM_CONTROL_ADDR`: where the speed endpoint listens. Default
     /// `127.0.0.1:8090`; it has no authentication, so only loopback is accepted.
     pub(crate) control_addr: std::net::SocketAddr,
@@ -76,6 +80,17 @@ impl Config {
                 .with_context(|| format!("SIM_TICKS_PER_SECOND: {value:?} is not 0, 4, 8 or 16"))?,
             None => 4,
         };
+        let warmup_hours = match var("SIM_WARMUP_HOURS") {
+            Some(value) => value
+                .trim()
+                .parse::<u32>()
+                .ok()
+                .filter(|h| h.checked_mul(felix_metro_core::TICKS_PER_HOUR).is_some())
+                .with_context(|| {
+                    format!("SIM_WARMUP_HOURS: {value:?} is not a whole number of hours")
+                })?,
+            None => 40,
+        };
         let control_addr = match var("SIM_CONTROL_ADDR") {
             Some(value) => value
                 .trim()
@@ -101,6 +116,7 @@ impl Config {
             cities,
             on_demand,
             ticks_per_second,
+            warmup_hours,
             control_addr,
         })
     }
@@ -172,6 +188,7 @@ mod tests {
         assert_eq!(config.connection.namespace, "default");
         assert_eq!(config.connection.ca_file, None);
         assert_eq!(config.ticks_per_second, 4);
+        assert_eq!(config.warmup_hours, 40);
         assert_eq!(config.control_addr, "127.0.0.1:8090".parse().unwrap());
     }
 
@@ -184,6 +201,17 @@ mod tests {
         ])
         .unwrap();
         assert_eq!(config.ticks_per_second, 0);
+    }
+
+    #[test]
+    fn warmup_hours_may_be_turned_off() {
+        let config = config(&[
+            ("SIM_CITIES", "a"),
+            ("SIM_FELIX_TOKEN_FILE", "/t"),
+            ("SIM_WARMUP_HOURS", "0"),
+        ])
+        .unwrap();
+        assert_eq!(config.warmup_hours, 0);
     }
 
     #[test]
@@ -216,6 +244,8 @@ mod tests {
             ("SIM_TICKS_PER_SECOND", "1"),
             ("SIM_TICKS_PER_SECOND", "12"),
             ("SIM_TICKS_PER_SECOND", "256"),
+            ("SIM_WARMUP_HOURS", "-1"),
+            ("SIM_WARMUP_HOURS", "1.5"),
             ("SIM_CONTROL_ADDR", "0.0.0.0:8090"),
             ("SIM_CONTROL_ADDR", "8090"),
         ] {

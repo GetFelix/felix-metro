@@ -14,6 +14,14 @@ if ! "${compose[@]}" up --detach --build; then
   exit 1
 fi
 
+# Every city has committed its warm-up. The probe can pass on a warm-up tick, so this is asked of the sim.
+live() {
+  local city
+  for city in $(tr ',' ' ' <<<"${SIM_CITIES:-harbor pinecrest}"); do
+    [[ "$("${compose[@]}" exec -T sim curl -fsS "http://127.0.0.1:8090/cities/${city%%:*}/warmup" 2>/dev/null)" == live ]] || return 1
+  done
+}
+
 for _ in $(seq 1 120); do
   # probed: the probe service saw a tick on every district of every city
   # arrive through the gateway.
@@ -21,6 +29,7 @@ for _ in $(seq 1 120); do
     && curl -fsS http://127.0.0.1:8080/ready >/dev/null 2>&1 \
     && curl -fsS http://127.0.0.1:8787/oidc >/dev/null 2>&1 \
     && curl -fsS http://127.0.0.1:8088/ >/dev/null 2>&1 \
+    && live \
     && running="$("${compose[@]}" ps --status running --services 2>/dev/null)" \
     && grep -qx sim <<<"$running" && grep -qx gateway <<<"$running"; then
     echo "Felix Metro is up, with cities harbor and pinecrest."
