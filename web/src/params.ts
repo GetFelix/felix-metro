@@ -22,11 +22,14 @@ export interface Params {
   live: boolean;
   /** The gateway's WebSocket URL, or null for `/ws` on the page's own origin. */
   gateway: string | null;
+  /** Keep a trace of every record taken, in `window.__trace`, for the CI checks. */
+  trace: boolean;
 }
 
 // ?live=0 skips the gateway and draws the city alone, ?gateway=ws://host:8787/ws names a gateway other than the page's own.
 // ?layout=frame draws the style frame's city instead of the generated one, ?districts=3 sets the districts per side
 // (2 by default) and the hash picks the seed (/#harbor).
+// ?trace keeps what became of every record in `window.__trace`.
 // ?t=18.5 freezes the clock at that hour, ?still freezes motion, ?tier=low|medium|high forces a tier, ?ui=0 hides the
 // overlay, ?hud shows frame statistics, ?slow=40 adds 40 ms to every frame.
 export function parseParams(search: string, hash = ''): Params {
@@ -44,5 +47,6 @@ export function parseParams(search: string, hash = ''): Params {
     districts: Math.min(16, Math.max(1, parseInt(params.get('districts') ?? '2', 10) || 2)),
     live: params.get('live') !== '0',
     gateway: params.get('gateway'),
+    trace: params.has('trace'),
   };
 }

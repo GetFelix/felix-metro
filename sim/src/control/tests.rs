@@ -1,8 +1,9 @@
 use std::collections::HashMap;
+use std::time::Duration;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::watch;
+use tokio::sync::{mpsc, watch};
 
 use super::*;
 
@@ -35,7 +36,11 @@ async fn put_sets_the_speed_and_bad_requests_change_nothing() {
     let (tx, rx) = watch::channel(4u8);
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    tokio::spawn(serve(listener, HashMap::from([("harbor".to_owned(), tx)])));
+    tokio::spawn(serve(
+        listener,
+        HashMap::from([("harbor".to_owned(), tx)]),
+        HashMap::new(),
+    ));
 
     assert!(
         request(addr, "GET", "/cities/harbor/speed", "")
@@ -74,14 +79,22 @@ async fn put_sets_the_speed_and_bad_requests_change_nothing() {
 #[tokio::test]
 async fn a_non_loopback_address_is_refused() {
     let listener = TcpListener::bind("0.0.0.0:0").await.unwrap();
-    assert!(serve(listener, HashMap::new()).await.is_err());
+    assert!(
+        serve(listener, HashMap::new(), HashMap::new())
+            .await
+            .is_err()
+    );
 }
 
 async fn city_at(speed: u8) -> (SocketAddr, watch::Receiver<u8>) {
     let (tx, rx) = watch::channel(speed);
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    tokio::spawn(serve(listener, HashMap::from([("harbor".to_owned(), tx)])));
+    tokio::spawn(serve(
+        listener,
+        HashMap::from([("harbor".to_owned(), tx)]),
+        HashMap::new(),
+    ));
     (addr, rx)
 }
 
@@ -147,4 +160,65 @@ async fn a_client_that_stalls_is_cut_off() {
         .expect("the server hung on a stalled client")
         .unwrap();
     assert!(out.starts_with("HTTP/1.1 408"), "{out}");
+}
+
+#[tokio::test]
+async fn post_starts_a_city_held_back_and_nothing_else() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (requests, mut starting) = mpsc::channel(1);
+    let starts = HashMap::from([("lakeside".to_owned(), requests)]);
+    tokio::spawn(serve(listener, HashMap::new(), starts));
+
+    for (method, path, status) in [
+        ("GET", "/cities/lakeside/start", "405"),
+        ("POST", "/cities/harbor/start", "404"),
+    ] {
+        let reply = request(addr, method, path, "").await;
+        assert!(reply.starts_with(&format!("HTTP/1.1 {status}")), "{reply}");
+    }
+    assert!(
+        starting.try_recv().is_err(),
+        "a refused request started the city"
+    );
+
+    let reply =
+        tokio::spawn(async move { request(addr, "POST", "/cities/lakeside/start", "").await });
+    let answer = tokio::time::timeout(Duration::from_secs(1), starting.recv())
+        .await
+        .expect("the city was not asked to start")
+        .unwrap();
+    answer.send(Ok(())).unwrap();
+    let reply = reply.await.unwrap();
+    assert!(reply.starts_with("HTTP/1.1 200"), "{reply}");
+}
+
+#[tokio::test]
+async fn a_city_that_cannot_start_is_a_500_and_can_be_asked_again() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (requests, mut starting) = mpsc::channel(1);
+    let starts = HashMap::from([("lakeside".to_owned(), requests)]);
+    tokio::spawn(serve(listener, HashMap::new(), starts));
+
+    let first =
+        tokio::spawn(async move { request(addr, "POST", "/cities/lakeside/start", "").await });
+    starting
+        .recv()
+        .await
+        .unwrap()
+        .send(Err("no streams".into()))
+        .unwrap();
+    let reply = first.await.unwrap();
+    assert!(reply.starts_with("HTTP/1.1 500"), "{reply}");
+    assert!(reply.contains("no streams"), "{reply}");
+
+    let second =
+        tokio::spawn(async move { request(addr, "POST", "/cities/lakeside/start", "").await });
+    starting.recv().await.unwrap().send(Ok(())).unwrap();
+    assert!(second.await.unwrap().starts_with("HTTP/1.1 200"));
+    // Once the city runs nobody listens for requests, and asking again is harmless.
+    drop(starting);
+    let again = request(addr, "POST", "/cities/lakeside/start", "").await;
+    assert!(again.starts_with("HTTP/1.1 200"), "{again}");
 }

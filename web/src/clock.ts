@@ -11,6 +11,9 @@ const LAG = 1;
 /** Further behind than this many seconds of sim time, the clock jumps to the newest tick instead of steering. */
 const SNAP_SECONDS = 3;
 
+/** With no records coming, the clock runs on its own for this long, then waits. */
+const COAST_SECONDS = 60;
+
 /** The day, counted from 1, and the hour of it as a fraction, for a tick. */
 export function cityTime(tick: number): { day: number; hour: number } {
   return { day: Math.floor(tick / TICKS_PER_DAY) + 1, hour: ((tick % TICKS_PER_DAY) / TICKS_PER_DAY) * 24 };
@@ -23,10 +26,24 @@ export function cityTime(tick: number): { day: number; hour: number } {
 export class TickClock {
   /** The tick drawn now, or `NaN` before the first record arrives. */
   now = NaN;
+  private coasted = 0;
 
-  /** Advance by `dt` seconds. `latest` is the newest tick every district has, `speed` the sim's ticks a second. */
-  advance(dt: number, latest: number, speed: number): number {
+  /**
+   * Advance by `dt` seconds. `latest` is the newest tick every district has, `speed` the sim's ticks a second. With
+   * `coast` the connection is down: the clock runs on at `speed` past `latest`, for a minute at most, so the city keeps
+   * moving until the records catch up. It never moves backwards when they do; it waits for them.
+   */
+  advance(dt: number, latest: number, speed: number, coast = false): number {
     if (latest < 0) return this.now;
+    if (coast) {
+      if (this.coasted < COAST_SECONDS) {
+        this.coasted += dt;
+        this.now += dt * speed;
+      }
+      return this.now;
+    }
+    this.coasted = 0;
+    if (this.now > latest) return this.now;
     if (Number.isNaN(this.now)) this.now = Math.max(0, latest - LAG);
     let lag = latest - this.now;
     // After a hidden tab or a long stall the page is too far behind to catch up by steering: jump.

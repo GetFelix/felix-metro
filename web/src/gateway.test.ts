@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Gateway, GatewayError, base64, parseFrame, unbase64 } from './gateway';
 
 describe('parseFrame', () => {
@@ -158,6 +158,29 @@ describe('Gateway', () => {
     const err = await page.catch((e) => e);
     expect(err).toBeInstanceOf(GatewayError);
     expect(err).toMatchObject({ code: 'trimmed', oldest: 900 });
+  });
+
+  it('sends a read again when the gateway refuses it for the four already waiting', async () => {
+    const { gateway, socket } = await joined();
+    const page = gateway.read('events', 0, 3, 4);
+    const sent = () => socket.sent.filter((m) => m.type === 'read');
+    socket.say({ type: 'error', code: 'read_failed', message: 'too many reads', id: sent()[0]!.id });
+    await new Promise((r) => setTimeout(r, 120));
+    expect(sent()).toHaveLength(2);
+    socket.say({ type: 'records', id: sent()[1]!.id, records: [], next_offset: 4 });
+    expect((await page).nextOffset).toBe(4);
+  });
+
+  it('gives up on a read the gateway keeps refusing', async () => {
+    const { gateway, socket } = await joined();
+    const page = gateway.read('events', 0, 3, 4);
+    const sent = () => socket.sent.filter((m) => m.type === 'read');
+    for (let i = 0; i < 4; i++) {
+      await vi.waitFor(() => expect(sent()).toHaveLength(i + 1));
+      socket.say({ type: 'error', code: 'read_failed', message: 'no', id: sent()[i]!.id });
+    }
+    await expect(page).rejects.toMatchObject({ code: 'read_failed' });
+    expect(sent()).toHaveLength(4);
   });
 
   it('reads a state key under the entity that picks the shard', async () => {

@@ -161,7 +161,7 @@ jobs:
   dev-stack:
     name: dev-stack
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -191,6 +191,23 @@ jobs:
           npx playwright install --with-deps chromium
           ../dev/speed.sh harbor 16
           node scripts/check-live.mjs 'http://127.0.0.1:8088/?tier=medium#harbor' live-frames
+      # The page at /#pinecrest lists the cities the sim registered. Lakeside is seeded but held back by the sim; dev/city.sh
+      # starts it and registers it while the page is open, and the page lists it without a reload and opens it on a choice.
+      - name: The city list picks up a city created after the page loaded
+        working-directory: web
+        timeout-minutes: 10
+        run: START_CITY='../dev/city.sh lakeside' node scripts/check-cities.mjs 'http://127.0.0.1:8088/?tier=low' live-frames/cities
+      # The gateway container is stopped for five seconds under an open page: the pill shows, the clock runs on, and
+      # after the restart every district's ticks are contiguous with none missing or taken twice. Then the gateway is
+      # recreated at a new address and the page must come back through the web server again.
+      - name: The page rides out the gateway going away for five seconds
+        working-directory: web
+        timeout-minutes: 10
+        run: |
+          ../dev/speed.sh harbor 16
+          GATEWAY_STOP='../dev/gateway.sh stop' GATEWAY_START='../dev/gateway.sh start' \
+          GATEWAY_RECREATE='../dev/gateway.sh recreate' \
+            node scripts/check-reconnect.mjs 'http://127.0.0.1:8088/?tier=low&trace#harbor' live-frames/reconnect
       - if: always()
         uses: actions/upload-artifact@v4
         with:

@@ -66,6 +66,127 @@
         color: var(--muted);
         font-size: 12px;
       }
+      .brand-button {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin: 0;
+        padding: 0;
+        border: 0;
+        background: none;
+        color: inherit;
+        font: inherit;
+        letter-spacing: inherit;
+        text-align: left;
+        cursor: pointer;
+      }
+      .brand-button:disabled {
+        color: inherit;
+        cursor: default;
+      }
+      .brand-button:focus-visible,
+      .cities a:focus-visible {
+        outline: 2px solid var(--cyan);
+        outline-offset: 3px;
+        border-radius: 6px;
+      }
+      .chevron {
+        width: 7px;
+        height: 7px;
+        margin: -3px 2px 0 4px;
+        border-right: 2px solid var(--muted);
+        border-bottom: 2px solid var(--muted);
+        transform: rotate(45deg);
+      }
+      .brand-button[aria-expanded='true'] .chevron {
+        margin-top: 3px;
+        transform: rotate(225deg);
+      }
+      .cities {
+        position: absolute;
+        top: calc(100% + 8px);
+        left: 0;
+        min-width: 100%;
+        box-sizing: border-box;
+        margin: 0;
+        padding: 6px;
+        list-style: none;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+      }
+      .cities a {
+        display: block;
+        padding: 8px 12px;
+        border-radius: 8px;
+        color: var(--text);
+        text-decoration: none;
+        font-weight: 600;
+        white-space: nowrap;
+      }
+      .cities a:hover {
+        background: rgba(255, 255, 255, 0.08);
+      }
+      .cities a[aria-current='page'] {
+        color: var(--cyan);
+      }
+      .loader {
+        position: fixed;
+        inset: 0;
+        z-index: 10;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 18px;
+        background: var(--void);
+        transition: opacity 0.6s ease;
+      }
+      .loader.done {
+        opacity: 0;
+        pointer-events: none;
+      }
+      .notice {
+        position: fixed;
+        inset: 42% 24px auto;
+        z-index: 5;
+        margin: 0;
+        text-align: center;
+        color: var(--muted);
+        font-size: 18px;
+        text-shadow: 0 1px 12px var(--void);
+        pointer-events: none;
+      }
+      .loader p {
+        margin: 0;
+        color: var(--muted);
+      }
+      .loader-grid {
+        display: grid;
+        grid-template-columns: repeat(var(--side, 2), 28px);
+        gap: 6px;
+      }
+      .loader-grid i {
+        width: 28px;
+        height: 28px;
+        border-radius: 6px;
+        background: rgba(255, 255, 255, 0.07);
+        transition:
+          background 0.35s ease,
+          box-shadow 0.35s ease;
+      }
+      .loader-grid i.on {
+        background: var(--cyan);
+        box-shadow: 0 0 14px hsla(192, 90%, 46%, 0.55);
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .loader,
+        .loader-grid i {
+          transition: none;
+        }
+      }
       .hud {
         position: fixed;
         top: 74px;
@@ -192,9 +313,28 @@
     </style>
   </head>
   <body>
-    <div class="chip brand">
+    <div class="loader" id="loader" role="status">
+      <div class="loader-grid" aria-hidden="true"></div>
+      <p>Loading…</p>
+    </div>
+    <p class="notice hidden" id="notice" role="alert">
+      We couldn’t find that city, or you can’t open it. Choose another from the Felix Metro menu.
+    </p>
+    <div class="chip brand" id="brand">
       <img src="brand/felix-metro-mark.png" alt="" />
-      <div>Felix Metro<small id="subtitle">style frame</small></div>
+      <button
+        type="button"
+        class="brand-button"
+        id="brand-button"
+        aria-haspopup="true"
+        aria-expanded="false"
+        aria-controls="cities"
+        disabled
+      >
+        <span>Felix Metro<small id="subtitle">style frame</small></span>
+        <i class="chevron hidden" id="chevron" aria-hidden="true"></i>
+      </button>
+      <ul class="cities hidden" id="cities" aria-label="Cities"></ul>
     </div>
     <div class="chip clock">
       <span id="day">Day 3</span><b id="clock">18:30</b><i class="pill hidden" id="pill">LIVE</i>

@@ -15,6 +15,7 @@ describe('parseParams', () => {
       districts: 2,
       live: true,
       gateway: null,
+      trace: false,
     });
   });
 

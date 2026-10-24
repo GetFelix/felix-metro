@@ -9,13 +9,21 @@ vi.mock('./core/felix_metro_core.js', () => ({
   districtKey: (district: number, _shards: number, routing: string) => `${routing}.${district}`,
 }));
 vi.mock('./auth', () => ({ signIn: async () => 'token' }));
-const { follow } = await import('./live');
+const { follow, createFeeds } = await import('./live');
 
 const city = { lots: [] } as unknown as City;
 const trips: Trips = { trip: () => undefined };
-const bytes = (tick: number, district: number) =>
+const bytes = (tick: number, district: number, keyframe = false) =>
   new TextEncoder().encode(
-    JSON.stringify({ kind: 'tick', epoch: 1, district, tick, speed: 4, keyframe: null, events: [] }),
+    JSON.stringify({
+      kind: 'tick',
+      epoch: 1,
+      district,
+      tick,
+      speed: 4,
+      keyframe: keyframe ? { buildings: [] } : null,
+      events: [],
+    }),
   );
 
 /** A gateway over one shard per district whose log the test writes and whose subscription it can feed. */
@@ -26,13 +34,18 @@ class FakeGateway {
   reads: [number, number, number][] = [];
   stateFails = 0;
   stalled = false;
-  constructor(districts: number) {
-    this.logs = Array.from({ length: districts }, () => []);
+  /** The offset of each district's newest keyframe, which `state_get` points at; none until one is committed. */
+  keyframes = new Map<number, number>();
+  /** The oldest offset retention has left; a read from before it is `trimmed`. */
+  oldest = 0;
+  constructor(districts: number, logs?: Uint8Array[][]) {
+    this.logs = logs ?? Array.from({ length: districts }, () => []);
   }
   /** Append the next tick to a district's log; `live` also delivers it, with `skippedBefore` on its frame. */
-  commit(district: number, live = true, skippedBefore = 0): void {
+  commit(district: number, live = true, skippedBefore = 0, keyframe = false): void {
     const log = this.logs[district]!;
-    log.push(bytes(log.length, district));
+    if (keyframe) this.keyframes.set(district, log.length);
+    log.push(bytes(log.length, district, keyframe));
     if (live) this.deliver(district, log.length - 1, skippedBefore);
   }
   deliver(district: number, offset: number, skippedBefore = 0): void {
@@ -57,6 +70,7 @@ class FakeGateway {
   async read(_stream: string, shard: number, from: number, end?: number): Promise<Page> {
     this.reads.push([shard, from, end ?? -1]);
     if (this.stalled) return { records: [], nextOffset: from };
+    if (from < this.oldest) throw new GatewayError('trimmed', 'gone', this.oldest);
     const log = this.logs[shard]!;
     const stop = Math.min(end ?? log.length, log.length);
     const records = [];
@@ -65,7 +79,11 @@ class FakeGateway {
   }
   async stateGet(): Promise<StateValue> {
     if (this.stateFails-- > 0) throw new GatewayError('state_failed', 'no such shard');
-    return { payload: null, version: null, asOf: 0 };
+    const at = this.keyframes.get(0);
+    if (at === undefined) return { payload: null, version: null, asOf: 0 };
+    const payload = new Uint8Array(8);
+    new DataView(payload.buffer).setBigUint64(0, BigInt(at), true);
+    return { payload, version: null, asOf: 0 };
   }
 }
 
@@ -160,5 +178,89 @@ describe('follow', () => {
     await settle();
     await settle();
     expect(failed).toHaveLength(1);
+  });
+});
+
+describe('a new session', () => {
+  const trace = (state: CityState) => {
+    const seen: [number, number, string][] = [];
+    state.onRecord = (d, t, r) => seen.push([d, t, r]);
+    return seen;
+  };
+
+  it('resumes after the last record handled, so none is read twice or missed', async () => {
+    const first = new FakeGateway(1);
+    commits(first, 5);
+    const state = new CityState(city, trips, 1);
+    const seen = trace(state);
+    const feeds = createFeeds(state);
+    await follow(first as unknown as Gateway, state, () => {}, feeds);
+    // The gateway is gone for a while and the sim goes on.
+    commits(first, 4);
+    const second = new FakeGateway(1, first.logs);
+    await follow(second as unknown as Gateway, state, () => {}, feeds);
+    expect(second.reads[0]).toEqual([0, 5, 9]);
+    expect(seen.map(([, t, r]) => `${t}:${r}`)).toEqual([
+      '0:applied',
+      '1:applied',
+      '2:applied',
+      '3:applied',
+      '4:applied',
+      '5:applied',
+      '6:applied',
+      '7:applied',
+      '8:applied',
+    ]);
+    second.commit(0);
+    expect(state.ticks[0]).toBe(9);
+  });
+
+  it('refolds from the newest keyframe when retention took what the feed needed', async () => {
+    const first = new FakeGateway(1);
+    commits(first, 3);
+    const state = new CityState(city, trips, 1);
+    const seen = trace(state);
+    const feeds = createFeeds(state);
+    await follow(first as unknown as Gateway, state, () => {}, feeds);
+    for (let i = 3; i < 12; i++) first.commit(0, false, 0, i === 8);
+    const second = new FakeGateway(1, first.logs);
+    second.oldest = 5;
+    second.keyframes = first.keyframes;
+    await follow(second as unknown as Gateway, state, () => {}, feeds);
+    expect(seen.filter(([, , r]) => r === 'applied').map(([, t]) => t)).toEqual([0, 1, 2, 8, 9, 10, 11]);
+    second.commit(0);
+    expect(state.ticks[0]).toBe(12);
+  });
+
+  it('does not wait for a future keyframe when none is left, and takes live records after', async () => {
+    const first = new FakeGateway(1);
+    commits(first, 3);
+    const state = new CityState(city, trips, 1);
+    const seen = trace(state);
+    const feeds = createFeeds(state);
+    await follow(first as unknown as Gateway, state, () => {}, feeds);
+    // The only keyframe was at offset 3, and retention has taken it.
+    for (let i = 3; i < 12; i++) first.commit(0, false, 0, i === 3);
+    first.keyframes.clear();
+    const second = new FakeGateway(1, first.logs);
+    second.oldest = 5;
+    await follow(second as unknown as Gateway, state, () => {}, feeds);
+    expect(seen.filter(([, , r]) => r === 'applied').map(([, t]) => t)).toEqual([0, 1, 2, 5, 6, 7, 8, 9, 10, 11]);
+    second.commit(0);
+    expect(state.ticks[0]).toBe(12);
+  });
+
+  it('tells the loading screen as each district catches up', async () => {
+    const gateway = new FakeGateway(3);
+    const state = new CityState(city, trips, 3);
+    const ready: number[] = [];
+    await follow(
+      gateway as unknown as Gateway,
+      state,
+      () => {},
+      createFeeds(state),
+      (d) => ready.push(d),
+    );
+    expect(ready.sort()).toEqual([0, 1, 2]);
   });
 });

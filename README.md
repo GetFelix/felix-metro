@@ -7,7 +7,7 @@ A 3D city simulator that runs in the browser, built on
 is stored in durable Felix streams, so you can scrub back to any earlier moment
 and play forward from there.
 
-> **Status:** design stage. `core/` generates a city from a seed; nothing is simulated yet. The [style frame](prototype/style-frame.html) shows the look. The plan is in
+> **Status:** a live city runs end to end. The sim steps it, the browser draws it live, and a city picker switches between cities. Time travel, following a resident and building are not built yet. The [style frame](prototype/style-frame.html) shows the look. The plan is in
 > [docs/design.md](docs/design.md) and the work is tracked in
 > [milestones](https://github.com/GetFelix/felix-metro/milestones).
 
@@ -55,7 +55,7 @@ there. [docs/design.md](docs/design.md) has the details.
 | M | Milestone | State |
 |---|---|---|
 | 0 | The look, locked | Planned |
-| 1 | A live city | In progress |
+| 1 | A live city | Done |
 | 2 | Time travel | Planned |
 | 3 | Follow a life | Planned |
 | 4 | Build | Planned |
@@ -64,8 +64,14 @@ there. [docs/design.md](docs/design.md) has the details.
 | 7 | Self-hosting | Planned |
 
 What runs today: the sim, the dev stack and a browser page that shows a city live, with
-cars and walkers moving in time with the sim and the sun following the tick. Scrubbing
-back in time, following a resident and building are not built yet.
+cars and walkers moving in time with the sim and the sun following the tick. The page
+opens on a loading screen that fills in district by district, then drifts down onto the
+city. If the connection drops, a `Reconnecting…` pill shows, the city keeps moving, and
+the page reads what it missed from the log and carries on in order. If retention has
+already dropped what it missed, it restarts that district from the newest keyframe left.
+A city the gateway refuses (a misspelled name, or no access) shows a message instead of
+retrying. The city name in the top left opens a list of every city. Scrubbing back in time, following a resident and
+building are not built yet.
 
 ## Run it locally
 
@@ -80,7 +86,7 @@ The first run builds the sim and the web app, which takes a few minutes. It star
 Felix (a control plane and one broker as a cluster of one, so a city's stream can
 have a shard per district), a stand-in sign-in provider, the
 [gateway](https://github.com/GetFelix/felix-gateway), the sim and the web app, with the
-cities `harbor` and `pinecrest`. It returns once a probe has seen a tick on every
+cities `harbor` and `pinecrest` (and `lakeside`, which the sim holds back, see below). It returns once a probe has seen a tick on every
 district of both cities arrive through the gateway, and prints the web app's address,
 <http://127.0.0.1:8088>. The stack keeps no state between runs: `dev/up.sh` starts it
 over each time. Stop it with `docker compose -f dev/compose.yml down --volumes`
@@ -92,6 +98,30 @@ walking in time with the sim, with the sun following the tick. A city starts at
 midnight, so for traffic run `dev/speed.sh harbor 16` and give it a few minutes
 (the morning commute is around 06:00). Without a gateway the page draws the
 city alone.
+
+Click the city name in the top left to switch cities, or open `/#pinecrest` (any name
+in the list) directly. Choosing a city opens its page afresh, so the old city's
+connections close with the old page. The list comes from the registry, which the sim
+writes to as each city starts, so a city that starts while the page is open appears in the
+list without a reload (a city started again at another size is listed at the latest one).
+If a city cannot open its streams when you start it, `dev/city.sh` fails with the reason
+and the sim keeps running. The stack seeds a third city, `lakeside`, and the sim keeps it idle
+and unlisted until you start it:
+
+```sh
+dev/city.sh lakeside
+```
+
+To see the page ride out a dropped connection, stop the gateway for a few seconds and
+start it again (the page shows `Reconnecting…` and carries on):
+
+```sh
+dev/gateway.sh stop
+dev/gateway.sh start
+```
+
+`dev/gateway.sh recreate` brings the gateway back at a new address instead; the web
+container looks the name up again, so the page reconnects through it.
 
 To watch ticks arrive the way a browser gets them, through the gateway (needs Node 22):
 

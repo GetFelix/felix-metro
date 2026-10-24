@@ -17,6 +17,7 @@ cargo run -p felix-metro-sim
 | Variable | Default | |
 |---|---|---|
 | `SIM_CITIES` | required | `name` or `name:districts`, comma or space separated. The name is the seed, and `districts` is how many districts a side has (2 by default) |
+| `SIM_ON_DEMAND` | none | cities in the same format whose streams exist but that stay idle, and unlisted, until `POST /cities/<name>/start` on the control endpoint. A city that starts is written to the registry, `metro.cities`, as it does |
 | `SIM_FELIX_BROKERS` | `127.0.0.1:5000` | `host:port`, comma separated |
 | `SIM_FELIX_SERVER_NAME` | `localhost` | name the broker's certificate is checked against |
 | `SIM_FELIX_CA_FILE` | platform store | PEM certificates to trust for the broker |
@@ -43,6 +44,13 @@ city started with `SIM_TICKS_PER_SECOND=0` waits for its first resume. The endpo
 for operators; the builders' `speed` command will replace it.
 
 The endpoint binds loopback only, so in a container it is reached with `exec` or a port-forward from inside the container's network namespace, not through published ports.
+
+## The registry
+
+Every city, when it starts, writes a `created` record (name, seed, districts a side, wall time) to
+`metro.cities`, the one-shard stream pages follow for their list of cities. A page lists a name once,
+so a repeated record is harmless. `SIM_ON_DEMAND` is how a city comes into being while pages are
+open; with the dev stack, `dev/city.sh lakeside` does it.
 
 ## Entity keys
 
