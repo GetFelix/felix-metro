@@ -6,18 +6,24 @@ import type { Voyage } from './city';
 /** Tiles from the road's centre line to a car's lane and to a walker's pavement. */
 export const LANE = 0.17;
 export const PAVEMENT = 0.38;
-/** Tiles from the centre line to where a lot's door opens: past the pavement, off the road. */
-export const LOT = 0.75;
-/** Ticks a trip spends turning in from the road at each end. */
+/** Ticks a trip spends turning in from the road at each end; a trip shorter than two of them gives half to each end. */
 export const TURN_TICKS = 1;
 
 /**
- * How far into its lot a trip is at `tick`, 0 on the road and 1 at the door: it rises over the first tick after the
- * trip leaves and falls over the last tick before it arrives. A function of the tick alone, so a rewind draws the same.
+ * How far into its lot a trip is at `tick`: 0 on the road, 1 standing on the lot. It falls over the first ticks after
+ * the trip leaves and rises over the last ticks before it arrives. A function of the tick alone, so a rewind draws
+ * the same.
  */
 export function doorEase(tick: number, depart: number, arrive: number): number {
-  const t = Math.max(1 - (tick - depart) / TURN_TICKS, 1 - (arrive - tick) / TURN_TICKS, 0);
-  return Math.min(t, 1);
+  const window = Math.min(TURN_TICKS, (arrive - depart) / 2);
+  if (!(window > 0)) return 0;
+  return Math.max(0, 1 - Math.min(tick - depart, arrive - tick) / window);
+}
+
+/** Where a lot stands, in tiles from the city's north-west corner. */
+export interface LotAt {
+  x: number;
+  z: number;
 }
 
 export interface Pose {
@@ -77,6 +83,7 @@ export class Traffic {
   private readonly free = new Map<string, Figure[]>();
   private readonly a = new Uint32Array(2);
   private readonly b = new Uint32Array(2);
+  private readonly ends = new Uint32Array(2);
   private readonly from = [0, 0];
   private readonly to = [0, 0];
   private readonly pose: Pose = { x: 0, z: 0, heading: 0 };
@@ -98,6 +105,8 @@ export class Traffic {
     private readonly fleet: Fleet,
     private readonly half: number,
     private readonly newPerUpdate = 16,
+    /** The city's lots by id, for turning into the one a trip starts or ends at. */
+    private readonly lots: readonly LotAt[] = [],
   ) {}
 
   /** Models in use right now. */
@@ -162,13 +171,28 @@ export class Traffic {
       this.from[1] = this.a[1]! / 1000 - this.half;
       this.to[0] = this.b[0]! / 1000 - this.half;
       this.to[1] = this.b[1]! / 1000 - this.half;
-      const into = doorEase(tick, v.depart, v.journey.arrive());
-      const side = on ? PAVEMENT : LANE;
-      const pose = poseBetween(this.from, this.to, f, side + into * (LOT - side), slot.heading, this.pose);
+      const arrive = v.journey.arrive();
+      const pose = poseBetween(this.from, this.to, f, on ? PAVEMENT : LANE, slot.heading, this.pose);
       slot.heading = pose.heading;
+      let into = doorEase(tick, v.depart, arrive);
+      let heading = pose.heading;
+      if (into > 0) {
+        // The lot at the end the trip is nearer: the one it left, or the one it is reaching.
+        v.journey.lots(this.ends);
+        const lot = this.lots[this.ends[tick - v.depart < arrive - tick ? 0 : 1]!];
+        if (lot) {
+          const tx = lot.x - this.half;
+          const tz = lot.z - this.half;
+          let turn = Math.atan2(tx - pose.x, tz - pose.z) - heading;
+          turn -= Math.round(turn / (2 * Math.PI)) * 2 * Math.PI;
+          heading += into * turn;
+          pose.x += into * (tx - pose.x);
+          pose.z += into * (tz - pose.z);
+        } else into = 0;
+      }
       slot.figure.o.scale.setScalar(slot.scale * (1 - into));
       slot.figure.o.position.set(pose.x, on ? 0 : 0.036, pose.z);
-      slot.figure.o.rotation.y = pose.heading + (into * Math.PI) / 2;
+      slot.figure.o.rotation.y = heading;
       slot.figure.mixer?.update(dt);
     }
   }

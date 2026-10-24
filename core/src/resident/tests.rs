@@ -313,3 +313,26 @@ fn the_pavements_are_busy_at_the_rush_and_at_lunch() {
     assert!(most(7 * h, 9 * h) >= 40);
     assert!(most(12 * h, 13 * h) >= 25);
 }
+
+#[test]
+fn a_trip_names_the_lots_it_starts_and_ends_at() {
+    let city = City::generate("harbor", 2).unwrap();
+    let places = Places::new(&city);
+    let mut checked = 0;
+    for index in sample(&places) {
+        let r = Resident::new(&city, &places, index).unwrap();
+        for trip in r.day_trips(&city, 0, &Congestion::FREE, 0).unwrap() {
+            let (_, from, to) = r
+                .trip_between_lots(&city, trip.depart, &trip.legs(), trip.mode)
+                .unwrap();
+            for (lot, tick) in [(from, trip.depart), (to, trip.arrive())] {
+                let door = city.lots[lot as usize].door().unwrap();
+                let (x, z) = point(&city, door.segment, u32::from(door.offset) * 1000);
+                let at = trip.position_at(&city, tick);
+                assert_eq!((at.x, at.z), (x, z), "resident {index} lot {lot}");
+            }
+            checked += 1;
+        }
+    }
+    assert!(checked > 100);
+}

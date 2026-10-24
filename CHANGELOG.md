@@ -2,10 +2,21 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- The timeline bar holds still while it is dragged. Its scale used to follow the growing city, so in a
+  young city each pointer move mapped to a different moment and the drag flashed. A drag now keeps the
+  scale it began with, and releasing at the right end goes live. The bar spans at least one city day,
+  so the live head moves right across a fixed scale and the part after it is dimmed as not yet
+  happened, and a press before the span the city holds has been read waits for it instead of mapping
+  through a one-tick placeholder.
+- A press on the live head picks the handle up at once; it used to land on the head's own button, so the
+  bar needed a click before it could be dragged.
+
 ### Changed
 
-- People on the pavements: a route of 8 tiles or less is walked (it was 4), so lunches, shopping and park trips are on foot. The harbor city at 2 by 2 peaks at 72 walkers instead of 20 and 72 cars instead of 91, and the busiest district holds about 21 walkers at lunch. Walkers are drawn about 1.3 times larger. The log rate is unchanged: trips are still route intents.
-- Cars and walkers no longer vanish on the road: in the last tick of a trip they turn off the road onto the lot and shrink away at the door, and a departure does the reverse. The pose is a function of the trip and the tick alone, so a rewind or seek draws the same.
+- People on the pavements: a route of 8 tiles or less is walked (it was 4), so lunches, shopping and park trips are on foot. The harbor city at 2 by 2 peaks at 72 walkers instead of 20 and 72 cars instead of 91, and the busiest district holds 24 to 36 walkers at the rush and about 21 at lunch. Walkers are drawn about 1.3 times larger. The log rate is unchanged: trips are still route intents.
+- Cars and walkers no longer vanish on the road: in the last tick of a trip they turn off the road onto the lot the trip leaves or enters, on whichever side of the road it stands, and shrink away; a departure does the reverse. The pose is a function of the trip and the tick alone, so a rewind or seek draws the same.
 
 ## [0.2.0] - 2026-10-24
 

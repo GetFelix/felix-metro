@@ -394,7 +394,8 @@ async function main() {
   };
   /** The state the live connection feeds, which keeps taking records while the page is held in the past. */
   const liveState = state;
-  const traffic = state && fleet ? new Traffic(fleet, city ? (city.tiles - 1) / 2 : 0) : null;
+  const traffic =
+    state && fleet ? new Traffic(fleet, city ? (city.tiles - 1) / 2 : 0, undefined, city?.lots ?? []) : null;
   if (traffic) traffic.cap = settingsFor(quality.tier).movers;
   if (state && traffic) {
     // The sun follows the tick the page draws, so the slider is only a readout.
@@ -757,8 +758,10 @@ async function main() {
     const handleAt = () => scrubTarget ?? pastTick ?? Math.floor(liveState!.latest);
     const go = (tick: number, moving: boolean) => {
       if (!range) return;
-      const tip = tipTick();
-      const to = clampTick({ oldest: range.oldest, newest: tip }, tick);
+      // A drag is judged against the bar it began on, so releasing at its right end goes live however far the tip moved.
+      const held = bar.held;
+      const tip = held?.live ?? tipTick();
+      const to = clampTick({ oldest: held?.oldest ?? range.oldest, newest: tip }, tick);
       // The tip is the live city: a step or a release within a city minute of it is going back to it.
       if (hasLive && !moving && to >= tip - LIVE_SNAP_TICKS) return goLive();
       stopPlayback();
@@ -816,7 +819,8 @@ async function main() {
       const inPast = pastTick !== null || scrubTarget !== null;
       syncRefresh(bar.dragging || inPast);
       const at = Math.min(scrubTarget ?? pastTick ?? tick, tip);
-      if (usable) bar.update({ oldest: range?.oldest ?? tip - 1, newest: tip, at, live: !inPast });
+      if (usable)
+        bar.update({ ready: range !== null, oldest: range?.oldest ?? tip - 1, newest: tip, at, live: !inPast });
       if (inPast !== wasPast) {
         const first = wasPast === null;
         wasPast = inPast;

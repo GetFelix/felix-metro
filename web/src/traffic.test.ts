@@ -34,6 +34,10 @@ function journey(from: number, to: number): Journey {
       out[0] = Math.min(to, Math.max(from, tick)) * 1000;
       out[1] = 0;
     },
+    lots(out) {
+      out[0] = 0;
+      out[1] = 1;
+    },
     free() {},
   };
 }
@@ -89,24 +93,76 @@ describe('Traffic', () => {
     expect(made.cars).toBe(1);
   });
 
-  it('turns in from the road onto its lot as a trip leaves and arrives', () => {
-    const car = new THREE.Object3D();
-    const traffic = new Traffic({ car: () => ({ o: car }), person: () => ({ o: new THREE.Object3D() }) }, 0);
-    const v = voyage(1, 2, 0, 10);
-    const o = () => car;
-    for (const tick of [0.01, 9.99]) {
-      traffic.update(tick, 0, [v]);
-      const [at] = traffic.where();
-      expect(Math.abs(at!.z)).toBeGreaterThan(0.7);
-      expect(o().scale.x).toBeLessThan(0.05);
+  // A road along z = 0; lot 0 is a tile to its north, lot 1 a tile to its south, both at x = 5.
+  const lots = [
+    { x: 5, z: -1 },
+    { x: 5, z: 1 },
+  ];
+  const trip = (from: number, to: number, ends: [number, number], vehicle = 2): Voyage => ({
+    resident: 1,
+    vehicle,
+    depart: from,
+    journey: { ...journey(from, to), lots: (out) => ((out[0] = ends[0]), (out[1] = ends[1])) },
+  });
+  const drawn = (v: Voyage, tick: number, vehicle = v.vehicle) => {
+    const model = new THREE.Object3D();
+    const traffic = new Traffic({ car: () => ({ o: model }), person: () => ({ o: model }) }, 0, 16, lots);
+    traffic.update(tick, 0, [v]);
+    return { x: model.position.x, z: model.position.z, scale: model.scale.x, vehicle };
+  };
+
+  it('turns onto the lot it leaves and the lot it enters, whichever side of the road that is', () => {
+    for (const vehicle of [2, 0]) {
+      for (const [ends, side] of [
+        [[0, 1], -1],
+        [[1, 0], 1],
+      ] as const) {
+        // Leaves lot ends[0], arrives at lot ends[1]: the other side of the road.
+        const start = drawn(trip(0, 10, [...ends], vehicle), 0.01);
+        expect(start.z).toBeCloseTo(side, 1);
+        expect(start.scale).toBeLessThan(0.05);
+        const end = drawn(trip(0, 10, [...ends], vehicle), 9.99);
+        expect(end.z).toBeCloseTo(-side, 1);
+        expect(end.scale).toBeLessThan(0.05);
+      }
     }
-    traffic.update(5, 0, [v]);
-    expect(traffic.where()[0]!.z).toBeCloseTo(-LANE);
-    expect(o().scale.x).toBe(1);
-    traffic.update(9.5, 0, [v]);
-    const half = traffic.where()[0]!.z;
-    traffic.update(9.5, 0, [v]);
-    expect(traffic.where()[0]!.z).toBe(half);
+  });
+
+  it('turns in on the same side at both ends of a round trip on one lot', () => {
+    const out = drawn(trip(0, 10, [0, 0]), 0.01);
+    const back = drawn(trip(20, 30, [0, 0]), 29.99);
+    expect(out.z).toBeCloseTo(-1, 1);
+    expect(back.z).toBeCloseTo(-1, 1);
+  });
+
+  it('drives in its lane mid-trip and walks on the pavement', () => {
+    expect(drawn(trip(0, 10, [0, 1]), 5).z).toBeCloseTo(-LANE);
+    expect(drawn(trip(0, 10, [0, 1], 0), 5, 0).z).toBeCloseTo(-PAVEMENT);
+    expect(drawn(trip(0, 10, [0, 1]), 5).scale).toBe(1);
+  });
+
+  it('gives a one tick trip half a tick at each end, without a jump at the middle', () => {
+    const v = trip(0, 1, [0, 1]);
+    const early = drawn(v, 0.499);
+    const late = drawn(v, 0.501);
+    expect(early.scale).toBeGreaterThan(0.9);
+    expect(late.scale).toBeGreaterThan(0.9);
+    expect(Math.abs(early.z - late.z)).toBeLessThan(0.1);
+    for (const tick of [0, 0.1, 0.25, 0.75, 0.9, 0.999]) {
+      const s = drawn(v, tick).scale;
+      expect(s).toBeGreaterThanOrEqual(0);
+      expect(s).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it('draws a zero length trip never', () => {
+    const v = trip(5, 5, [0, 1]);
+    for (const tick of [4.9, 5, 5.1]) {
+      const model = new THREE.Object3D();
+      const traffic = new Traffic({ car: () => ({ o: model }), person: () => ({ o: model }) }, 0, 16, lots);
+      traffic.update(tick, 0, [v]);
+      expect(traffic.drawn).toBe(0);
+    }
   });
 
   it('makes only so many new models in one update and the rest in the ones after it', () => {
