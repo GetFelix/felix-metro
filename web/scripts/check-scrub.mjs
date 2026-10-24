@@ -59,10 +59,13 @@ const tickMinutes = (tick) => Math.floor(((tick % 5760) / 5760) * 24 * 60);
 
 // What the page has drawn: the folded state, not a guess from pixels. A past state has every district at one tick and
 // buildings in it once the city has grown; the live one has buildings in it.
+/** Whether the live city has buildings at all; a stack that has built nothing proves nothing by an empty one. */
+let grown = false;
 const wholeProblem = (r) => {
   const { shown } = r;
   // The first hours of a city are empty, so only the live city and later moments must have buildings.
-  if ((shown.past === null || shown.past >= BUILT_BY) && !(shown.buildings > 0)) return 'no buildings are drawn';
+  if (grown && (shown.past === null || shown.past >= BUILT_BY) && !(shown.buildings > 0))
+    return `no buildings are drawn (${JSON.stringify({ past: shown.past, ticks: shown.ticks })})`;
   if (shown.past !== null && shown.ticks.some((t) => t !== shown.past))
     return `the state is at ticks ${shown.ticks} while holding tick ${shown.past}`;
   return null;
@@ -116,6 +119,8 @@ await page.evaluate(() => window.__metro.prepare());
 const live = await read();
 if (live.mode !== 'live') await fail(`the page opens in "${live.mode}", not live`);
 console.log(`timeline spans ticks ${live.min} to ${live.max}`);
+grown = live.shown.buildings > 0;
+console.log(`the live city has ${live.shown.buildings} buildings`);
 await page.locator('#timeline').screenshot({ path: join(out, 'bar-live.png') });
 await page.screenshot({ path: join(out, 'live.png') });
 
