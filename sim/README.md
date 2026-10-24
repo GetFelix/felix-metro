@@ -24,6 +24,7 @@ cargo run -p felix-metro-sim
 | `SIM_FELIX_TOKEN_FILE` | required | the sim's Felix token |
 | `SIM_TENANT`, `SIM_NAMESPACE` | `metro`, `default` | |
 | `SIM_TICKS_PER_SECOND` | `4` | the city's speed at start: 0 (paused), 4, 8 or 16; a tick is 15 seconds of city time at any speed |
+| `SIM_WARMUP_HOURS` | `40` | city hours of ticks a city with no history commits as fast as the log takes them before it goes live, so it starts at 16:00 on day 2 with history behind it; 0 starts at midnight. A city that starts paused, or already has records, skips it |
 | `SIM_CONTROL_ADDR` | `127.0.0.1:8090` | where the speed endpoint listens; loopback only, it has no authentication |
 
 ## Speed
@@ -42,6 +43,9 @@ record for it holds a `speed` event. A pause commits that tick as the last one, 
 records are written until a resume, which continues at the next tick with no burst. A
 city started with `SIM_TICKS_PER_SECOND=0` waits for its first resume. The endpoint is
 for operators. A builder's `speed` command does the same through the command stream.
+
+`GET /cities/<name>/warmup` answers `warming` while a new city is committing its warm-up and
+`live` after; `dev/up.sh` waits for `live` on every city.
 
 The endpoint binds loopback only, so in a container it is reached with `exec` or a port-forward from inside the container's network namespace, not through published ports.
 

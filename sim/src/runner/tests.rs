@@ -690,6 +690,108 @@ async fn a_log_with_someone_elses_records_stops_the_city() {
     assert!(format!("{err:#}").contains("another sim"), "{err:#}");
 }
 
+fn warm(warmup: u32, stop: u32) -> Settings {
+    Settings {
+        warmup_ticks: warmup,
+        ..settings(stop)
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_new_city_commits_its_warmup_at_once_then_runs_at_normal_speed() {
+    let log = Memory::healthy();
+    let (warming, seen) = watch::channel(true);
+    let mut s = warm(500, 700);
+    s.warming = Some(warming);
+    let start = Instant::now();
+    let done = run_city("harbor", city(), s, log.clone()).await.unwrap();
+    assert_eq!(done.ticks, 700);
+    assert_whole(&log, 700);
+    // The first live tick is due at once, then one every 250 ms: 200 live ticks.
+    assert_eq!(start.elapsed(), Duration::from_millis(199 * 250));
+    assert!(!*seen.borrow());
+    for district in 0..4 {
+        let records = log.records(district);
+        let mut latest = None;
+        for (offset, r) in records.iter().enumerate() {
+            if r.header.tick % 240 == 0 {
+                latest = Some(offset as u64);
+            }
+            assert_eq!(Some(r.header.keyframe_offset), latest);
+        }
+        assert_eq!(log.keyframes.lock().unwrap()[&district], 480);
+        // Warm-up ticks are stamped as if they ran at 4 Hz up to go-live.
+        for pair in records[..500].windows(2) {
+            assert_eq!(pair[1].header.wall_us - pair[0].header.wall_us, 250_000);
+        }
+        assert!(records[500].header.wall_us > records[499].header.wall_us);
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_warmup_keeps_each_districts_order_through_failures() {
+    let log = Memory::new(|district, offset, attempt| {
+        (district == 2 && offset % 97 == 5 && attempt == 1).then_some(Fault::Fail)
+    });
+    let done = run_city("harbor", city(), warm(400, 400), log.clone())
+        .await
+        .unwrap();
+    assert_eq!(done.ticks, 400);
+    assert!(done.retries >= 4, "{done:?}");
+    assert_whole(&log, 400);
+}
+
+#[tokio::test(start_paused = true)]
+async fn another_writer_in_the_warmup_stops_the_city() {
+    let log = Memory::new(|district, offset, attempt| {
+        (district == 1 && offset == 30 && attempt == 1).then_some(Fault::Foreign)
+    });
+    let err = run_city("harbor", city(), warm(400, 400), log)
+        .await
+        .unwrap_err();
+    assert!(format!("{err:#}").contains("another sim"), "{err:#}");
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_city_with_history_does_not_warm_up_again() {
+    let log = Memory::healthy();
+    log.append(1, 0, vec![1, 2, 3], false);
+    let err = run_city("harbor", city(), warm(2000, 2000), log.clone())
+        .await
+        .unwrap_err();
+    assert!(format!("{err:#}").contains("another sim"), "{err:#}");
+    // A warm-up would have run district 0 hundreds of ticks ahead before the refusal.
+    assert!(log.records(0).len() <= 1, "{}", log.records(0).len());
+}
+
+#[tokio::test(start_paused = true)]
+async fn without_a_warmup_the_city_starts_at_tick_zero_as_before() {
+    let log = Memory::healthy();
+    let (warming, seen) = watch::channel(true);
+    let mut s = warm(0, 41);
+    s.warming = Some(warming);
+    let start = Instant::now();
+    run_city("harbor", city(), s, log.clone()).await.unwrap();
+    assert_eq!(start.elapsed(), Duration::from_secs(10));
+    assert_whole(&log, 41);
+    assert!(!*seen.borrow());
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_city_that_starts_paused_skips_the_warmup() {
+    let log = Memory::healthy();
+    let (control, speed) = watch::channel(0u8);
+    let mut s = warm(300, 10);
+    s.ticks_per_second = 0;
+    s.speed = Some(speed);
+    let task = tokio::spawn(run_city("harbor", city(), s, log.clone()));
+    tokio::time::sleep(Duration::from_secs(5)).await;
+    assert!(log.records(0).is_empty());
+    control.send_replace(4);
+    task.await.unwrap().unwrap();
+    assert_whole(&log, 10);
+}
+
 mod builders {
     use felix_metro_core::record::{
         Command, REFUSED_IN_USE, REFUSED_OCCUPIED, RESULT_APPLIED, principal_hash,

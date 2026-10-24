@@ -180,6 +180,9 @@ jobs:
           cache-dependency-path: web/package-lock.json
       # Felix, the gateway, the sim for harbor and pinecrest, and the web app, all built and started from dev/compose.yml.
       - run: dev/up.sh
+      # up.sh returns once every city has committed its warm-up; the sim logs how long that took.
+      - name: Warm-up time
+        run: docker compose -f dev/compose.yml logs --no-color sim | grep -E "warming up|warm-up done"
       # A client signs in through the IdP, joins each city at the gateway and follows every district's shard live.
       - name: Ticks reach a WebSocket client through the gateway
         run: node dev/check-ticks.mjs harbor pinecrest

@@ -35,6 +35,8 @@ async fn main() -> Result<()> {
 
     let mut cities = JoinSet::new();
     let mut controls = std::collections::HashMap::new();
+    let mut warmups = std::collections::HashMap::new();
+    let warmup_ticks = config.warmup_hours * felix_metro_core::TICKS_PER_HOUR;
     let mut starts: std::collections::HashMap<String, mpsc::Sender<StartRequest>> =
         std::collections::HashMap::new();
     let all = config
@@ -49,6 +51,8 @@ async fn main() -> Result<()> {
     for (spec, held) in all {
         let (control, speed) = watch::channel(config.ticks_per_second);
         controls.insert(spec.name.clone(), control.clone());
+        let (warming, warming_seen) = watch::channel(held.is_none() && warmup_ticks > 0);
+        warmups.insert(spec.name.clone(), warming_seen);
         let (client, connection, spec) =
             (Arc::clone(&client), config.connection.clone(), spec.clone());
         let ticks_per_second = config.ticks_per_second;
@@ -83,7 +87,12 @@ async fn main() -> Result<()> {
                 spec.name.clone(),
                 spec.districts_per_side,
             );
+            if warmup_ticks > 0 {
+                warming.send_replace(true);
+            }
             let settings = Settings {
+                warmup_ticks,
+                warming: Some(warming),
                 ticks_per_second,
                 speed: Some(speed),
                 speed_out: Some(control),
@@ -99,7 +108,7 @@ async fn main() -> Result<()> {
         .with_context(|| format!("bind the speed endpoint {}", config.control_addr))?;
     info!(addr = %config.control_addr, "speed endpoint");
     cities.spawn(async move {
-        serve_speed_control(listener, controls, starts).await?;
+        serve_speed_control(listener, controls, starts, warmups).await?;
         Ok("the speed endpoint".to_owned())
     });
     // A city's clock only stops on an error, which ends the process: a sim that

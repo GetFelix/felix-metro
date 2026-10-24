@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### The city
+
+- A new city starts with a day behind it. On its first start the sim commits `SIM_WARMUP_HOURS` of ticks
+  (40 by default, so live begins at 16:00 on day 2) as fast as the broker takes them, then runs at normal
+  speed. The page opens on an evening commute with history to scrub through instead of an empty dark city.
+  Warm-up ticks are stamped with wall times spread back from the start of the warm-up at the city's speed.
+  A city with records, or one that starts paused, skips it; `SIM_WARMUP_HOURS=0` starts at midnight as before.
+- `GET /cities/<name>/warmup` on the sim's endpoint says whether a city is still warming up, and `dev/up.sh`
+  (and the compose bundle's `up.sh`) waits for every city to go live.
+
 ## [0.2.0] - 2026-10-24
 
 ### Changed
