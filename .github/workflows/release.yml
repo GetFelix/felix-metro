@@ -1,0 +1,457 @@
+name: Release
+
+# A v* tag releases that version: the sim and web images on GHCR, the compose
+# bundle, the web dist, SHA256SUMS, and a GitHub release with its notes from
+# CHANGELOG.md. The site is told afterwards.
+#
+# Pull requests, and a manual run with dry_run, build every asset and image
+# for the version in the tree and publish nothing. A manual run with a tag that
+# already exists releases it, which finishes a release that failed part way.
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+    paths:
+      - .github/workflows/release.yml
+      - .github/scripts/**
+      - dev/**
+      - CHANGELOG.md
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: The tag to release, such as v0.1.0
+        required: true
+        type: string
+      dry_run:
+        description: Check and build everything, publish nothing
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.event_name == 'pull_request' && github.ref || inputs.tag || github.ref_name }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  plan:
+    name: Check and package
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      tag: ${{ steps.plan.outputs.tag }}
+      version: ${{ steps.plan.outputs.version }}
+      prerelease: ${{ steps.plan.outputs.prerelease }}
+      publish: ${{ steps.plan.outputs.publish }}
+    steps:
+      - name: Choose the source
+        id: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          case "$EVENT" in
+            push)
+              echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+              echo "ref=${GITHUB_REF}" >> "$GITHUB_OUTPUT"
+              echo "publish=true" >> "$GITHUB_OUTPUT"
+              ;;
+            workflow_dispatch)
+              echo "tag=${INPUT_TAG}" >> "$GITHUB_OUTPUT"
+              if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${INPUT_TAG}" >/dev/null 2>&1; then
+                echo "ref=refs/tags/${INPUT_TAG}" >> "$GITHUB_OUTPUT"
+                echo "publish=$([ "$DRY_RUN" = true ] && echo false || echo true)" >> "$GITHUB_OUTPUT"
+              elif [ "$DRY_RUN" = true ]; then
+                echo "::notice::${INPUT_TAG} does not exist, so this dry run builds ${GITHUB_REF_NAME}"
+                echo "ref=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+                echo "publish=false" >> "$GITHUB_OUTPUT"
+              else
+                echo "::error::${INPUT_TAG} is not a tag. Push the tag first, or check dry_run to rehearse it."
+                exit 1
+              fi
+              ;;
+            *)
+              # The tag is read from the tree once it is checked out.
+              echo "ref=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+              echo "publish=false" >> "$GITHUB_OUTPUT"
+              ;;
+          esac
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.source.outputs.ref }}
+
+      # The changelog and the scripts come from the commit this workflow runs
+      # from, so a tag cut before an entry was written can still be released.
+      - name: Release tools
+        uses: actions/checkout@v4
+        with:
+          path: .release-tools
+          sparse-checkout: |
+            CHANGELOG.md
+            .github/scripts
+          sparse-checkout-cone-mode: false
+
+      - name: Plan
+        id: plan
+        env:
+          TAG: ${{ steps.source.outputs.tag }}
+          PUBLISH: ${{ steps.source.outputs.publish }}
+        run: |
+          if [ -z "$TAG" ]; then
+            TAG="v$(jq -r .version web/package.json)"
+          fi
+          version="${TAG#v}"
+          {
+            echo "tag=${TAG}"
+            echo "version=${version}"
+            echo "prerelease=$([[ "$version" == *-* ]] && echo true || echo false)"
+            echo "publish=${PUBLISH}"
+          } | tee -a "$GITHUB_OUTPUT"
+
+      - name: The tag matches every version in the tree
+        env:
+          TAG: ${{ steps.plan.outputs.tag }}
+        run: python3 .release-tools/.github/scripts/check-release-version.py "$TAG"
+
+      - name: Release notes from CHANGELOG.md
+        env:
+          TAG: ${{ steps.plan.outputs.tag }}
+          VERSION: ${{ steps.plan.outputs.version }}
+        run: |
+          python3 .release-tools/.github/scripts/changelog-section.py "$TAG" .release-tools/CHANGELOG.md > notes.md
+          download="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}"
+          cat >> notes.md <<EOF
+
+          ## Install
+
+          With Docker or Podman (needs Compose v2, or podman-compose 1.4 or later):
+
+          \`\`\`bash
+          curl -fsSL ${download}/felix-metro-compose-${VERSION}.tar.gz | tar xz
+          cd felix-metro-compose-${VERSION}
+          ./up.sh
+          \`\`\`
+
+          The web app is then at http://127.0.0.1:8088. \`felix-metro-web-${TAG}.tar.gz\` is the built web app alone, for any static host.
+          EOF
+          cat notes.md
+
+      - name: Bundle the compose install
+        env:
+          VERSION: ${{ steps.plan.outputs.version }}
+        run: |
+          mkdir -p dist stage
+          .github/scripts/make-compose-bundle.sh "$VERSION" stage
+          name="felix-metro-compose-${VERSION}"
+          # shellcheck disable=SC2016
+          grep -h -o 'felix-metro-[a-z]*:${METRO_VERSION:-[^}]*}' "stage/${name}/compose.yml" | sort -u
+          (cd "stage/${name}" && docker compose config --quiet)
+          tar -C stage --sort=name --owner=0 --group=0 --numeric-owner \
+            --mtime="@$(git log -1 --format=%ct)" -czf "dist/${name}.tar.gz" "${name}"
+          tar -tzf "dist/${name}.tar.gz"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bundle
+          path: |
+            dist/
+            notes.md
+          if-no-files-found: error
+          retention-days: 7
+
+  web:
+    name: Web dist
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'push' && github.ref || (github.event_name == 'workflow_dispatch' && needs.plan.outputs.publish == 'true' && format('refs/tags/{0}', needs.plan.outputs.tag)) || github.sha }}
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen@0.2.129
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci && npm run core && npm run build
+        working-directory: web
+      - name: Package the built web app
+        env:
+          TAG: ${{ needs.plan.outputs.tag }}
+        run: |
+          mkdir -p dist
+          name="felix-metro-web-${TAG}"
+          cp -a web/dist "$name"
+          tar -C . --sort=name --owner=0 --group=0 --numeric-owner \
+            --mtime="@$(git log -1 --format=%ct)" -czf "dist/${name}.tar.gz" "$name"
+          tar -tzf "dist/${name}.tar.gz" | head
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+
+  # Each platform builds on a runner of its own architecture. On a release it is
+  # pushed by digest alone and `manifest` tags one list over both.
+  images:
+    name: Image ${{ matrix.image.name }} (${{ matrix.platform.arch }})
+    needs: plan
+    runs-on: ${{ matrix.platform.runner }}
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - name: felix-metro-sim
+            dockerfile: dev/sim.Dockerfile
+          - name: felix-metro-web
+            dockerfile: dev/web.Dockerfile
+        platform:
+          - name: linux/amd64
+            arch: amd64
+            runner: ubuntu-latest
+          - name: linux/arm64
+            arch: arm64
+            runner: ubuntu-24.04-arm
+    env:
+      PUSH: ${{ needs.plan.outputs.publish }}
+    steps:
+      # GHCR names must be lowercase and the owner is GetFelix.
+      - name: Registry owner
+        run: echo "OWNER=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'push' && github.ref || (github.event_name == 'workflow_dispatch' && needs.plan.outputs.publish == 'true' && format('refs/tags/{0}', needs.plan.outputs.tag)) || github.sha }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: env.PUSH == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Labels
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.OWNER }}/${{ matrix.image.name }}
+
+      - name: Build${{ env.PUSH == 'true' && ' and push by digest' || '' }}
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.image.dockerfile }}
+          platforms: ${{ matrix.platform.name }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Untagged on a release: a tag here would point at one platform
+          # until the manifest job moved it.
+          outputs: >-
+            ${{ env.PUSH == 'true'
+              && format('type=image,name={0}/{1}/{2},push-by-digest=true,name-canonical=true,push=true', env.REGISTRY, env.OWNER, matrix.image.name)
+              || 'type=cacheonly' }}
+          cache-from: type=gha,scope=${{ matrix.image.name }}-${{ matrix.platform.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image.name }}-${{ matrix.platform.arch }}
+
+      # Recorded on every run, so a dry run exercises the artifact names the
+      # manifest job combines.
+      - name: Record the digest
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          ARCH: ${{ matrix.platform.arch }}
+        run: |
+          mkdir -p "${RUNNER_TEMP}/digests"
+          if [ "$PUSH" = true ]; then
+            touch "${RUNNER_TEMP}/digests/${DIGEST#sha256:}"
+          else
+            touch "${RUNNER_TEMP}/digests/not-pushed-${ARCH}"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: digests--${{ matrix.image.name }}--${{ matrix.platform.arch }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  manifest:
+    name: ${{ needs.plan.outputs.publish == 'true' && 'Tag' || 'Tag (dry run)' }} ${{ matrix.image }}
+    needs: [plan, images]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [felix-metro-sim, felix-metro-web]
+    env:
+      PUSH: ${{ needs.plan.outputs.publish }}
+      VERSION: ${{ needs.plan.outputs.version }}
+      PRERELEASE: ${{ needs.plan.outputs.prerelease }}
+    steps:
+      - name: Registry owner
+        run: echo "OWNER=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: digests--${{ matrix.image }}--*
+          merge-multiple: true
+
+      - name: Exactly two platform digests
+        working-directory: ${{ runner.temp }}/digests
+        run: |
+          ls -1
+          count=$(find . -type f | wc -l)
+          if [ "$count" -ne 2 ]; then
+            echo "::error::expected 2 platform digests for ${{ matrix.image }}, found ${count}"
+            exit 1
+          fi
+
+      - uses: docker/setup-buildx-action@v3
+        if: env.PUSH == 'true'
+
+      - name: Log in to GHCR
+        if: env.PUSH == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # `latest` and the minor tag only for a version without a pre-release suffix.
+      - name: Create the manifest list
+        if: env.PUSH == 'true'
+        working-directory: ${{ runner.temp }}/digests
+        env:
+          IMAGE: ${{ env.REGISTRY }}/${{ env.OWNER }}/${{ matrix.image }}
+        run: |
+          tags=(-t "${IMAGE}:${VERSION}")
+          if [ "$PRERELEASE" != true ]; then
+            tags+=(-t "${IMAGE}:${VERSION%.*}" -t "${IMAGE}:latest")
+          fi
+          # shellcheck disable=SC2046
+          docker buildx imagetools create "${tags[@]}" $(printf "${IMAGE}@sha256:%s " *)
+          docker buildx imagetools inspect "${IMAGE}:${VERSION}"
+
+  checksums:
+    name: Checksums
+    needs: [plan, web]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: parts
+      - name: SHA256SUMS
+        run: |
+          mkdir -p dist
+          cp parts/bundle/dist/* parts/web/* dist/
+          cp parts/bundle/notes.md notes.md
+          (cd dist && sha256sum -- * | tee SHA256SUMS)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release
+          path: |
+            dist/
+            notes.md
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish
+    needs: [plan, checksums, manifest]
+    if: needs.plan.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      packages: read
+    env:
+      TAG: ${{ needs.plan.outputs.tag }}
+      VERSION: ${{ needs.plan.outputs.version }}
+    steps:
+      - name: Registry owner
+        run: echo "OWNER=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: release
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: The images and their digests
+        run: |
+          {
+            echo
+            echo "## Images"
+            echo
+            echo "| Reference | Digest |"
+            echo "|---|---|"
+            for image in felix-metro-sim felix-metro-web; do
+              ref="${REGISTRY}/${OWNER}/${image}"
+              digest=$(docker buildx imagetools inspect "${ref}:${VERSION}" --format '{{json .Manifest}}' | jq -r .digest)
+              echo "| \`${ref}:${VERSION}\` | \`${digest}\` |"
+            done
+          } >> notes.md
+          cat notes.md
+          cat dist/SHA256SUMS
+
+      - name: Create the GitHub release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ env.TAG }}
+          name: Felix Metro ${{ env.TAG }}
+          body_path: notes.md
+          prerelease: ${{ needs.plan.outputs.prerelease == 'true' }}
+          make_latest: ${{ needs.plan.outputs.prerelease == 'true' && 'false' || 'true' }}
+          files: |
+            dist/felix-metro-compose-${{ env.VERSION }}.tar.gz
+            dist/felix-metro-web-${{ env.TAG }}.tar.gz
+            dist/SHA256SUMS
+          fail_on_unmatched_files: true
+
+  site:
+    name: Tell the site
+    needs: [plan, publish]
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      # The site's Release versions workflow also runs hourly, so a missing token only delays the update.
+      - name: Dispatch release-published to the site
+        env:
+          GH_TOKEN: ${{ secrets.SITE_DISPATCH_TOKEN }}
+          SITE: ${{ github.repository_owner }}/getfelix.github.io
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::notice::SITE_DISPATCH_TOKEN is not set; the site picks up the release within the hour."
+            exit 0
+          fi
+          gh api "repos/$SITE/dispatches" -f event_type=release-published
