@@ -3,7 +3,8 @@
 //   node dev/check-builder-bot.mjs <log> [--min <n>]
 //
 // The log must end cleanly, every command it sent must have a result, at least `--min` buildings (default 6)
-// must have gone up in one district, and no lot may be tried again after a refusal or built twice.
+// NEW buildings must have gone up in one district (a build applied on a lot that was empty before, with no applied
+// demolish on that lot, so a rebuild of existing buildings does not count), and no lot may be tried again after a refusal or built twice.
 import { readFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 
@@ -36,8 +37,17 @@ for (const c of commands.filter((c) => c.phase === "grow")) {
   if (c.result !== 0 && !(c.type === "demolish" && c.result === 4)) over.add(c.lot);
 }
 
+const EMPTY_FROM = 38; // kinds from here are trees and props, as in the sim's is_empty
+// In log order: a demolish applied before the build is what makes it a rebuild. One after it is the bot taking the
+// building down again.
+const demolished = new Set();
 const perDistrict = new Map();
-for (const c of builds.values()) if (c.result === 0) perDistrict.set(c.recordDistrict, (perDistrict.get(c.recordDistrict) ?? 0) + 1);
+for (const c of commands) {
+  if (c.type === "demolish" && c.result === 0) demolished.add(c.lot);
+  if (c.type !== "build" || c.phase !== "grow" || c.result !== 0) continue;
+  if (c.before === undefined) fail(`build on lot ${c.lot} does not say what stood there before`);
+  if (c.before >= EMPTY_FROM && !demolished.has(c.lot)) perDistrict.set(c.recordDistrict, (perDistrict.get(c.recordDistrict) ?? 0) + 1);
+}
 const [district, n] = [...perDistrict.entries()].sort((a, b) => b[1] - a[1])[0] ?? [null, 0];
-if (n < min) fail(`only ${n} buildings went up in the best district, wanted ${min}`);
-console.log(`builder-bot log: ${n} buildings in district ${district}, ${commands.length} commands all answered, ${end.refused} refused, none retried`);
+if (n < min) fail(`only ${n} net new buildings went up in the best district, wanted ${min}`);
+console.log(`builder-bot log: ${n} net new buildings in district ${district}, ${commands.length} commands all answered, ${end.refused} refused, none retried`);

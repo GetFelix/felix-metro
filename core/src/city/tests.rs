@@ -42,10 +42,10 @@ fn all_cities() -> Vec<(String, City)> {
 
 #[test]
 fn layouts_are_pinned() {
-    assert_eq!(city_of("harbor", 2).hash(), 0xd02c_e316_e658_7317);
-    assert_eq!(city_of("harbor", 4).hash(), 0xef2d_8f75_5481_eca7);
-    assert_eq!(city_of("pinecrest", 2).hash(), 0xd507_4b30_360b_9fca);
-    assert_eq!(city_of("pinecrest", 4).hash(), 0x1f12_133f_e692_d827);
+    assert_eq!(city_of("harbor", 2).hash(), 0xe287_6ca2_2c51_26c4);
+    assert_eq!(city_of("harbor", 4).hash(), 0x0f2c_ceea_2949_8504);
+    assert_eq!(city_of("pinecrest", 2).hash(), 0x205a_1949_527d_8bbd);
+    assert_eq!(city_of("pinecrest", 4).hash(), 0xaf6a_b54a_6a33_9710);
 }
 
 #[test]
@@ -305,7 +305,18 @@ fn the_shoreline_changes_only_the_wet_area() {
         let kept: std::collections::HashMap<_, _> =
             wet.lots.iter().map(|l| ((l.x, l.z), l)).collect();
         let water: HashSet<_> = wet.water.iter().copied().collect();
-        for lot in &dry.lots {
+        // The development area is picked from the lots that remain, so it may move with the water.
+        let moved: HashSet<_> = wet
+            .development
+            .iter()
+            .map(|&i| (wet.lots[i as usize].x, wet.lots[i as usize].z))
+            .chain(
+                dry.development
+                    .iter()
+                    .map(|&i| (dry.lots[i as usize].x, dry.lots[i as usize].z)),
+            )
+            .collect();
+        for lot in dry.lots.iter().filter(|l| !moved.contains(&(l.x, l.z))) {
             match kept.get(&(lot.x, lot.z)) {
                 Some(w) => {
                     assert_eq!(
@@ -377,7 +388,7 @@ fn every_zone_appears_and_kinds_match_them() {
     for (name, city) in all_cities() {
         for lot in &city.lots {
             seen.insert(lot.zone as u8);
-            if lot.door().is_none() {
+            if lot.door().is_none() || city.development.contains(&lot.id) {
                 continue;
             }
             let info = lot.kind.info();
@@ -517,6 +528,52 @@ impl Shares {
             patch,
             industry: share(&|l| l.zone == Zone::Industrial),
             downtown: share(&|l| l.zone == Zone::Downtown),
+        }
+    }
+}
+
+#[test]
+fn the_development_area_is_empty_ground_in_one_district() {
+    for (name, city) in all_cities() {
+        let area = &city.development;
+        assert!(area.windows(2).all(|w| w[0] < w[1]), "{name}: sorted");
+        let side = city.districts_per_side;
+        if side >= 2 {
+            assert!(
+                (20..=30).contains(&area.len()),
+                "{name}: {} lots",
+                area.len()
+            );
+        }
+        let first = city.lots[area[0] as usize].district;
+        for &id in area {
+            let lot = &city.lots[id as usize];
+            assert_eq!(lot.district, first, "{name}: one district");
+            assert!(lot.door().is_some(), "{name}: a door to face");
+            assert!(lot.kind.0 >= BuildingKind::TREE_FIRST, "{name}: empty");
+            assert_ne!(lot.zone, Zone::Park, "{name}");
+            assert_ne!(lot.id, city.tower().id, "{name}");
+        }
+    }
+}
+
+#[test]
+fn residents_never_go_to_the_development_area() {
+    use crate::{Places, Resident};
+    for seed in ["harbor", "pinecrest", "meadow"] {
+        let city = city_of(seed, 2);
+        let places = Places::new(&city);
+        for i in 0..places.population() {
+            let Some(r) = Resident::new(&city, &places, i) else {
+                continue;
+            };
+            for b in &r.schedule.blocks {
+                assert!(
+                    city.development.binary_search(&b.lot).is_err(),
+                    "{seed}: resident {i} goes to development lot {}",
+                    b.lot
+                );
+            }
         }
     }
 }

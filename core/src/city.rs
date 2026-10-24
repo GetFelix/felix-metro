@@ -22,6 +22,7 @@ use roads::{
 };
 use zoning::Site;
 
+mod development;
 mod lots;
 mod noise;
 mod roads;
@@ -166,6 +167,8 @@ pub struct City {
     pub roads: Vec<RoadTile>,
     /// The main centre, then the secondary ones.
     pub centres: Vec<(u16, u16)>,
+    /// The development area: ids of lots left empty for builders, in one district. Residents never go to them.
+    pub development: Vec<u32>,
 }
 
 /// The kind of road piece a tile needs.
@@ -291,6 +294,9 @@ impl City {
         for &(x, z) in &self.centres {
             h.num(u64::from(x) << 16 | u64::from(z));
         }
+        for &id in &self.development {
+            h.num(u64::from(id));
+        }
         h.0
     }
 
@@ -371,6 +377,10 @@ impl City {
         s.push_str("],\"centres\":[");
         for (n, (x, z)) in self.centres.iter().enumerate() {
             let _ = write!(s, "{}[{x},{z}]", if n > 0 { "," } else { "" });
+        }
+        s.push_str("],\"development\":[");
+        for (n, id) in self.development.iter().enumerate() {
+            let _ = write!(s, "{}{id}", if n > 0 { "," } else { "" });
         }
         s.push_str("],\"streets\":[");
         for (n, name) in self.streets.iter().enumerate() {
@@ -464,6 +474,9 @@ pub(crate) fn build(
         });
     }
 
+    let development = development::pick(seed_hash, n, d, &lots);
+    development::clear(seed_hash, &mut lots, &development);
+
     let districts = (0..d)
         .flat_map(|dz| (0..d).map(move |dx| (dx, dz)))
         .zip(&park_blocks)
@@ -516,6 +529,7 @@ pub(crate) fn build(
             .iter()
             .map(|&(x, z, _)| (x as u16, z as u16))
             .collect(),
+        development,
     })
 }
 

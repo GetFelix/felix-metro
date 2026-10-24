@@ -21,6 +21,9 @@
 - A resume queued behind a pause is no longer stranded, an operator setting that lands during a commanded change is no longer overwritten, a flood past what a paused city holds logs once per pause, and a closed command stream is logged as an error.
 - The sim keeps retrying to follow a city's command stream at startup instead of running without builders after one refusal.
 - `place road`, `zone` and `fork` are refused as unsupported for now.
+- The builder bot grows on the development area first and no longer demolishes by default (`--rebuild` opts in,
+  and restores the old building when the build that follows is refused). A second SIGINT exits at once.
+  `dev/check-builder-bot.mjs` counts net new buildings, so a run that only rebuilds fails; CI requires ten.
 - `dev/builder-bot.mjs` grows a neighbourhood through the gateway for demos and the clip, reading every result and never retrying a refused lot. The dev scripts share `dev/lib/gateway.mjs`, and the core crate has a `city_json` example that prints a city with the lots residents go to.
 - The page's fold follows `road` events and a keyframe's road list.
 - `dev/check-commands.mjs` publishes commands as a mayor from a plain client; the
@@ -29,6 +32,12 @@
 
 ### The city
 
+- Each city sets aside a development area of 20 to 30 empty lots in one district, for builders. Residents never
+  choose them as home, shop, park or work, so the sim accepts builds there, and the page draws them as bare
+  earth. `City::development`, the city JSON and `City::hash` carry it. This changes every seed's layout hash and
+  residents (golden hashes updated): the harbor city at 2 by 2 now has 390 residents (was 522) and up to 71 cars
+  at once (was 104), and the step-time test loads 64 residents a home to stay at its 1,000 a district. Pinecrest
+  loses 23 lots to it, harbor 22.
 - Rush hour is busier. A city has six residents per home instead of two, office
   workers arrive 07:45 to 08:15 and leave 17:00 to 17:30, shopkeepers arrive 07:45 to
   08:30 and leave 17:00 to 18:30, office

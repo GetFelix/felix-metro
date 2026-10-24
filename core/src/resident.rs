@@ -58,7 +58,11 @@ impl Places {
             piece: pieces(city),
             per_home,
         };
-        for lot in city.lots.iter().filter(|l| l.door().is_some()) {
+        for lot in city
+            .lots
+            .iter()
+            .filter(|l| l.door().is_some() && city.development.binary_search(&l.id).is_err())
+        {
             p.any.push(lot.id);
             match lot.zone {
                 Zone::Suburban => p.homes.push(lot.id),

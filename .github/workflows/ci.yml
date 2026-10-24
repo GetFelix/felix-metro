@@ -185,13 +185,15 @@ jobs:
       # refuses are recorded with their reason and change nothing; a viewer cannot publish.
       - name: A mayor's commands are applied, attributed and refused as they should be
         run: node dev/check-commands.mjs pinecrest
-      # The builder bot raises a neighbourhood in pinecrest through the gateway, a building a second, and takes three down
-      # again. Its JSON log must show buildings in one district, a result for every command, and no lot tried again after
-      # a refusal. The lots come from the core crate's city_json example, so this step compiles it.
+      # The builder bot raises a neighbourhood on pinecrest's development area through the gateway, a building a second,
+      # and takes three down again. Its JSON log must show at least ten NEW buildings (on lots that were empty, with no
+      # demolish) in one district, a result for every command, and no lot tried again after a refusal. The lots come
+      # from the core crate's city_json example, so this step compiles it.
       - name: The builder bot grows a neighbourhood
+        timeout-minutes: 10
         run: |
           node dev/builder-bot.mjs pinecrest --interval 1 --count 12 --demolish-after 1 --json bot-log.ndjson
-          node dev/check-builder-bot.mjs bot-log.ndjson --min 8
+          node dev/check-builder-bot.mjs bot-log.ndjson --min 10
       # The page at /#harbor signs in as `viewer`, follows the city through the gateway and draws it: the tick on
       # screen advances, cars are drawn and move, and the sun follows the tick. The sim runs at 4x so the commute and
       # the evening arrive in minutes. Screenshots of a day moment, dusk and a street are in the artifact.

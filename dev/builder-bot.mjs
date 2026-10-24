@@ -1,6 +1,7 @@
 // Grows a neighbourhood on camera: signs in as the dev IdP's `mayor` from a plain client, waits until the sim
 // answers a probe, then publishes `build` commands through the gateway one at a time, on the lots nearest a chosen
-// point first. Homes go on suburban land, shops on corners and arterials, offices toward the centre and
+// point first, starting with the city's development area: lots set aside as bare ground that no resident visits.
+// Homes go on suburban land, shops on corners and arterials, offices toward the centre and
 // factories on industrial land. Every result is read: a refusal moves on to the next lot and a lot is never
 // sent twice.
 //
@@ -8,8 +9,11 @@
 //
 //   --interval <s>        wall seconds after each build that took (default 2)
 //   --count <n>           stop after this many buildings (default 12)
-//   --district <n>        the district to grow in (default: the one with the most lots a builder may change)
-//   --centre <x,z>        tile to grow around (default: the middle of the densest spot of such lots)
+//   --district <n>        the district to grow in (default: the development area's, else the one with the most
+//                         lots a builder may change)
+//   --centre <x,z>        tile to grow around (default: the middle of the development area, else the densest
+//                         spot of lots a builder may change)
+//   --rebuild             also take down a building that stands on a lot and build on it (default: leave those alone)
 //   --demolish-after <s>  once done, wait this long and take buildings down again, newest first
 //   --demolish <n>        how many to take down (default 3)
 //   --json <path|->       one JSON object a line: start, each build/demolish with its tick, end ("-" is stdout)
@@ -17,10 +21,12 @@
 //   --city-file <path>    the city as `city_json` prints it (default: run that example with cargo)
 //   --result-timeout <s>  how long a command may go unanswered before it counts as lost (default 30)
 //
-// The city comes from `cargo run -p felix-metro-core --example city_json`, which also lists the lots residents go to.
-// Those refuse any change, so the bot leaves them alone; a lot with a building is demolished first, then built on.
-// SIGINT or SIGTERM stops after the command in flight and writes the end line. Exit 1 when a command got no result
-// or nothing was built. Roads are not placed: the sim refuses them.
+// The city comes from `cargo run -p felix-metro-core --example city_json`, which also lists the development area and
+// the lots residents go to. Those refuse any change, so the bot leaves them alone. A lot with a building is left
+// alone too, unless --rebuild: then it is demolished first and built on; if that build is then refused the bot builds
+// the old kind back and logs it as an `orphan` line.
+// SIGINT or SIGTERM stops after the command in flight and writes the end line; a second one exits at once, still
+// writing it. Exit 1 when a command got no result or nothing was built. Roads are not placed: the sim refuses them.
 import { execFileSync } from "node:child_process";
 import { createWriteStream, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -43,6 +49,7 @@ const { values: flags, positionals } = parseArgs({
     count: { type: "string", default: "12" },
     district: { type: "string" },
     centre: { type: "string" },
+    rebuild: { type: "boolean", default: false },
     "demolish-after": { type: "string" },
     demolish: { type: "string", default: "3" },
     json: { type: "string" },
@@ -88,6 +95,7 @@ function loadCity() {
     segments: rows(raw.segmentColumns, raw.segments),
     centres: raw.centres,
     tower: raw.tower,
+    development: new Set(raw.development ?? []),
     inUse: new Set(raw.inUse),
   };
 }
@@ -96,6 +104,8 @@ function loadCity() {
 const changeable = (world, lot) => lot.id !== world.tower && !world.inUse.has(lot.id);
 
 function chooseDistrict(world) {
+  const site = world.lots.find((l) => world.development.has(l.id) && changeable(world, l));
+  if (site) return site.district;
   const counts = new Map();
   for (const l of world.lots) if (changeable(world, l)) counts.set(l.district, (counts.get(l.district) ?? 0) + 1);
   const best = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0] - b[0])[0];
@@ -137,6 +147,7 @@ function kindFor(world, byTile, lot) {
   const door = lot.doorSegment === null ? null : world.segments[lot.doorSegment];
   const onStreet = door && (door.avenue === 1 || lot.doorOffset === 0 || lot.doorOffset === door.length);
   const fromCentre = Math.min(...world.centres.map(([x, z]) => Math.hypot(lot.x - x, lot.z - z)));
+  if (world.development.has(lot.id) && zone === "suburban") return pick(HOUSES, lot.id);
   if (zone === "industrial") return pick(FACTORIES, lot.id);
   if (onStreet) return pick(COMMERCIAL, lot.id);
   if (zone === "downtown" || fromCentre <= 6) return pick(SKYSCRAPERS, lot.id);
@@ -149,15 +160,26 @@ const byTile = new Map(world.lots.map((l) => [`${l.x},${l.z}`, l]));
 const district = flags.district === undefined ? chooseDistrict(world) : Number(flags.district);
 const pool = world.lots.filter((l) => l.district === district && changeable(world, l));
 if (pool.length === 0) usage(`district ${district} has no lot a builder may change`);
-const [cx, cz] = flags.centre ? flags.centre.split(",").map(Number) : (({ x, z }) => [x, z])(chooseCentre(pool));
+const site = pool.filter((l) => world.development.has(l.id));
+const middle = (lots) => [lots.reduce((s, l) => s + l.x, 0) / lots.length, lots.reduce((s, l) => s + l.z, 0) / lots.length];
+const [cx, cz] = flags.centre
+  ? flags.centre.split(",").map(Number)
+  : site.length > 0
+    ? middle(site)
+    : (({ x, z }) => [x, z])(chooseCentre(pool));
 if (!Number.isFinite(cx) || !Number.isFinite(cz)) usage("--centre wants x,z");
-// Nearest first, with parks pushed back a little: a building in green space is the last resort.
+// The development area first, nearest its middle outwards. The rest of the district follows, nearest first, with
+// parks pushed back a little: a building in green space is the last resort.
 const order = pool
-  .map((l) => ({ lot: l, cost: Math.hypot(l.x - cx, l.z - cz) + (l.zone === "park" ? 4 : 0) }))
+  .map((l) => ({
+    lot: l,
+    cost: Math.hypot(l.x - cx, l.z - cz) + (l.zone === "park" ? 4 : 0) + (world.development.has(l.id) ? 0 : 1000),
+  }))
   .sort((a, b) => a.cost - b.cost || a.lot.id - b.lot.id)
   .map((e) => e.lot);
 
 let running = false;
+let finished = false;
 const stop = new AbortController();
 const stopped = () => stop.signal.aborted;
 const summary = { built: 0, demolished: 0, refused: 0, unanswered: 0, sent: 0 };
@@ -166,6 +188,8 @@ const tried = new Set();
 let session = null;
 
 function finish(reason, code) {
+  if (finished) return;
+  finished = true;
   const xs = built.map((b) => b.x);
   const zs = built.map((b) => b.z);
   const mean = (a) => a.reduce((s, v) => s + v, 0) / a.length;
@@ -178,7 +202,8 @@ function finish(reason, code) {
 }
 for (const signal of ["SIGINT", "SIGTERM"]) {
   process.on(signal, () => {
-    if (running) stop.abort();
+    // The first one waits for the command in flight; a second means now.
+    if (running && !stop.signal.aborted) stop.abort();
     else finish("stopped", 0);
   });
 }
@@ -217,7 +242,7 @@ async function send(type, lot, command, kind, phase = "grow") {
   const id = nextId++;
   summary.sent++;
   const result = await session.command(id, command, resultMs);
-  const entry = { type, phase, id, lot: lot.id, x: lot.x, z: lot.z, zone: lot.zone, kind, district: lot.district };
+  const entry = { type, phase, id, lot: lot.id, before: lot.kind, x: lot.x, z: lot.z, zone: lot.zone, kind, district: lot.district };
   if (!result) {
     summary.unanswered++;
     emit({ ...entry, result: null, outcome: "no-result" });
@@ -237,14 +262,25 @@ for (const lot of order) {
   if (stopped() || summary.built >= count) break;
   if (tried.has(lot.id)) continue;
   tried.add(lot.id);
-  // A lot with a building is cleared first. Nothing there to demolish (an earlier run did it) is as good as done;
-  // any other refusal, here or at the build, ends the lot's turn for good.
+  // A lot with a building is left alone unless --rebuild, which clears it first. Nothing there to demolish (an
+  // earlier run did it) is as good as done; any other refusal, here or at the build, ends the lot's turn for good.
+  let cleared = false;
   if (lot.kind < FIRST_FILLER) {
-    const cleared = await send("demolish", lot, demolish(lot.id), lot.kind);
-    if (cleared !== APPLIED && cleared !== EMPTY) continue;
+    if (!flags.rebuild) continue;
+    const result = await send("demolish", lot, demolish(lot.id), lot.kind);
+    if (result !== APPLIED && result !== EMPTY) continue;
+    cleared = result === APPLIED;
   }
   const kind = kindFor(world, byTile, lot);
-  if ((await send("build", lot, build(lot.id, kind, lot.facing), kind)) !== APPLIED) continue;
+  if ((await send("build", lot, build(lot.id, kind, lot.facing), kind)) !== APPLIED) {
+    if (cleared) {
+      // The old building is gone and nothing replaced it: put it back, and say so either way.
+      const restored = (await send("build", lot, build(lot.id, lot.kind, lot.facing), lot.kind, "restore")) === APPLIED;
+      emit({ type: "orphan", lot: lot.id, kind: lot.kind, restored });
+      log(`lot ${lot.id} was demolished and the build was refused: ${restored ? "old building restored" : "LEFT BARE"}`);
+    }
+    continue;
+  }
   summary.built++;
   built.push({ ...lot, built: kind });
   log(`built kind ${kind} on lot ${lot.id} (${lot.zone}) at ${lot.x},${lot.z}: ${summary.built} of ${count}`);

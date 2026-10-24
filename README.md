@@ -17,7 +17,7 @@ and play forward from there.
 
 ## What you will be able to do
 
-- Watch a generated city go about its day in 3D: residents commute, shop and go home, and the sun rises and sets. Rush hour at 08:00 and 17:15 puts up to about 40 cars and 10 walkers on the streets of the busiest district, and about 100 cars across the harbor city at 2 by 2 (522 residents; `cargo run --release -p felix-metro-core --example density -- harbor 2` prints the counts). The log averages about 8 KB/s over a day at 20,000 residents and peaks near 17 KB/s in the busiest minute of the rush, from the hourly snapshots of each district landing together, which #95 tracks (`cargo test -p felix-metro-sim --release report_load -- --ignored --nocapture` measures it).
+- Watch a generated city go about its day in 3D: residents commute, shop and go home, and the sun rises and sets. Rush hour at 08:00 and 17:15 puts up to about 30 cars and 7 walkers on the streets of the busiest district, and about 70 cars across the harbor city at 2 by 2 (390 residents; `cargo run --release -p felix-metro-core --example density -- harbor 2` prints the counts). The log averages about 8 KB/s over a day at 20,000 residents and peaks near 17 KB/s in the busiest minute of the rush, from the hourly snapshots of each district landing together, which #95 tracks (`cargo test -p felix-metro-sim --release report_load -- --ignored --nocapture` measures it).
 - Drag the timeline back to any moment the log holds and see the city exactly as it was
 - Let go and watch it play forward and catch up to live
 - Follow one resident or car through their day
@@ -166,24 +166,30 @@ and checks it lists the built lot, and demolishes what it built. A `viewer` cann
 `dev/builder-bot.mjs` builds like a mayor does, for demos and the clip. It signs in as `mayor`,
 sends a probe command and waits for its result (commands sent before the sim opens its
 subscription are lost), then raises a cluster of buildings in one district, one every
-`--interval` seconds, on the lots nearest a centre first. Homes go on suburban land, shops on
+`--interval` seconds, on the city's development area first (see below), nearest its middle outwards. Homes go on suburban land, shops on
 corners and arterials, offices toward the centre of town and factories on industrial land.
 
 ```sh
 node dev/builder-bot.mjs pinecrest --interval 2 --count 12 --json bot.ndjson
 ```
 
-Most lots are ones residents go to, and the sim refuses to change those, so the bot asks the core
-crate's `city_json` example which lots those are (it needs `cargo`) and leaves them alone. A lot
-that still holds a building is demolished and then built on. Every command's result is read: a
-refusal (in use, occupied, busy, unsupported) moves on to the next lot, and no lot is sent twice.
+Almost every lot is one residents go to, and the sim refuses to change those. Each city therefore
+sets aside a development area of 20 to 30 empty lots in one district (22 in `harbor`, 23 in
+`pinecrest` at 2 by 2) that no resident visits, drawn as bare earth until something is built.
+The bot asks the core crate's `city_json` example for it (it needs `cargo`), grows there first,
+and puts homes on it. It never demolishes by default: a lot that holds a building is skipped.
+`--rebuild` demolishes and then builds on such lots. If the build is then refused the bot builds the
+old kind back and logs an `orphan` line saying whether that worked. Every command's result is
+read: a refusal (in use, occupied, busy, unsupported) moves on to the next lot, and no lot is sent
+twice.
 
 | Flag | Default | |
 |---|---|---|
 | `--interval <s>` | 2 | wall seconds after each build that took |
 | `--count <n>` | 12 | buildings to raise before stopping |
-| `--district <n>` | the district with the most lots it may change | where to grow |
-| `--centre <x,z>` | the densest spot of such lots | tile to grow around |
+| `--district <n>` | the development area's, else the district with the most lots it may change | where to grow |
+| `--centre <x,z>` | the middle of the development area, else the densest spot of such lots | tile to grow around |
+| `--rebuild` | off | also demolish and rebuild lots that hold a building |
 | `--demolish-after <s>` | off | once done, wait this long and take buildings down again, newest first |
 | `--demolish <n>` | 3 | how many to take down |
 | `--json <path or ->` | off | a line of JSON for the start, each command with its tick, and the end |
@@ -191,10 +197,12 @@ refusal (in use, occupied, busy, unsupported) moves on to the next lot, and no l
 | `--city-file <path>` | run the example | the example's output, saved |
 | `--result-timeout <s>` | 30 | how long a command may go unanswered before it counts as lost |
 
-SIGINT or SIGTERM stops after the command in flight and writes the end line, which carries the mean
+SIGINT or SIGTERM stops after the command in flight and writes the end line (a second one exits at
+once, still writing it), which carries the mean
 tile of what was built for aiming a camera. It exits 1 if a command got no result or nothing was
 built. It places no roads; the sim refuses them. CI runs it for about 20 seconds and checks the
-log with `dev/check-builder-bot.mjs`.
+log with `dev/check-builder-bot.mjs`, which counts only net new buildings (a build applied on a lot that
+was empty, with no demolish applied on it first) and wants at least ten in one district.
 
 The sim runs at 4 ticks a second. Its speed endpoint accepts only loopback, so it is
 not published; `dev/speed.sh` runs `curl` inside the sim's container:

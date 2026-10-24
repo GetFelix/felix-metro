@@ -25,6 +25,8 @@ export interface City {
   /** Which map edge the sea lies along: 0 north, 1 east, 2 south, 3 west, or null for a dry city. */
   shore: number | null;
   tower: number;
+  /** Ids of the lots left bare for builders; the sim keeps residents away from them. */
+  development: number[];
   lots: Lot[];
   roads: Road[];
   water: [number, number][];
@@ -40,6 +42,7 @@ export function parseCity(json: string): City {
     tiles: raw.tiles,
     shore: raw.shore,
     tower: raw.tower,
+    development: raw.development ?? [],
     lots: rows(raw.lotColumns, raw.lots) as unknown as Lot[],
     roads: rows(raw.roadColumns, raw.roads).map((r) => ({ ...r, avenue: r.avenue === 1 })) as unknown as Road[],
     water: raw.water,
