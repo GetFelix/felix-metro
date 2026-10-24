@@ -3,7 +3,8 @@
 // recorded: each district's ticks must run on from the seek's tick one at a time with none missing or taken twice, up to
 // the tick the page joined live at. At the join the state on screen is the live one, and the cars and walkers under way
 // do not jump between the frames either side of it. Usage: node scripts/check-playback.mjs <page url> <out dir> where
-// the page url has no hash. The sim should have run long enough to hold a few city hours.
+// the page url has no hash. Back to live must also arrive from a few ticks back, where the tip keeps moving away, and
+// from many hours back in a bounded time. The sim should have run long enough to hold a few city hours.
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { chromium } from 'playwright';
@@ -16,6 +17,9 @@ mkdirSync(out, { recursive: true });
 const MINUTE = 60_000;
 const HOUR_TICKS = 240;
 const ATTEMPTS = 4;
+/** The fastest road in tiles per tick (1.5 tiles a second, 4 ticks a second): the most any resident can move. */
+const MAX_TILES_PER_TICK = 0.375;
+const MIN_COMPARED = 5;
 
 const browser = await chromium.launch({
   args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'],
@@ -118,11 +122,15 @@ for (let attempt = 1; attempt <= ATTEMPTS && compared === 0; attempt++) {
   const districts = done.liveNow.ticks.length;
   for (let d = 0; d < districts; d++) {
     const mine = applied.filter((a) => a[0] === d);
-    const ticks = mine.map((a) => a[1]);
-    if (mine.some((a) => a[2] !== 'applied'))
-      await fail(
-        `district ${d} took a record twice or out of order: ${JSON.stringify(mine.filter((a) => a[2] !== 'applied'))}`,
-      );
+    // A retried tick may arrive again and is ignored as 'seen'; anything else that is not applied, or a repeat of a tick
+    // never applied, is wrong.
+    const have = new Set();
+    for (const [, tick, result] of mine) {
+      if (result === 'applied') have.add(tick);
+      else if (result !== 'seen' || !have.has(tick))
+        await fail(`district ${d} took a record out of order: ${JSON.stringify([tick, result])}`);
+    }
+    const ticks = mine.filter((a) => a[2] === 'applied').map((a) => a[1]);
     if (ticks[0] !== started + 1) await fail(`district ${d} began at tick ${ticks[0]}, not ${started + 1}`);
     for (let i = 0; i < ticks.length; i++) {
       if (ticks[i] !== started + 1 + i)
@@ -152,20 +160,54 @@ for (let attempt = 1; attempt <= ATTEMPTS && compared === 0; attempt++) {
     if (frames[i].tick < frames[i - 1].tick - 1e-6)
       await fail(`the tick went back from ${frames[i - 1].tick} to ${frames[i].tick} at the join`);
   }
-  const before = steps(frames, j - 12, j - 1);
-  const across = steps(frames, j, j + 1);
-  for (const [resident, step] of across) {
-    if (!before.has(resident)) continue;
-    compared++;
-    const allowed = Math.max(0.3, 2 * before.get(resident));
-    if (step > allowed)
-      await fail(
-        `resident ${resident} jumped ${step.toFixed(2)} tiles at the join, against ${before.get(resident).toFixed(2)} before it`,
-      );
+  // No resident moves further between two frames than the fastest road allows for the ticks between them.
+  let comparedHere = 0;
+  for (let i = Math.max(1, j - 12); i < Math.min(frames.length, j + 4); i++) {
+    const allowed = MAX_TILES_PER_TICK * Math.max(0, frames[i].tick - frames[i - 1].tick) + 0.2;
+    for (const [resident, step] of steps(frames, i, i)) {
+      comparedHere++;
+      if (step > allowed)
+        await fail(
+          `resident ${resident} moved ${step.toFixed(2)} tiles in frame ${i} (join at ${j}), over the ${allowed.toFixed(2)} its ticks allow`,
+        );
+    }
   }
-  console.log(`joined at tick ${joined}; ${compared} residents compared across the join`);
+  compared = comparedHere >= MIN_COMPARED ? comparedHere : 0;
+  console.log(`joined at tick ${joined}; ${comparedHere} resident steps compared around the join`);
 }
-if (compared === 0) await fail('no car or walker was under way across the join in any attempt');
+if (compared === 0)
+  await fail(`fewer than ${MIN_COMPARED} resident steps were compared around the join in any attempt`);
+
+/** Seek to `from`, then click Back to live and say how many seconds the page took to show the live city. */
+const backToLive = async (from, bound) => {
+  const seeked = await page.evaluate((t) => window.__metro.seek(t), from);
+  if (!(await page.evaluate(() => window.__metro.play()))) await fail('there was nothing to play from the past');
+  await page.waitForTimeout(300);
+  await page.evaluate(() => window.__metro.play());
+  const began = Date.now();
+  await page.click('#back-live');
+  await page
+    .waitForFunction(() => window.__metro.shown().live, null, { polling: 50, timeout: bound * 1000 })
+    .catch(() => fail(`Back to live from tick ${seeked.tick} had not arrived after ${bound} s`));
+  return (Date.now() - began) / 1000;
+};
+
+// Near the tip, which moves away while the page closes on it.
+for (const back of [8, 40]) {
+  const live = Math.floor(await page.evaluate(() => window.__live.tick));
+  const seconds = await backToLive(live - back, 5);
+  console.log(`back to live from ${back} ticks back took ${seconds.toFixed(1)} s`);
+}
+
+// From many city hours back, as far as the sim has run: the time is logged, and only a very slow one fails.
+const live = Math.floor(await page.evaluate(() => window.__live.tick));
+const far = Math.max(0, live - 12 * HOUR_TICKS);
+if (live - far > 3 * HOUR_TICKS) {
+  const seconds = await backToLive(far, 15);
+  console.log(
+    `back to live from ${((live - far) / HOUR_TICKS).toFixed(1)} city hours back took ${seconds.toFixed(1)} s`,
+  );
+} else console.log(`the sim has run ${live} ticks, too few to measure a catch-up from many hours back`);
 await page.screenshot({ path: join(out, 'joined.png') });
 if (errors.length) await fail(`page errors:\n${errors.join('\n')}`);
 await browser.close();

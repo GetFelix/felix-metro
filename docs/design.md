@@ -359,8 +359,11 @@ an error. The subscriptions are on a session of their own, in slots `p00`, `p01`
 ends.
 
 Space and the pill's Play button play and pause from the past on screen. **Back to live** does not cut: the city's time
-races forward with the cars moving, at the pace that closes the distance in about three seconds (at most 480 ticks a second),
-and when the playhead is within a tick of the live state's newest tick the page hands over. The live state has taken every
+races forward with the cars moving, at the city's own pace plus a steady gain that closes the distance in about three
+seconds (at most 960 ticks a second in all), and when the playhead is within a tick of the live state's newest tick the
+page hands over. Within a second of the tip it hands over at once. Space and Play do nothing during the race, when no
+control is shown. If the sim restarts mid-playback (a new epoch numbers its ticks from the start again) the playback
+ends and the page shows the live city. The playback's session is closed when the page is left. The live state has taken every
 record all along, so nothing is folded a second time and nothing reloads; the live clock is set to the playhead
 first, so a car under way carries on from where it was drawn. Scrubbing while playing ends the playback; a page opened with `?at` has
 no live state to join and cannot play.

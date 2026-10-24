@@ -24,9 +24,13 @@ const APPLY_AHEAD = 2;
 /** The live clock's render delay: the playhead joins it this many ticks behind the live tip. */
 export const JOIN_LAG = 1;
 
-/** Seconds a fast-forward to live takes, whatever the distance, and the most ticks a second it will ask for. */
+/**
+ * Seconds a fast-forward to live aims to take, whatever the distance, the most ticks a second it will ask for, and the
+ * least it closes the gap by so a short one still ends. The reads behind it keep up at the cap: a day takes a few seconds.
+ */
 const CATCH_UP_SECONDS = 3;
-const MAX_CATCH_UP_TPS = 480;
+const MAX_CATCH_UP_TPS = 960;
+const MIN_CLOSING_TPS = 8;
 
 const slot = (district: number) => `p${String(district).padStart(2, '0')}`;
 
@@ -165,8 +169,10 @@ export class Playback {
   /** Racing to the live tip rather than playing at the city's speed. */
   catchingUp = false;
   failure: Error | null = null;
-  /** Ticks a second the catch-up asked for, or 0. */
-  private catchUpTps = 0;
+  /** The sim began a new epoch, so the ticks ahead do not continue these. */
+  restarted = false;
+  /** Ticks a second a catch-up gains on the live tip, fixed when it starts so it ends in about the time promised. */
+  private closing = 0;
   private readonly pumps: Pump[];
 
   constructor(
@@ -189,14 +195,19 @@ export class Playback {
   /** Race to the live tip in about {@link CATCH_UP_SECONDS}, however far back the playhead is. */
   catchUp(): void {
     const gap = Math.max(0, this.options.tail() - this.head);
+    this.closing = Math.max(MIN_CLOSING_TPS, gap / CATCH_UP_SECONDS);
     this.catchingUp = true;
     this.paused = false;
-    this.catchUpTps = Math.min(MAX_CATCH_UP_TPS, this.speed() + gap / CATCH_UP_SECONDS);
   }
 
-  /** The playhead's pace in ticks a second. */
+  /**
+   * The playhead's pace in ticks a second. A catch-up goes at the city's own pace, which the live tip also advances at
+   * (read afresh each time), plus a steady gain on it, so a tip that keeps moving is still reached.
+   */
   private speed(): number {
-    return this.catchingUp ? this.catchUpTps : Math.max(1, this.state.speed) * this.rate;
+    const own = Math.max(1, this.state.speed) * this.rate;
+    if (!this.catchingUp) return own;
+    return Math.min(MAX_CATCH_UP_TPS, own + this.closing);
   }
 
   /** Whether the playhead has reached the live tip's render delay: time to hand over. */
@@ -217,6 +228,14 @@ export class Playback {
     for (const pump of this.pumps) {
       while (pump.queue.length > 0 && pump.queue[0]!.record.tick <= limit) {
         const { record } = pump.queue.shift()!;
+        // A restarted sim numbers its ticks from the start again, below the playhead, which cannot follow it.
+        const had = this.state.epochOf(record.district);
+        if (had >= 0 && record.epoch > had) {
+          this.restarted = true;
+          this.failure ??= new Error('the city restarted');
+          this.options.onFail?.(this.failure);
+          return;
+        }
         if (this.state.apply(record) === 'gap') {
           this.failure ??= new Error(`district ${record.district} skipped to tick ${record.tick}`);
           this.options.onFail?.(this.failure);

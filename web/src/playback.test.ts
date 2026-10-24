@@ -17,14 +17,14 @@ const trips: Trips = { trip: () => undefined };
 const DISTRICTS = 2;
 const PAGE = 50;
 
-const record = (tick: number, district: number) =>
+const record = (tick: number, district: number, speed = 10, epoch = 1) =>
   new TextEncoder().encode(
     JSON.stringify({
       kind: 'tick',
-      epoch: 1,
+      epoch,
       district,
       tick,
-      speed: 10,
+      speed,
       keyframe: tick === 0 ? { buildings: [] } : null,
       events: [],
     }),
@@ -38,6 +38,9 @@ class FakeLog {
   subscribes: [number, number][] = [];
   /** Skip the next live delivery of a district, as a full subscriber queue does. */
   dropNext = new Set<number>();
+  /** The city's speed and epoch the next commits are written with. */
+  speed = 10;
+  epoch = 1;
   constructor(length: number) {
     this.grow(length);
   }
@@ -50,7 +53,7 @@ class FakeLog {
   commit(): void {
     for (let d = 0; d < DISTRICTS; d++) {
       const log = this.logs[d]!;
-      log.push(record(log.length, d));
+      log.push(record(this.epoch === 1 ? log.length : log.length, d, this.speed, this.epoch));
       const frame = { sub: d, offset: log.length - 1, skippedBefore: 0, payload: log.at(-1)! };
       if (this.dropNext.delete(d)) continue;
       this.handlers.get(`p0${d}`)?.(frame);
@@ -226,6 +229,49 @@ describe('Playback', () => {
     expect(p.atTip).toBe(true);
     expect(seconds).toBeLessThan(8);
     expect(p.head).toBeGreaterThan(1000);
+  });
+
+  it.each([4, 16])('reaches a tip a few ticks ahead that keeps moving at %i ticks a second', async (tps) => {
+    const log = new FakeLog(600);
+    log.speed = tps;
+    const { p } = start(log, 591);
+    p.catchUp();
+    let seconds = 0;
+    let owed = 0;
+    while (!p.atTip && seconds < 10) {
+      const dt = 0.05;
+      owed += dt * tps;
+      for (; owed >= 1; owed--) log.commit();
+      p.advance(dt);
+      seconds += dt;
+      await settle();
+    }
+    expect(p.atTip).toBe(true);
+    expect(seconds).toBeLessThan(3.5);
+  });
+
+  it('stops, as restarted, when a new epoch numbers its ticks from the start again', async () => {
+    const log = new FakeLog(300);
+    const { p, failures } = start(log, 250);
+    p.advance(0.1);
+    await settle();
+    log.epoch = 2;
+    // The new epoch's records land below the playhead's tick.
+    for (let d = 0; d < DISTRICTS; d++) {
+      log.logs[d]!.push(record(0, d, 10, 2));
+      log.handlers.get(`p0${d}`)?.({
+        sub: d,
+        offset: log.logs[d]!.length - 1,
+        skippedBefore: 0,
+        payload: log.logs[d]!.at(-1)!,
+      });
+    }
+    for (let i = 0; i < 40 && !p.failure; i++) {
+      p.advance(1);
+      await settle();
+    }
+    expect(p.restarted).toBe(true);
+    expect(failures).toHaveLength(1);
   });
 
   it('fails when retention takes the records it needs', async () => {

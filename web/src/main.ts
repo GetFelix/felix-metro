@@ -443,6 +443,8 @@ async function main() {
       joined: null,
       applied: [],
     };
+    // The playback's own session is closed by hand, so the gateway sees its subscriptions end.
+    addEventListener('pagehide', () => stopPlayback());
     const stopPlayback = () => {
       playMark++;
       if (!playback) return;
@@ -493,8 +495,10 @@ async function main() {
       swap(liveState!, null);
       shownResult = null;
     };
+    /** Whether Space or Play has anything to do: not while racing to live, when no control is shown. */
+    const canToggle = () => hasLive && pastTick !== null && scrubTarget === null && !playback?.catchingUp;
     const togglePlay = async (): Promise<boolean> => {
-      if (!hasLive || pastTick === null || scrubTarget !== null) return false;
+      if (!canToggle()) return false;
       if (playback) {
         playback.paused = !playback.paused;
         return true;
@@ -544,6 +548,9 @@ async function main() {
       // A seek still running was dropped above; with nothing past drawn there is nothing to swap back.
       if (pastTick === null) return;
       if (playback?.catchingUp) return;
+      // Within a second of the tip there is nothing worth racing.
+      const from = playback?.head ?? pastTick;
+      if (liveState!.latest - from <= Math.max(LIVE_SNAP_TICKS, liveState!.speed)) return snapLive();
       // The city races forward from where it is, then joins the live one; with no way to play it, it shows at once.
       const mark = playMark;
       void openPlayback().then((p) => {
@@ -646,6 +653,7 @@ async function main() {
     addEventListener('keydown', (e) => {
       const target = e.target as HTMLElement | null;
       if (e.key !== ' ' || e.repeat || target?.closest('button, input, [role="slider"]')) return;
+      if (!canToggle()) return;
       e.preventDefault();
       void togglePlay();
     });
@@ -685,7 +693,8 @@ async function main() {
       const p = playback;
       if (!p) return null;
       if (p.failure || state !== p.state) {
-        if (p.failure) note('Playback stopped. Showing the city live.');
+        if (p.failure)
+          note(p.restarted ? 'The city restarted. Showing it live.' : 'Playback stopped. Showing the city live.');
         snapLive();
         return null;
       }
