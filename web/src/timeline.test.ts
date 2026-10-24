@@ -20,6 +20,11 @@ describe('timeline maths', () => {
     expect(stepTick(range, 1000, 1, true)).toBe(1000 + TICKS_PER_HOUR);
     expect(stepTick(range, 500, -1, true)).toBe(480);
     expect(stepTick(range, range.newest - 10, 1, false)).toBe(range.newest);
+    // Steps stop at the oldest moment, so a run of them is not the sum of their sizes.
+    let at = range.oldest + 150;
+    for (let i = 0; i < 3; i++) at = stepTick(range, at, -1, false);
+    expect(at).toBe(range.oldest);
+    expect(stepTick(range, at, 1, false)).toBe(range.oldest + STEP_TICKS);
     expect(clampTick(range, 1e9)).toBe(range.newest);
   });
 
