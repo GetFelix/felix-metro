@@ -26,13 +26,15 @@ export interface Params {
   at: number | null;
   /** Keep a trace of every record taken, in `window.__trace`, for the CI checks. */
   trace: boolean;
+  /** Draw only when `window.__capture.frame` asks, for the clip job. Needs `trace`, so a stray link cannot stop a page. */
+  capture: boolean;
 }
 
 // ?live=0 skips the gateway and draws the city alone, ?gateway=ws://host:8787/ws names a gateway other than the page's own.
 // ?layout=frame draws the style frame's city instead of the generated one, ?districts=3 sets the districts per side
 // (2 by default) and the hash picks the seed (/#harbor).
 // ?at=1234 shows the city at tick 1234 and stays there, for trying out seeking before the timeline exists.
-// ?trace keeps what became of every record in `window.__trace`.
+// ?trace keeps what became of every record in `window.__trace`. ?capture (with ?trace) hands the render clock to the clip script.
 // ?t=18.5 freezes the clock at that hour, ?still freezes motion, ?tier=low|medium|high forces a tier, ?ui=0 hides the
 // overlay, ?hud shows frame statistics, ?slow=40 adds 40 ms to every frame.
 export function parseParams(search: string, hash = ''): Params {
@@ -52,6 +54,7 @@ export function parseParams(search: string, hash = ''): Params {
     gateway: params.get('gateway'),
     at: tickParam(params.get('at')),
     trace: params.has('trace'),
+    capture: params.has('trace') && params.has('capture'),
   };
 }
 

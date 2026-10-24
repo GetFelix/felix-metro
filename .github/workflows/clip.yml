@@ -1,0 +1,73 @@
+name: Clip
+
+# Records the clip for getfelix.dev: the dev stack runs, the page draws the city one frame at a time (web/scripts/clip.mjs)
+# and ffmpeg encodes the frames. The mp4 and its posters are in the artifact, with the density numbers of the run.
+on:
+  push:
+    branches: [clip]
+  workflow_dispatch:
+    inputs:
+      city:
+        description: City to film
+        default: harbor
+      length:
+        description: Seconds of video
+        default: '30'
+      tier:
+        description: Quality tier the page draws at (low, medium, high)
+        default: medium
+
+permissions:
+  contents: read
+
+jobs:
+  clip:
+    runs-on: ubuntu-latest
+    timeout-minutes: 170
+    env:
+      CITY: ${{ inputs.city || 'harbor' }}
+      LENGTH: ${{ inputs.length || '30' }}
+      CLIP_TIER: ${{ inputs.tier || 'medium' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: dev/up.sh
+      - name: Draw the frames
+        working-directory: web
+        timeout-minutes: 140
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+          node scripts/clip.mjs 'http://127.0.0.1:8088' "$CITY" "$LENGTH" clip-out
+      - name: Encode
+        working-directory: web/clip-out
+        run: |
+          command -v ffmpeg >/dev/null || sudo apt-get install -y ffmpeg
+          at="$(node -p "require('./meta.json').posterAt / 1000")"
+          ffmpeg -y -framerate 30 -i frames/f%05d.jpg -c:v libx264 -profile:v high -pix_fmt yuv420p \
+            -crf 22 -preset slow -movflags +faststart -an "metro-$CITY.mp4"
+          ffmpeg -y -ss "$at" -i "metro-$CITY.mp4" -frames:v 1 -c:v libwebp -quality 82 "metro-$CITY.webp"
+          ffmpeg -y -ss "$at" -i "metro-$CITY.mp4" -frames:v 1 -q:v 3 "metro-$CITY.jpg"
+          ffprobe -v error -show_entries stream=codec_name,profile,width,height,r_frame_rate,pix_fmt,bit_rate:format=duration,size \
+            -of default=nw=1 "metro-$CITY.mp4" | tee specs.txt
+      # A few frames to look at without downloading the whole set.
+      - name: Pick sample frames
+        if: always()
+        working-directory: web/clip-out
+        run: |
+          mkdir -p samples
+          for i in 0000 0120 0240 0360 0480 0600 0720 0840; do cp "frames/f0$i.jpg" samples/ 2>/dev/null || true; done
+          rm -rf frames-all && mv frames frames-all
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: clip
+          path: |
+            web/clip-out
+            !web/clip-out/frames-all
+      - if: failure()
+        run: docker compose -f dev/compose.yml logs --no-color

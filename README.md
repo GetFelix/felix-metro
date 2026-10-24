@@ -73,6 +73,16 @@ A city the gateway refuses (a misspelled name, or no access) shows a message ins
 retrying. The city name in the top left opens a list of every city. Scrubbing back in time, following a resident and
 building are not built yet.
 
+## Recording the clip
+
+The Clip workflow (`.github/workflows/clip.yml`, run by hand) brings up the dev stack,
+runs the sim to the evening rush and draws the city one frame at a time at 1600 × 900,
+30 fps: the street at rush hour, the evening coming on, the timeline dragged back to the
+morning and, once Play is in the page, played forward and back to live. ffmpeg turns the
+frames into an mp4 and posters, uploaded with `density.json` and `shots.csv`, which count
+the cars and walkers drawn. `cargo run --release --example density -- harbor 2` in
+`core/` prints the same from the schedules alone.
+
 ## Install a release
 
 Each [release](https://github.com/GetFelix/felix-metro/releases) has a compose bundle

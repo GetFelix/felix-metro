@@ -20,6 +20,7 @@ import { createLoader, type Loader } from './loader';
 import { createPicker } from './picker';
 import { displayName } from './registry';
 import { Traffic } from './traffic';
+import { sample, type Path } from './capture';
 
 declare global {
   interface Window {
@@ -82,11 +83,30 @@ declare global {
       /** Hold each scrub seek this many ms before it is shown; 0 for none. */
       holdSeeks(ms: number): void;
     };
+    /** Frame-by-frame drawing for the clip job; only under ?capture&trace. */
+    __capture?: {
+      /** The city's side in tiles. */
+      tiles: number;
+      /** Where the camera stands and looks and how far the tick runs, by video time in ms. */
+      setPath(path: Path): void;
+      /** Draw the frame at video time `tMs` and say what is in it. */
+      frame(tMs: number): Promise<CaptureFrame>;
+    };
     __quality?: {
       history: readonly Tier[];
       memory: { tier: Tier; textures: number; geometries: number }[];
     };
   }
+}
+
+/** What a captured frame holds, to check the shot is busy. */
+interface CaptureFrame {
+  tick: number;
+  clock: string;
+  cars: number;
+  walkers: number;
+  carsInView: number;
+  walkersInView: number;
 }
 
 /** Whether the connection is down; the clock runs on its own meanwhile. */
@@ -218,6 +238,7 @@ async function main() {
     gateway,
     at,
     trace,
+    capture,
   } = parseParams(returned?.search ?? location.search, returned?.hash ?? location.hash);
   if (!ui) document.querySelectorAll('.chip').forEach((e) => e.classList.add('hidden'));
   // Switching city is a new page: its sockets close with the old one and nothing of it is left to tear down.
@@ -261,6 +282,8 @@ async function main() {
   let hasLive = false;
   /** Draws the bar and the past pill from the tick on screen; set once the page can scrub. */
   let timelineFrame: ((tick: number) => void) | null = null;
+  /** Resolves when no scrub seek is waiting or running; the clip job draws a frame only after it. */
+  let scrubSettled: () => Promise<void> = async () => {};
   /** Told the frame after the city changed has been drawn. */
   const frameWaiters: (() => void)[] = [];
   const pill = document.getElementById('pill')!;
@@ -497,6 +520,7 @@ async function main() {
       }
       if (scrubLatest.pending === null && scrubTarget === tick) scrubTarget = null;
     });
+    scrubSettled = () => scrubLatest.settled();
     /** Where the handle is, to step from: the target if one is on its way. */
     const handleAt = () => scrubTarget ?? pastTick ?? Math.floor(liveState!.latest);
     const go = (tick: number, moving: boolean) => {
@@ -622,21 +646,28 @@ async function main() {
     };
   }
   let intro: ReturnType<typeof startIntro> | null = null;
+  /** The tick the clip script wants drawn, or null to let the clock steer. */
+  let captureTick: number | null = null;
   function frame() {
     const now = performance.now();
+    draw(now, now - last, still ? 0 : Math.min(clock.getDelta(), 0.05));
+  }
+  /** Draw one frame `dt` seconds on from the last. */
+  function draw(now: number, frameMs: number, dt: number) {
     if (intro && !intro.step(now)) intro = null;
-    const frameMs = now - last;
     last = now;
-    quality.tick(frameMs);
+    if (!capture) quality.tick(frameMs);
     hud?.frame(frameMs);
     if (slow) for (const end = performance.now() + slow; performance.now() < end; );
-    const dt = still ? 0 : Math.min(clock.getDelta(), 0.05);
     move(cars, dt, true);
     move(people, dt, false);
     for (const p of people) p.mixer.update(dt);
     if (state && traffic && window.__live) {
       // The clock runs on real time even when frames are slow, so it stays with the sim.
-      const tick = pastTick ?? clockTicks.advance(Math.min(1, frameMs / 1000), state.latest, state.speed, link.down);
+      const tick =
+        pastTick ??
+        captureTick ??
+        clockTicks.advance(Math.min(1, frameMs / 1000), state.latest, state.speed, link.down);
       if (!Number.isNaN(tick)) {
         state.retire(Math.floor(tick));
         traffic.update(tick, still ? 0 : dt, state.active());
@@ -655,7 +686,8 @@ async function main() {
         });
       }
     }
-    controls.update();
+    if (capture) camera.lookAt(controls.target);
+    else controls.update();
     post!.render(controls.target);
     for (const done of frameWaiters.splice(0)) done();
     // A live state the page has left keeps taking records; let its finished trips go.
@@ -666,11 +698,68 @@ async function main() {
     }
     requestAnimationFrame(frame);
   }
+  /** The clip script's way in: one frame at a time at a video time, the camera and the tick following the path it set. */
+  function captureApi(): NonNullable<Window['__capture']> {
+    let path: Path = { position: [], target: [], ticks: [] };
+    let base: number | null = null;
+    let lastMs: number | null = null;
+    const view = new THREE.Vector3();
+    const inView = (x: number, z: number) => {
+      view.set(x, 0.1, z).project(camera);
+      return Math.abs(view.x) <= 1 && Math.abs(view.y) <= 1 && view.z < 1;
+    };
+    return {
+      tiles: city?.tiles ?? 0,
+      setPath(next) {
+        path = next;
+      },
+      async frame(tMs) {
+        await scrubSettled();
+        const [cam, aim] = [sample(path.position, tMs), sample(path.target, tMs)];
+        if (cam.length) camera.position.set(cam[0]!, cam[1]!, cam[2]!);
+        if (aim.length) controls.target.set(aim[0]!, aim[1]!, aim[2]!);
+        captureTick = null;
+        if (pastTick === null && liveState && path.ticks.length) {
+          base ??= Math.floor(liveState.latest) - 1;
+          const want = base + sample(path.ticks, tMs)[0]!;
+          // The sim runs ahead of the clip; if it has not got there yet, wait for it rather than draw a gap.
+          for (let waited = 0; liveState.latest < want + 1; waited += 25) {
+            if (waited > 120_000) throw new Error(`the sim did not reach tick ${Math.ceil(want)}`);
+            await new Promise((done) => setTimeout(done, 25));
+          }
+          captureTick = want;
+        }
+        const dt = lastMs === null ? 0 : Math.max(0, (tMs - lastMs) / 1000);
+        lastMs = tMs;
+        draw(performance.now(), 1000 / 30, dt);
+        // Cars and walkers get their models a share a frame; draw on, without moving, until all of them have one.
+        for (let i = 0; i < 600 && traffic && traffic.waiting > 0; i++) draw(performance.now(), 0, 0);
+        const where = traffic?.where() ?? [];
+        const cars = where.filter((w) => w.car);
+        const walkers = where.filter((w) => !w.car);
+        return {
+          tick: window.__live?.tick ?? NaN,
+          clock: document.getElementById('clock')!.textContent ?? '',
+          cars: cars.length,
+          walkers: walkers.length,
+          carsInView: cars.filter((w) => inView(w.x, w.z)).length,
+          walkersInView: walkers.filter((w) => inView(w.x, w.z)).length,
+        };
+      },
+    };
+  }
   move(cars, 0, true);
   move(people, 0, false);
   const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
-  if (city && !still && frozenHour === null && !reduced) intro = startIntro(camera, controls, performance.now());
-  frame();
+  if (city && !still && frozenHour === null && !reduced && !capture)
+    intro = startIntro(camera, controls, performance.now());
+  if (capture) {
+    camera.near = 0.02;
+    camera.updateProjectionMatrix();
+    controls.enabled = false;
+    window.__capture = captureApi();
+    draw(performance.now(), 0, 0);
+  } else frame();
   if (window.__seek) window.__seek.drawMs = performance.now() - seekDone;
   document.body.dataset.ready = '1';
   window.__ready = true;

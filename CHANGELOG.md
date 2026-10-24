@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- A Clip workflow that records the getfelix.dev video: the page can draw frame by frame (`?capture&trace`) and a script drives the camera, the tick and the timeline.
+
 ## [0.1.0] - 2026-10-24
 
 The first release: a generated city that runs live in the browser on Felix. It
