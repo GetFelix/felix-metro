@@ -1,5 +1,27 @@
 # Changelog
 
+## [Unreleased]
+
+### Building
+
+- The sim reads each city's command stream and applies `build` and `demolish` before
+  the next tick. Every command is recorded as a `command` event with a hash of who
+  sent it and a result, in the district it touched, beside the `built` or
+  `demolished` event it caused. A refused command is recorded with its reason and
+  changes nothing.
+- The `speed` command sets the city's speed and resumes a paused city. The loopback
+  endpoint stays for operators.
+- A commanded speed is the city's speed: the operator endpoint reports it, and it holds
+  until someone sets another. A paused city holds a bounded queue of commands and
+  records the overflow as refused (result 9) once it resumes.
+- A resume queued behind a pause is no longer stranded, an operator setting that lands during a commanded change is no longer overwritten, a flood past what a paused city holds logs once per pause, and a closed command stream is logged as an error.
+- The sim keeps retrying to follow a city's command stream at startup instead of running without builders after one refusal.
+- `place road`, `zone` and `fork` are refused as unsupported for now.
+- The page's fold follows `road` events and a keyframe's road list.
+- `dev/check-commands.mjs` publishes commands as a mayor from a plain client; the
+  dev-stack CI job runs it. It reads keyframe records too, fails when a result never
+  appears, and checks a later keyframe lists the built lot.
+
 ## [0.1.0] - 2026-10-24
 
 The first release: a generated city that runs live in the browser on Felix. It

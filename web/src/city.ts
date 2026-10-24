@@ -5,6 +5,12 @@ import type { City } from './layout';
 /** A building kind that means the lot is empty. */
 export const NO_BUILDING = 65535;
 
+/** What a `road` event or a keyframe's road list says happened to a segment, as the sim writes it. */
+export const ROAD_CLOSED = 0;
+export const ROAD_OPENED = 1;
+export const ROAD_ADDED = 2;
+export const ROAD_REMOVED = 3;
+
 interface TripEvent {
   type: 'trip';
   resident: number;
@@ -18,12 +24,17 @@ interface BuildingEvent {
   kind: number;
   rotation: number;
 }
+interface RoadEvent {
+  type: 'road';
+  segment: number;
+  change: number;
+}
 interface SpeedEvent {
   type: 'speed';
   ticksPerSecond: number;
 }
 /** The events this page acts on; the rest of what a record carries is ignored. */
-export type TickEvent = TripEvent | BuildingEvent | SpeedEvent | { type: 'other' };
+export type TickEvent = TripEvent | BuildingEvent | RoadEvent | SpeedEvent | { type: 'other' };
 
 export interface TickRecord {
   kind: 'tick';
@@ -33,7 +44,7 @@ export interface TickRecord {
   speed: number;
   keyframeOffset: number;
   wallUs: number;
-  keyframe: { buildings: [number, number, number][] } | null;
+  keyframe: { buildings: [number, number, number][]; roads?: [number, number][] } | null;
   events: TickEvent[];
 }
 
@@ -66,6 +77,10 @@ export interface Building {
 export class CityState {
   /** Lots that differ from the generated city. */
   readonly built = new Map<number, Building>();
+  /** Segments closed, added or removed since the city was generated, by segment: a `ROAD_*` change. */
+  readonly roads = new Map<number, number>();
+  /** The district whose record last said something about a segment, so its keyframe can replace the entry. */
+  private readonly roadDistrict = new Map<number, number>();
   /** The newest tick of each district. */
   readonly ticks: number[];
   /** The sim epoch of each district's newest record. */
@@ -121,7 +136,7 @@ export class CityState {
     this.epochs[d] = record.epoch;
     this.ticks[d] = record.tick;
     this.speed = record.speed;
-    if (record.keyframe) this.keyframe(d, record.keyframe.buildings);
+    if (record.keyframe) this.keyframe(d, record.keyframe.buildings, record.keyframe.roads ?? []);
     for (const e of record.events) {
       if (e.type === 'trip') {
         const t = e;
@@ -138,6 +153,8 @@ export class CityState {
           e.lot,
           e.type === 'built' ? { kind: e.kind, rotation: e.rotation } : { kind: NO_BUILDING, rotation: 0 },
         );
+      } else if (e.type === 'road') {
+        this.road(d, e.segment, e.change);
       } else if (e.type === 'speed') {
         this.speed = e.ticksPerSecond;
       }
@@ -175,12 +192,28 @@ export class CityState {
 
   // A keyframe lists every lot of its district that differs from the generated city, so a lot it leaves out is the
   // generated one again.
-  private keyframe(district: number, diffs: [number, number, number][]): void {
+  private keyframe(district: number, diffs: [number, number, number][], roads: [number, number][]): void {
     const listed = new Set(diffs.map((b) => b[0]));
     for (const lot of [...this.built.keys()]) {
       if (this.city.lots[lot]?.district === district && !listed.has(lot)) this.set(lot, null);
     }
     for (const [lot, kind, rotation] of diffs) this.set(lot, { kind, rotation });
+    for (const segment of [...this.roads.keys()]) {
+      if (this.roadDistrict.get(segment) === district) this.roads.delete(segment);
+    }
+    for (const [segment, change] of roads) {
+      this.roads.set(segment, change);
+      this.roadDistrict.set(segment, district);
+    }
+  }
+
+  // Opening a closed road and removing an added one put it back as generated, which is no entry.
+  private road(district: number, segment: number, change: number): void {
+    const was = this.roads.get(segment);
+    if (change === ROAD_OPENED && was === ROAD_CLOSED) this.roads.delete(segment);
+    else if (change === ROAD_REMOVED && was === ROAD_ADDED) this.roads.delete(segment);
+    else this.roads.set(segment, change);
+    this.roadDistrict.set(segment, district);
   }
 
   private set(lot: number, building: Building | null): void {

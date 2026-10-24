@@ -689,3 +689,454 @@ async fn a_log_with_someone_elses_records_stops_the_city() {
         .unwrap_err();
     assert!(format!("{err:#}").contains("another sim"), "{err:#}");
 }
+
+mod builders {
+    use felix_metro_core::record::{
+        Command, REFUSED_IN_USE, REFUSED_OCCUPIED, RESULT_APPLIED, principal_hash,
+    };
+
+    use super::*;
+    use crate::commands::tests::{city as harbor, command, free_lot};
+
+    fn command_events(log: &Memory, district: u16) -> Vec<(u32, u64, u32, u8)> {
+        let mut out = Vec::new();
+        for r in log.records(district) {
+            for e in &r.events {
+                if let Event::Command {
+                    principal,
+                    id,
+                    result,
+                    ..
+                } = e
+                {
+                    out.push((r.header.tick, *principal, *id, *result));
+                }
+            }
+        }
+        out
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_command_is_recorded_on_the_next_tick_in_the_district_it_touched() {
+        let world = World::new(harbor());
+        let lot = free_lot(&world);
+        let district = world.city.lots[lot as usize].district;
+        let used = *world.in_use.iter().min().unwrap();
+        let used_district = world.city.lots[used as usize].district;
+        let (send, inbox) = mpsc::channel(16);
+        // Sent after tick 5 is committed in district 0, so it is applied for tick 6.
+        let mut log = Memory::healthy();
+        log.hook = Arc::new(move |d, offset| {
+            if d == 0 && offset == 5 {
+                for c in [
+                    command(
+                        "mayor",
+                        11,
+                        Command::Build {
+                            lot,
+                            kind: 4,
+                            rotation: 1,
+                        },
+                    ),
+                    command("mayor", 12, Command::Demolish { lot: used }),
+                    command(
+                        "viewer",
+                        13,
+                        Command::Build {
+                            lot,
+                            kind: 6,
+                            rotation: 0,
+                        },
+                    ),
+                ] {
+                    send.try_send(c).unwrap();
+                }
+            }
+        });
+        run_city_with("harbor", harbor(), settings(245), log.clone(), Some(inbox))
+            .await
+            .unwrap();
+        assert_whole(&log, 245);
+
+        let mayor = principal_hash("mayor");
+        let viewer = principal_hash("viewer");
+        let mut expected: HashMap<u16, Vec<(u32, u64, u32, u8)>> = HashMap::new();
+        expected
+            .entry(district)
+            .or_default()
+            .push((6, mayor, 11, RESULT_APPLIED));
+        expected
+            .entry(used_district)
+            .or_default()
+            .push((6, mayor, 12, REFUSED_IN_USE));
+        expected
+            .entry(district)
+            .or_default()
+            .push((6, viewer, 13, REFUSED_OCCUPIED));
+        for d in 0..4 {
+            let mut want = expected.remove(&d).unwrap_or_default();
+            want.sort_by_key(|c| c.2);
+            let mut got = command_events(&log, d);
+            got.sort_by_key(|c| c.2);
+            assert_eq!(got, want, "district {d}");
+        }
+
+        // The change is a `built` event in the same record, in the lot's district only.
+        let record = &log.records(district)[6];
+        let command_at = record
+            .events
+            .iter()
+            .position(|e| matches!(e, Event::Command { id: 11, .. }))
+            .unwrap();
+        assert_eq!(
+            record.events[command_at + 1],
+            Event::Built {
+                lot,
+                kind: 4,
+                rotation: 1
+            }
+        );
+        for d in (0..4).filter(|d| *d != district) {
+            let events = &log.records(d)[6].events;
+            assert!(
+                !events
+                    .iter()
+                    .any(|e| matches!(e, Event::Built { .. } | Event::Demolished { .. }))
+            );
+        }
+
+        // A keyframe after it holds the change, and the one before did not.
+        let before = log.records(district)[0].keyframe.clone().unwrap();
+        assert!(before.buildings.is_empty());
+        let after = log.records(district)[240].keyframe.clone().unwrap();
+        assert_eq!(
+            after.buildings,
+            vec![felix_metro_core::record::BuildingDiff {
+                lot,
+                kind: 4,
+                rotation: 1
+            }]
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_speed_command_resumes_a_paused_city_and_is_recorded() {
+        let (send, inbox) = mpsc::channel(4);
+        send.try_send(command(
+            "mayor",
+            1,
+            Command::Speed {
+                ticks_per_second: 8,
+            },
+        ))
+        .unwrap();
+        let mut s = settings(4);
+        s.ticks_per_second = 0;
+        let log = Memory::healthy();
+        run_city_with("harbor", harbor(), s, log.clone(), Some(inbox))
+            .await
+            .unwrap();
+        assert_whole(&log, 4);
+        let first = &log.records(0)[0];
+        assert_eq!(first.header.speed, 8);
+        assert!(first.events.iter().any(|e| matches!(
+            e,
+            Event::Speed {
+                ticks_per_second: 8
+            }
+        )));
+        assert_eq!(
+            command_events(&log, 0),
+            vec![(0, principal_hash("mayor"), 1, RESULT_APPLIED)]
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_build_sent_while_paused_waits_for_the_resume() {
+        let (send, inbox) = mpsc::channel(4);
+        let lot = free_lot(&World::new(harbor()));
+        send.try_send(command(
+            "mayor",
+            1,
+            Command::Build {
+                lot,
+                kind: 2,
+                rotation: 0,
+            },
+        ))
+        .unwrap();
+        send.try_send(command(
+            "mayor",
+            2,
+            Command::Speed {
+                ticks_per_second: 4,
+            },
+        ))
+        .unwrap();
+        let mut s = settings(2);
+        s.ticks_per_second = 0;
+        let log = Memory::healthy();
+        run_city_with("harbor", harbor(), s, log.clone(), Some(inbox))
+            .await
+            .unwrap();
+        let all: Vec<u32> = (0..4)
+            .flat_map(|d| command_events(&log, d))
+            .map(|c| c.0)
+            .collect();
+        assert_eq!(all, vec![0, 0]);
+    }
+
+    /// A hang is a failure: a stranded command parks the city for good.
+    async fn bounded<T>(what: &str, run: impl Future<Output = T>) -> T {
+        tokio::time::timeout(Duration::from_secs(600), run)
+            .await
+            .unwrap_or_else(|_| panic!("{what}: the city never finished"))
+    }
+
+    fn speed_command(id: u32, ticks_per_second: u8) -> Incoming {
+        command("mayor", id, Command::Speed { ticks_per_second })
+    }
+
+    /// Settings wired as the real binary does: the operator's watch both ways.
+    fn wired(ticks: u32, start: u8) -> (Settings, watch::Sender<u8>) {
+        let (tx, rx) = watch::channel(start);
+        let mut s = settings(ticks);
+        s.ticks_per_second = start;
+        s.speed = Some(rx);
+        s.speed_out = Some(tx.clone());
+        (s, tx)
+    }
+
+    fn speed_events(log: &Memory, district: u16) -> usize {
+        log.records(district)
+            .iter()
+            .flat_map(|r| &r.events)
+            .filter(|e| matches!(e, Event::Speed { .. }))
+            .count()
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_commanded_speed_sticks_when_the_operator_watch_is_wired() {
+        let (send, inbox) = mpsc::channel(4);
+        send.try_send(speed_command(1, 8)).unwrap();
+        let (s, tx) = wired(6, 4);
+        let log = Memory::healthy();
+        bounded(
+            "a_commanded_speed_sticks_when_the_operator_watch_is_wired",
+            run_city_with("harbor", harbor(), s, log.clone(), Some(inbox)),
+        )
+        .await
+        .unwrap();
+        for district in 0..4 {
+            assert!(log.records(district).iter().all(|r| r.header.speed == 8));
+            assert_eq!(speed_events(&log, district), 1, "district {district}");
+        }
+        assert_eq!(*tx.borrow(), 8, "the endpoint reports the commanded speed");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_commanded_pause_holds_until_something_resumes_the_city() {
+        let (send, inbox) = mpsc::channel(4);
+        send.try_send(speed_command(1, 0)).unwrap();
+        let (s, _tx) = wired(3, 4);
+        let log = Memory::healthy();
+        let started = Instant::now();
+        let resume = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(5)).await;
+            send.send(speed_command(2, 4)).await.unwrap();
+            send
+        });
+        bounded(
+            "a_commanded_pause_holds_until_something_resumes_the_city",
+            run_city_with("harbor", harbor(), s, log.clone(), Some(inbox)),
+        )
+        .await
+        .unwrap();
+        drop(resume);
+        assert!(
+            started.elapsed() >= Duration::from_secs(5),
+            "{:?}",
+            started.elapsed()
+        );
+        assert_whole(&log, 3);
+        assert_eq!(speeds(&log, 0)[0].1, 0);
+        assert_eq!(speeds(&log, 0)[1].1, 4);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_city_started_paused_stays_resumed_after_a_command() {
+        let (send, inbox) = mpsc::channel(4);
+        send.try_send(speed_command(1, 8)).unwrap();
+        let (s, _tx) = wired(5, 0);
+        let log = Memory::healthy();
+        tokio::time::timeout(
+            Duration::from_secs(60),
+            run_city_with("harbor", harbor(), s, log.clone(), Some(inbox)),
+        )
+        .await
+        .expect("the city fell back to the stale paused watch")
+        .unwrap();
+        drop(send);
+        assert_whole(&log, 5);
+        assert!(log.records(0).iter().all(|r| r.header.speed == 8));
+        assert_eq!(speed_events(&log, 0), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_operator_change_after_a_command_still_wins() {
+        let (send, inbox) = mpsc::channel(4);
+        send.try_send(speed_command(1, 8)).unwrap();
+        let (s, tx) = wired(6, 4);
+        let log = Memory::steered(&[(1, 16)], tx);
+        let mut s = s;
+        s.speed_out = None;
+        run_city_with("harbor", harbor(), s, log.clone(), Some(inbox))
+            .await
+            .unwrap();
+        let seen: Vec<u8> = log.records(0).iter().map(|r| r.header.speed).collect();
+        assert_eq!(seen, vec![8, 8, 16, 16, 16, 16]);
+        drop(send);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_paused_city_holds_a_bounded_queue_and_refuses_the_rest_once_resumed() {
+        use crate::commands::{MAX_HELD, MAX_PER_TICK};
+        use felix_metro_core::record::REFUSED_BUSY;
+        let extra = 10;
+        let (send, inbox) = mpsc::channel(MAX_HELD + extra + 4);
+        let lot = free_lot(&World::new(harbor()));
+        for id in 1..=(MAX_HELD + extra) as u32 {
+            send.try_send(command(
+                "mayor",
+                id,
+                Command::Build {
+                    lot,
+                    kind: 2,
+                    rotation: 0,
+                },
+            ))
+            .unwrap();
+        }
+        let resume_id = (MAX_HELD + extra) as u32 + 1;
+        send.try_send(speed_command(resume_id, 4)).unwrap();
+        let ticks = (MAX_HELD / MAX_PER_TICK) as u32 + 4;
+        let (s, _tx) = wired(ticks, 0);
+        let log = Memory::healthy();
+        bounded(
+            "a_paused_city_holds_a_bounded_queue_and_refuses_the_rest_once_resumed",
+            run_city_with("harbor", harbor(), s, log.clone(), Some(inbox)),
+        )
+        .await
+        .unwrap();
+        // The sim never skipped a tick.
+        assert_whole(&log, ticks);
+        let mut results: HashMap<u32, u8> = HashMap::new();
+        for d in 0..4 {
+            for (_, _, id, result) in command_events(&log, d) {
+                assert!(
+                    results.insert(id, result).is_none(),
+                    "id {id} recorded twice"
+                );
+            }
+        }
+        // Every command got exactly one result.
+        assert_eq!(results.len(), MAX_HELD + extra + 1);
+        let busy = results.values().filter(|r| **r == REFUSED_BUSY).count();
+        assert_eq!(busy, extra);
+        assert_eq!(results[&resume_id], RESULT_APPLIED);
+        drop(send);
+    }
+
+    fn build(id: u32, lot: u32) -> Incoming {
+        command(
+            "mayor",
+            id,
+            Command::Build {
+                lot,
+                kind: 2,
+                rotation: 0,
+            },
+        )
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_resume_behind_a_pause_in_the_queue_is_not_stranded() {
+        use crate::commands::MAX_PER_TICK;
+        let lot = free_lot(&World::new(harbor()));
+        let extra = 300;
+        let (send, inbox) = mpsc::channel(extra + 8);
+        send.try_send(speed_command(1, 0)).unwrap();
+        for id in 2..(extra as u32 + 2) {
+            send.try_send(build(id, lot)).unwrap();
+        }
+        let resume_id = extra as u32 + 2;
+        send.try_send(speed_command(resume_id, 4)).unwrap();
+        assert!(extra + 2 > MAX_PER_TICK);
+        let (s, _tx) = wired(8, 0);
+        let log = Memory::healthy();
+        bounded(
+            "resume",
+            run_city_with("harbor", harbor(), s, log.clone(), Some(inbox)),
+        )
+        .await
+        .unwrap();
+        assert_whole(&log, 8);
+        let mut ids: Vec<u32> = (0..4)
+            .flat_map(|d| command_events(&log, d))
+            .map(|c| c.2)
+            .collect();
+        ids.sort();
+        assert_eq!(ids, (1..=resume_id).collect::<Vec<_>>());
+        assert_eq!(log.records(0).last().unwrap().header.speed, 4);
+        drop(send);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_flood_past_what_a_paused_city_remembers_stays_bounded_and_resumes() {
+        use crate::commands::{MAX_HELD, MAX_REFUSED};
+        use felix_metro_core::record::REFUSED_BUSY;
+        let sent = MAX_HELD + MAX_REFUSED + 500;
+        let (send, inbox) = mpsc::channel(sent + 4);
+        let lot = free_lot(&World::new(harbor()));
+        for id in 1..=sent as u32 {
+            send.try_send(build(id, lot)).unwrap();
+        }
+        let resume_id = sent as u32 + 1;
+        send.try_send(speed_command(resume_id, 4)).unwrap();
+        let ticks = 24;
+        let (s, _tx) = wired(ticks, 0);
+        let log = Memory::healthy();
+        bounded(
+            "flood",
+            run_city_with("harbor", harbor(), s, log.clone(), Some(inbox)),
+        )
+        .await
+        .unwrap();
+        assert_whole(&log, ticks);
+        let results: Vec<(u32, u8)> = (0..4)
+            .flat_map(|d| command_events(&log, d))
+            .map(|c| (c.2, c.3))
+            .collect();
+        // Held, remembered-to-refuse and the resume get a result; the rest were dropped.
+        assert_eq!(results.len(), MAX_HELD + MAX_REFUSED + 1);
+        let busy = results.iter().filter(|r| r.1 == REFUSED_BUSY).count();
+        assert_eq!(busy, MAX_REFUSED);
+        assert!(results.contains(&(resume_id, RESULT_APPLIED)));
+        drop(send);
+    }
+
+    #[test]
+    fn an_operator_setting_after_the_runner_read_is_not_overwritten() {
+        let (tx, mut rx) = watch::channel(4u8);
+        // The runner read 4, then the operator set 16 before the write-back.
+        tx.send_replace(16);
+        assert!(!publish_speed(&tx, Some(&mut rx), 8));
+        assert_eq!(*tx.borrow(), 16);
+        assert!(rx.has_changed().unwrap(), "the setting is still to be read");
+        // With nothing newer, the commanded speed is reported and not re-read.
+        rx.borrow_and_update();
+        assert!(publish_speed(&tx, Some(&mut rx), 8));
+        assert_eq!(*tx.borrow(), 8);
+        assert!(!rx.has_changed().unwrap());
+    }
+}
