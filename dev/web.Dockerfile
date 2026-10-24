@@ -4,6 +4,7 @@
 
 # core/ in WebAssembly, with the records from a native run the web tests read.
 FROM docker.io/library/rust:1.97-bookworm AS core
+# The version must match the wasm-bindgen in Cargo.lock.
 RUN rustup target add wasm32-unknown-unknown
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cargo install wasm-bindgen-cli --version 0.2.129 --locked

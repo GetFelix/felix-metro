@@ -14,11 +14,15 @@ if ! "${compose[@]}" up --detach --build; then
   exit 1
 fi
 
-for _ in $(seq 1 90); do
-  if [[ -f state/seeded && -f state/finalized ]] \
+for _ in $(seq 1 120); do
+  # probed: the probe service saw a tick on every district of every city
+  # arrive through the gateway.
+  if [[ -f state/seeded && -f state/finalized && -f state/probed ]] \
     && curl -fsS http://127.0.0.1:8080/ready >/dev/null 2>&1 \
     && curl -fsS http://127.0.0.1:8787/oidc >/dev/null 2>&1 \
-    && curl -fsS http://127.0.0.1:8088/ >/dev/null 2>&1; then
+    && curl -fsS http://127.0.0.1:8088/ >/dev/null 2>&1 \
+    && running="$("${compose[@]}" ps --status running --services 2>/dev/null)" \
+    && grep -qx sim <<<"$running" && grep -qx gateway <<<"$running"; then
     echo "Felix Metro is up, with cities harbor and pinecrest."
     echo "  web app:  http://127.0.0.1:8088"
     echo "  gateway:  ws://127.0.0.1:8787/ws"

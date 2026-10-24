@@ -23,6 +23,8 @@ const WATCHERS = env("METRO_WATCHERS", "viewer").split(",").filter(Boolean);
 const BUILDERS = env("METRO_BUILDERS", "mayor").split(",").filter(Boolean);
 const AUDIENCE = "felix-metro";
 const RETENTION_SECONDS = 7 * 24 * 60 * 60;
+// Per stream, so a dev machine's disk is safe at any speed.
+const MAX_BYTES = 1024 ** 3;
 
 async function request(method, url, { token, headers = {}, body } = {}) {
   const response = await fetch(url, {
@@ -95,7 +97,7 @@ const grant = (subject, name, action) =>
     body: { subject, object: object("stream", name), action },
   });
 
-const createStream = (stream, shards, retention) => {
+const createStream = (stream, shards, retention, maxBytes) => {
   console.log(`stream ${stream}, ${shards} shard${shards === 1 ? "" : "s"}`);
   return request("POST", `${CONTROL_PLANE}/v1/tenants/${TENANT}/namespaces/${NAMESPACE}/streams`, {
     token: admin,
@@ -104,7 +106,7 @@ const createStream = (stream, shards, retention) => {
       kind: "Stream",
       shards,
       replication_factor: 1,
-      retention: { max_age_seconds: retention, max_size_bytes: null },
+      retention: { max_age_seconds: retention, max_size_bytes: maxBytes },
       consistency: "Leader",
       delivery: "AtLeastOnce",
       durable: true,
@@ -113,7 +115,7 @@ const createStream = (stream, shards, retention) => {
 };
 
 // Every city that exists, kept for good.
-await createStream("metro.cities", 1, null);
+await createStream("metro.cities", 1, null, null);
 await grant("role:sim", "metro.cities", "stream.publish");
 await grant("role:sim", "metro.cities", "stream.subscribe");
 
@@ -121,8 +123,8 @@ for (const city of CITIES) {
   const [name, districts] = city.split(":");
   const events = `metro.events.${name}`;
   const commands = `metro.commands.${name}`;
-  await createStream(events, Number(districts), RETENTION_SECONDS);
-  await createStream(commands, 1, RETENTION_SECONDS);
+  await createStream(events, Number(districts), RETENTION_SECONDS, MAX_BYTES);
+  await createStream(commands, 1, RETENTION_SECONDS, MAX_BYTES);
   // A commit needs publish, and reading the log or a state key needs subscribe.
   await grant("role:sim", events, "stream.publish");
   await grant("role:sim", events, "stream.subscribe");

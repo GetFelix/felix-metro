@@ -65,8 +65,8 @@ there. [docs/design.md](docs/design.md) has the details.
 
 ## Run it locally
 
-You need Docker or Podman (`podman compose` or `podman-compose`; on macOS run
-`podman machine start` first) and Node 22 for the check below.
+You need Docker or Podman (`podman compose` with Docker Compose v2 or podman-compose
+1.4 or later as its provider; on macOS run `podman machine start` first).
 
 ```sh
 dev/up.sh
@@ -76,12 +76,13 @@ The first run builds the sim and the web app, which takes a few minutes. It star
 Felix (a control plane and one broker as a cluster of one, so a city's stream can
 have a shard per district), a stand-in sign-in provider, the
 [gateway](https://github.com/GetFelix/felix-gateway), the sim and the web app, with the
-cities `harbor` and `pinecrest`, then prints the web app's address,
+cities `harbor` and `pinecrest`. It returns once a probe has seen a tick on every
+district of both cities arrive through the gateway, and prints the web app's address,
 <http://127.0.0.1:8088>. The stack keeps no state between runs: `dev/up.sh` starts it
 over each time. Stop it with `docker compose -f dev/compose.yml down --volumes`
 (`podman compose` the same).
 
-To see ticks arrive the way a browser gets them, through the gateway:
+To watch ticks arrive the way a browser gets them, through the gateway (needs Node 22):
 
 ```sh
 node dev/check-ticks.mjs harbor pinecrest

@@ -147,12 +147,17 @@ function redeem(form, reply) {
 
 createServer((request, response) => {
   const url = new URL(request.url, ISSUER);
-  // The browser calls discovery and the token endpoint from the web app's origin.
+  // The browser reads discovery and redeems its code from the web app's origin.
+  // The direct mint below stays closed to pages: any site could ask for a token.
+  const cors =
+    url.pathname === "/jwks.json" ||
+    url.pathname === "/.well-known/openid-configuration" ||
+    (url.pathname === "/token" && request.method === "POST");
   const reply = (status, body, type = "application/json") => {
     response.writeHead(status, {
       "content-type": type,
       "cache-control": "no-store",
-      "access-control-allow-origin": "*",
+      ...(cors ? { "access-control-allow-origin": "*" } : {}),
     });
     response.end(typeof body === "string" ? body : JSON.stringify(body));
   };
@@ -172,6 +177,7 @@ createServer((request, response) => {
   const subject = url.searchParams.get("sub");
   const audience = url.searchParams.get("aud");
   if (url.pathname === "/token" && subject && audience) {
+    if (request.headers.origin) return reply(403, { error: "the direct mint is not for browsers" });
     return reply(200, { id_token: mint(subject, audience) });
   }
   return reply(404, { error: "not found" });

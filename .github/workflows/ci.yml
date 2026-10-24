@@ -176,7 +176,7 @@ jobs:
       - name: The speed can be set from inside the sim
         run: |
           dev/speed.sh harbor 16
-          [[ "$(dev/speed.sh harbor)" == *16* ]]
+          [[ "$(dev/speed.sh harbor)" == "16" ]]
           dev/speed.sh harbor 4
       - if: failure()
         run: docker compose -f dev/compose.yml logs --no-color
