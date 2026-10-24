@@ -299,3 +299,16 @@ fn keyframes_list_the_lots_that_differ_from_the_generated_city() {
             .any(|d| d.lot == b as u32)
     );
 }
+
+#[test]
+fn state_at_is_the_keyframe_the_step_commits() {
+    let city = || City::generate("harbor", 2).unwrap();
+    let mut world = World::new(city());
+    let mut steps = (0..=480).map(|_| world.step()).collect::<Vec<_>>();
+    let committed: Vec<_> = steps
+        .remove(480)
+        .into_iter()
+        .map(|d| d.keyframe.unwrap())
+        .collect();
+    assert_eq!(state_at(city(), 480), committed);
+}
