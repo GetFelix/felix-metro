@@ -1,0 +1,20 @@
+# What the gateway lets a browser session reach in one city. dev/seed.mjs
+# creates these streams for cities `harbor` and `pinecrest`.
+
+[scope]
+field = "city"
+
+# One shard per district. A session follows each with its own slot and shard.
+[[scope.streams]]
+alias = "events"
+name = "metro.events.{scope}"
+actions = ["subscribe"]
+
+[[scope.streams]]
+alias = "commands"
+name = "metro.commands.{scope}"
+actions = ["publish"]
+# The sim learns who built what from the gateway's stamp.
+stamp_sender = true
+# A viewer has no publish right here and still joins.
+optional = true

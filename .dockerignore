@@ -1,0 +1,8 @@
+.git
+target
+**/node_modules
+web/dist
+web/frames
+web/src/core
+dev/state
+sim/ci/state
