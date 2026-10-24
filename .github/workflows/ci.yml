@@ -157,3 +157,26 @@ jobs:
           METRO_TEST_TOKEN_FILE: ${{ github.workspace }}/sim/ci/state/sim.token
       - if: failure()
         run: docker compose -f sim/ci/compose.yml logs --no-color
+
+  dev-stack:
+    name: dev-stack
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # Felix, the gateway, the sim for harbor and pinecrest, and the web app, all built and started from dev/compose.yml.
+      - run: dev/up.sh
+      # A client signs in through the IdP, joins each city at the gateway and follows every district's shard live.
+      - name: Ticks reach a WebSocket client through the gateway
+        run: node dev/check-ticks.mjs harbor pinecrest
+      # The speed endpoint is loopback only, so dev/speed.sh runs curl inside the sim's container.
+      - name: The speed can be set from inside the sim
+        run: |
+          dev/speed.sh harbor 16
+          [[ "$(dev/speed.sh harbor)" == *16* ]]
+          dev/speed.sh harbor 4
+      - if: failure()
+        run: docker compose -f dev/compose.yml logs --no-color

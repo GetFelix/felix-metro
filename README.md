@@ -63,6 +63,42 @@ there. [docs/design.md](docs/design.md) has the details.
 | 6 | Scale and failover | Planned |
 | 7 | Self-hosting | Planned |
 
+## Run it locally
+
+You need Docker or Podman (`podman compose` or `podman-compose`; on macOS run
+`podman machine start` first) and Node 22 for the check below.
+
+```sh
+dev/up.sh
+```
+
+The first run builds the sim and the web app, which takes a few minutes. It starts
+Felix (a control plane and one broker as a cluster of one, so a city's stream can
+have a shard per district), a stand-in sign-in provider, the
+[gateway](https://github.com/GetFelix/felix-gateway), the sim and the web app, with the
+cities `harbor` and `pinecrest`, then prints the web app's address,
+<http://127.0.0.1:8088>. The stack keeps no state between runs: `dev/up.sh` starts it
+over each time. Stop it with `docker compose -f dev/compose.yml down --volumes`
+(`podman compose` the same).
+
+To see ticks arrive the way a browser gets them, through the gateway:
+
+```sh
+node dev/check-ticks.mjs harbor pinecrest
+```
+
+The sim runs at 4 ticks a second. Its speed endpoint accepts only loopback, so it is
+not published; `dev/speed.sh` runs `curl` inside the sim's container:
+
+```sh
+dev/speed.sh harbor 16   # 0 pauses, 4, 8 or 16
+dev/speed.sh harbor      # show it
+```
+
+`dev/seed.mjs` sets up the tenant and each city's streams, and the roles that
+`viewer` (watch) and `mayor` (watch and build) sign in with. `sim/ci/` runs the same
+seed against a broker for the sim's integration test.
+
 ## Documentation
 
 - [docs/design.md](docs/design.md): the design, data model and build order
