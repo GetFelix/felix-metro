@@ -205,7 +205,25 @@ console.log(`past pill: "${pill.replace(/\s+/g, ' ').trim()}"`);
 await page.locator('#timeline').screenshot({ path: join(out, 'bar-past.png') });
 await page.screenshot({ path: join(out, 'past.png') });
 
-// Keyboard: three quarter-hour steps back made quickly, one forward, an hour back with shift.
+// Keyboard: three quarter-hour steps back made quickly, one forward, an hour back with shift. The steps sum to six
+// quarter-hours back, and the bar stops at the oldest moment held, which moves up as retention does. The drag ended
+// a fraction of the span from the oldest end, so start from the middle, where the whole sum fits with room to spare.
+await page.mouse.click(xAt(0.6), y);
+await page
+  .waitForFunction(
+    () => {
+      const s = document.getElementById('scrub');
+      const { past } = window.__metro.shown();
+      return past !== null && Number(s.dataset.at) === past && Math.floor(window.__live.tick) === past;
+    },
+    null,
+    { polling: 100, timeout: MINUTE },
+  )
+  .catch(async () => fail(`after the click the city did not rest at the handle: ${JSON.stringify(await read())}`));
+const start = await sample('after the click', true);
+const keysStart = start.shown.past;
+if (keysStart - start.min < 2 * HOUR_TICKS)
+  await fail(`only ${keysStart - start.min} ticks lie below the handle, too few for the keys to move freely`);
 await page.focus('#scrub');
 const steps = [
   ['ArrowLeft', -60],
@@ -214,7 +232,7 @@ const steps = [
   ['ArrowRight', 60],
   ['Shift+ArrowLeft', -HOUR_TICKS],
 ];
-let expected = dragEnd;
+let expected = keysStart;
 for (const [key, delta] of steps) {
   await page.keyboard.press(key);
   expected += delta;
