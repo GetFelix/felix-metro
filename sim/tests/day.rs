@@ -17,7 +17,7 @@ use std::sync::Arc;
 use felix_metro_core::record::{Doing, Event, TickRecord};
 use felix_metro_core::{City, TICKS_PER_DAY};
 use felix_metro_sim::{
-    Connection, FelixLog, Settings, connect, district_keys, events_stream, run_city,
+    Connection, FelixLog, Settings, connect, district_keys, events_stream, run_city, state_at,
 };
 use felix_metro_sim::{Log, Write};
 use std::time::Duration;
@@ -220,6 +220,52 @@ async fn a_city_runs_a_day_with_every_tick_in_every_district() {
             .unwrap();
         assert_eq!(state.version, Some(newest), "district {district}");
         assert_eq!(state.value.as_deref(), Some(&newest.to_le_bytes()[..]));
+    }
+
+    // Reading at the pointer gives a keyframe that is the sim's state at that tick, which a fresh world stepped
+    // to the same tick reproduces exactly.
+    let expected = state_at(
+        City::generate(&city_name, DISTRICTS_PER_SIDE).unwrap(),
+        newest as u32,
+    );
+    assert_eq!(expected.len(), DISTRICTS);
+    for (district, key) in district_keys(shards, routing, DISTRICTS)
+        .unwrap()
+        .iter()
+        .enumerate()
+    {
+        let state = client
+            .state_get(
+                &connection.tenant,
+                &connection.namespace,
+                &stream,
+                key.as_bytes(),
+                "keyframe",
+            )
+            .await
+            .unwrap();
+        let at = state.version.expect("a keyframe pointer");
+        let page = client
+            .read(
+                &connection.tenant,
+                &connection.namespace,
+                &stream,
+                district as u32,
+                at,
+                None,
+                1,
+            )
+            .await
+            .unwrap();
+        let record = TickRecord::decode(&page.records[0].payload).unwrap();
+        assert_eq!(page.records[0].offset, at);
+        assert_eq!(record.header.tick, newest as u32);
+        assert_eq!(record.header.keyframe_offset, at, "a keyframe names itself");
+        assert_eq!(
+            record.keyframe.as_ref(),
+            Some(&expected[district]),
+            "district {district}"
+        );
     }
 }
 

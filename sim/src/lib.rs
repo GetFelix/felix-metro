@@ -12,3 +12,4 @@ pub use control::{SPEEDS, StartRequest, check_speed, serve as serve_speed_contro
 pub use felix::{Connection, FelixLog, connect, district_keys, events_stream};
 pub use registry::{REGISTRY_STREAM, announce, announce_later};
 pub use runner::{Done, Log, Settings, Write, run_city};
+pub use world::state_at;

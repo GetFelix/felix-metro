@@ -287,6 +287,17 @@ impl World {
     }
 }
 
+/// Each district's state at the end of `tick`, from stepping a fresh world
+/// there: what a keyframe committed at that tick has to hold.
+pub fn state_at(city: City, tick: u32) -> Vec<Keyframe> {
+    let mut world = World::new(city);
+    while world.next_tick() < tick {
+        world.step();
+    }
+    let frames = world.step();
+    frames.into_iter().filter_map(|d| d.keyframe).collect()
+}
+
 /// The vehicle with the route it has left, from the leg it is on.
 fn vehicle_state(trip: &Trip, kind: u8, leg: usize, progress: u16) -> Vehicle {
     let route: Vec<Leg> = trip.legs().split_off(leg);
