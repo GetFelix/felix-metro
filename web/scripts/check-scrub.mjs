@@ -225,6 +225,10 @@ const keysStart = start.shown.past;
 if (keysStart - start.min < 2 * HOUR_TICKS)
   await fail(`only ${keysStart - start.min} ticks lie below the handle, too few for the keys to move freely`);
 await page.focus('#scrub');
+// Steps go from where the app holds the handle, so say so if that is no longer where the page rested.
+const idle = await read();
+if (idle.at !== keysStart || idle.shown.past !== keysStart)
+  await fail(`the handle moved while idle, from tick ${keysStart} to ${JSON.stringify(idle)}`);
 const steps = [
   ['ArrowLeft', -60],
   ['ArrowLeft', -60],
