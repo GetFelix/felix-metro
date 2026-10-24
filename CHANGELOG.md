@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+### The city
+
+- A new city starts with a day behind it. On its first start the sim commits `SIM_WARMUP_HOURS` of ticks
+  (40 by default, so live begins at 16:00 on day 2) as fast as the broker takes them, then runs at normal
+  speed. The page opens on an evening commute with history to scrub through instead of an empty dark city.
+  Warm-up ticks are stamped with wall times spread back from the start of the warm-up at the city's speed.
+  A city with records, or one that starts paused, skips it; `SIM_WARMUP_HOURS=0` starts at midnight as before.
+- `dev/lib/gateway.mjs` skipped each keyframe resident one byte short, so a keyframe with events after it
+  misparsed once residents were mid-trip; the command check now reads them.
+- `GET /cities/<name>/warmup` on the sim's endpoint says whether a city is still warming up, and `dev/up.sh`
+  (and the compose bundle's `up.sh`) waits for every city to go live.
+- A city is listed in the registry only once its warm-up is done, so the picker never offers a city whose districts
+  are still far apart in the log.
+- A sim killed during warm-up leaves partial history and is refused on restart, so the streams need a reset
+  (`dev/up.sh` starts fresh); restarting over history is tracked in
+  [#105](https://github.com/GetFelix/felix-metro/issues/105).
+
 ### Fixed
 
 - The timeline bar holds still while it is dragged. Its scale used to follow the growing city, so in a
