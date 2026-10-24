@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+### Changed
+
+- The blur is far-only. Nothing in front of the focus is blurred, a sharp band as wide as the camera
+  distance follows it, and a gentle haze (amount 3.5, down from 7) builds toward the horizon, so the
+  city reads sharp at the default view and zoomed in. The style frame uses the same blur.
+
+### Fixed
+
+- A failed depth pre-pass no longer leaves the depth material on the scene and the glows hidden for
+  every later frame.
+
 ## [0.2.0] - 2026-10-24
 
 ### Changed
