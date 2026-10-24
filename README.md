@@ -52,16 +52,16 @@ there. [docs/design.md](docs/design.md) has the details.
 
 ## Status
 
-| M | Milestone | State |
-|---|---|---|
-| 0 | The look, locked | In progress: style frame, assets, daylight, post-processing and quality tiers done; instanced traffic, the UI shell and camera controls open |
-| 1 | A live city | Done |
-| 2 | Time travel | In progress: keyframes, seeking, the timeline scrubber and rewind then follow done |
-| 3 | Follow a life | Planned |
-| 4 | Build | In progress: the sim applies build, demolish and speed commands and records who sent them, and the page animates a building going up (scaffold) or coming down (dust) over 8 ticks, backwards when you rewind; placement tools in the page, roads and zones are not built yet |
-| 5 | Branching timelines | Planned |
-| 6 | Scale and failover | Planned |
-| 7 | Self-hosting | Planned |
+| M   | Milestone           | State                                                                                                                                                                                                                                                                         |
+| --- | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0   | The look, locked    | In progress: style frame, assets, daylight, post-processing and quality tiers done; instanced traffic, the UI shell and camera controls open                                                                                                                                  |
+| 1   | A live city         | Done                                                                                                                                                                                                                                                                          |
+| 2   | Time travel         | In progress: keyframes, seeking, the timeline scrubber and rewind then follow done                                                                                                                                                                                            |
+| 3   | Follow a life       | Planned                                                                                                                                                                                                                                                                       |
+| 4   | Build               | In progress: the sim applies build, demolish and speed commands and records who sent them, and the page animates a building going up (scaffold) or coming down (dust) over 8 ticks, backwards when you rewind; placement tools in the page, roads and zones are not built yet |
+| 5   | Branching timelines | Planned                                                                                                                                                                                                                                                                       |
+| 6   | Scale and failover  | Planned                                                                                                                                                                                                                                                                       |
+| 7   | Self-hosting        | Planned                                                                                                                                                                                                                                                                       |
 
 What runs today: the sim, the dev stack and a browser page that shows a city live, with
 cars and walkers moving in time with the sim and the sun following the tick. The page
@@ -73,6 +73,35 @@ A city the gateway refuses (a misspelled name, or no access) shows a message ins
 retrying. The city name in the top left opens a list of every city. Following a resident and the page's own
 building tools are not built yet; a command published to the city's command stream by any client with a
 builder's token is applied by the sim and shows up in the page, rising over 8 ticks of city time inside a scaffold (a demolished building scales down in a puff of dust). Rewind through it and it comes down again; the low quality tier skips the scaffold and the dust.
+
+## Recording the clip
+
+`web/scripts/clip-local.mjs` records it on this machine's GPU. It takes the backend from a
+release bundle in Podman (nothing is built), serves this checkout's page with Vite, draws
+the city in a visible Edge window one frame at a time and encodes the frames with ffmpeg:
+
+```
+cd web && npm run core
+node scripts/clip-local.mjs harbor 30 ~/clips      # city, seconds, output directory
+CLIP_SIM=native node scripts/clip-local.mjs ...    # this checkout's sim in place of the bundle's image
+```
+
+The page draws frame by frame only under `?capture&trace`, with the camera and the city's
+tick following a path the script sets, so the clip is smooth however long a frame takes. The
+shots are the street at rush hour, the evening coming on, the timeline dragged back to the
+morning, played forward and back to live. A playback is stepped one video frame at a time
+in capture mode, so the clip does not depend on how long a frame takes to draw. `density.json` and `shots.csv` count the cars and walkers drawn. Everything
+the script starts is stopped when it ends. The sim has to be native (`CLIP_SIM=native`)
+for any sim change that is not in the release bundle's image.
+
+The bundle's ports are moved so it runs beside another Felix stack: broker 5100/udp, 28080,
+18443, and the gateway on `CLIP_GATEWAY_PORT` (default 18787, which Vite proxies through
+`FELIX_GATEWAY_PORT`). The native sim's control address is `CLIP_SIM_PORT` (default 18090).
+The run stops if 5173 is already in use.
+
+The Clip workflow (`.github/workflows/clip.yml`, run by hand) does the same on a CI runner in
+software GL, as a fallback; it fails when no mp4 is written. `cargo run --release --example
+density -- harbor 2` in `core/` prints the cars and walkers on the road from the schedules alone.
 
 ## Install a release
 
