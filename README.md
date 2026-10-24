@@ -52,16 +52,16 @@ there. [docs/design.md](docs/design.md) has the details.
 
 ## Status
 
-| M   | Milestone           | State                                                                              |
-| --- | ------------------- | ---------------------------------------------------------------------------------- |
-| 0   | The look, locked    | Planned                                                                            |
-| 1   | A live city         | Done                                                                               |
-| 2   | Time travel         | In progress: keyframes, seeking, the timeline scrubber and rewind then follow done |
-| 3   | Follow a life       | Planned                                                                            |
-| 4   | Build               | Planned                                                                            |
-| 5   | Branching timelines | Planned                                                                            |
-| 6   | Scale and failover  | Planned                                                                            |
-| 7   | Self-hosting        | Planned                                                                            |
+| M | Milestone | State |
+|---|---|---|
+| 0 | The look, locked | In progress: style frame, assets, daylight, post-processing and quality tiers done; instanced traffic, the UI shell and camera controls open |
+| 1 | A live city | Done |
+| 2 | Time travel | In progress: keyframes, seeking, the timeline scrubber and rewind then follow done |
+| 3 | Follow a life | Planned |
+| 4 | Build | Planned |
+| 5 | Branching timelines | Planned |
+| 6 | Scale and failover | Planned |
+| 7 | Self-hosting | Planned |
 
 What runs today: the sim, the dev stack and a browser page that shows a city live, with
 cars and walkers moving in time with the sim and the sun following the tick. The page
