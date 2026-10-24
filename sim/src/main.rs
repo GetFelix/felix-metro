@@ -7,8 +7,8 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use felix_metro_core::City;
 use felix_metro_sim::{
-    Connection, FelixLog, Settings, StartRequest, announce_later, connect, run_city,
-    serve_speed_control,
+    Connection, FelixLog, Settings, StartRequest, announce_later, connect, follow_commands,
+    run_city_with, serve_speed_control,
 };
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinSet;
@@ -75,6 +75,15 @@ async fn main() -> Result<()> {
                     }
                 },
             };
+            // A city whose command stream is missing still runs, just without builders.
+            let commands = match follow_commands(Arc::clone(&client), &connection, &spec.name).await
+            {
+                Ok(commands) => Some(commands),
+                Err(err) => {
+                    error!(city = %spec.name, error = %format!("{err:#}"), "builders cannot reach the city");
+                    None
+                }
+            };
             announce_later(
                 Arc::clone(&client),
                 connection,
@@ -86,7 +95,7 @@ async fn main() -> Result<()> {
                 speed: Some(speed),
                 ..Settings::default()
             };
-            run_city(&spec.name, city, settings, log)
+            run_city_with(&spec.name, city, settings, log, commands)
                 .await
                 .map(|_| spec.name)
         });

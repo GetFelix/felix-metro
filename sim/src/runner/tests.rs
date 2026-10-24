@@ -689,3 +689,200 @@ async fn a_log_with_someone_elses_records_stops_the_city() {
         .unwrap_err();
     assert!(format!("{err:#}").contains("another sim"), "{err:#}");
 }
+
+mod builders {
+    use felix_metro_core::record::{
+        Command, REFUSED_IN_USE, REFUSED_OCCUPIED, RESULT_APPLIED, principal_hash,
+    };
+
+    use super::*;
+    use crate::commands::tests::{city as harbor, command, free_lot};
+
+    fn command_events(log: &Memory, district: u16) -> Vec<(u32, u64, u32, u8)> {
+        let mut out = Vec::new();
+        for r in log.records(district) {
+            for e in &r.events {
+                if let Event::Command {
+                    principal,
+                    id,
+                    result,
+                    ..
+                } = e
+                {
+                    out.push((r.header.tick, *principal, *id, *result));
+                }
+            }
+        }
+        out
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_command_is_recorded_on_the_next_tick_in_the_district_it_touched() {
+        let world = World::new(harbor());
+        let lot = free_lot(&world);
+        let district = world.city.lots[lot as usize].district;
+        let used = *world.in_use.iter().min().unwrap();
+        let used_district = world.city.lots[used as usize].district;
+        let (send, inbox) = mpsc::channel(16);
+        // Sent after tick 5 is committed in district 0, so it is applied for tick 6.
+        let mut log = Memory::healthy();
+        log.hook = Arc::new(move |d, offset| {
+            if d == 0 && offset == 5 {
+                for c in [
+                    command(
+                        "mayor",
+                        11,
+                        Command::Build {
+                            lot,
+                            kind: 4,
+                            rotation: 1,
+                        },
+                    ),
+                    command("mayor", 12, Command::Demolish { lot: used }),
+                    command(
+                        "viewer",
+                        13,
+                        Command::Build {
+                            lot,
+                            kind: 6,
+                            rotation: 0,
+                        },
+                    ),
+                ] {
+                    send.try_send(c).unwrap();
+                }
+            }
+        });
+        run_city_with("harbor", harbor(), settings(245), log.clone(), Some(inbox))
+            .await
+            .unwrap();
+        assert_whole(&log, 245);
+
+        let mayor = principal_hash("mayor");
+        let viewer = principal_hash("viewer");
+        let mut expected: HashMap<u16, Vec<(u32, u64, u32, u8)>> = HashMap::new();
+        expected
+            .entry(district)
+            .or_default()
+            .push((6, mayor, 11, RESULT_APPLIED));
+        expected
+            .entry(used_district)
+            .or_default()
+            .push((6, mayor, 12, REFUSED_IN_USE));
+        expected
+            .entry(district)
+            .or_default()
+            .push((6, viewer, 13, REFUSED_OCCUPIED));
+        for d in 0..4 {
+            let mut want = expected.remove(&d).unwrap_or_default();
+            want.sort_by_key(|c| c.2);
+            let mut got = command_events(&log, d);
+            got.sort_by_key(|c| c.2);
+            assert_eq!(got, want, "district {d}");
+        }
+
+        // The change is a `built` event in the same record, in the lot's district only.
+        let record = &log.records(district)[6];
+        let command_at = record
+            .events
+            .iter()
+            .position(|e| matches!(e, Event::Command { id: 11, .. }))
+            .unwrap();
+        assert_eq!(
+            record.events[command_at + 1],
+            Event::Built {
+                lot,
+                kind: 4,
+                rotation: 1
+            }
+        );
+        for d in (0..4).filter(|d| *d != district) {
+            let events = &log.records(d)[6].events;
+            assert!(
+                !events
+                    .iter()
+                    .any(|e| matches!(e, Event::Built { .. } | Event::Demolished { .. }))
+            );
+        }
+
+        // A keyframe after it holds the change, and the one before did not.
+        let before = log.records(district)[0].keyframe.clone().unwrap();
+        assert!(before.buildings.is_empty());
+        let after = log.records(district)[240].keyframe.clone().unwrap();
+        assert_eq!(
+            after.buildings,
+            vec![felix_metro_core::record::BuildingDiff {
+                lot,
+                kind: 4,
+                rotation: 1
+            }]
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_speed_command_resumes_a_paused_city_and_is_recorded() {
+        let (send, inbox) = mpsc::channel(4);
+        send.try_send(command(
+            "mayor",
+            1,
+            Command::Speed {
+                ticks_per_second: 8,
+            },
+        ))
+        .unwrap();
+        let mut s = settings(4);
+        s.ticks_per_second = 0;
+        let log = Memory::healthy();
+        run_city_with("harbor", harbor(), s, log.clone(), Some(inbox))
+            .await
+            .unwrap();
+        assert_whole(&log, 4);
+        let first = &log.records(0)[0];
+        assert_eq!(first.header.speed, 8);
+        assert!(first.events.iter().any(|e| matches!(
+            e,
+            Event::Speed {
+                ticks_per_second: 8
+            }
+        )));
+        assert_eq!(
+            command_events(&log, 0),
+            vec![(0, principal_hash("mayor"), 1, RESULT_APPLIED)]
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_build_sent_while_paused_waits_for_the_resume() {
+        let (send, inbox) = mpsc::channel(4);
+        let lot = free_lot(&World::new(harbor()));
+        send.try_send(command(
+            "mayor",
+            1,
+            Command::Build {
+                lot,
+                kind: 2,
+                rotation: 0,
+            },
+        ))
+        .unwrap();
+        send.try_send(command(
+            "mayor",
+            2,
+            Command::Speed {
+                ticks_per_second: 4,
+            },
+        ))
+        .unwrap();
+        let mut s = settings(2);
+        s.ticks_per_second = 0;
+        let log = Memory::healthy();
+        run_city_with("harbor", harbor(), s, log.clone(), Some(inbox))
+            .await
+            .unwrap();
+        let all: Vec<u32> = (0..4)
+            .flat_map(|d| command_events(&log, d))
+            .map(|c| c.0)
+            .collect();
+        assert_eq!(all, vec![0, 0]);
+    }
+}

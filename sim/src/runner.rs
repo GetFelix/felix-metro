@@ -1,17 +1,19 @@
 //! A city's clock: steps the world, commits one record per district per tick
 //! and waits for every answer before the next tick.
 
+use std::collections::VecDeque;
 use std::future::Future;
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use felix_metro_core::City;
 use felix_metro_core::record::{Event, Header, TickRecord};
-use tokio::sync::watch;
+use tokio::sync::{mpsc, watch};
 use tokio::task::JoinSet;
 use tokio::time::{Instant, MissedTickBehavior};
 use tracing::{info, warn};
 
+use crate::commands::{Incoming, MAX_PER_TICK, apply_all};
 use crate::control::check_speed;
 use crate::latency::Window;
 use crate::world::World;
@@ -120,9 +122,24 @@ struct Shard {
 /// Changing to 0 commits that tick as the last one, then the clock waits; a
 /// resume continues at the next tick with no catch-up burst.
 pub async fn run_city<L: Log>(name: &str, city: City, settings: Settings, log: L) -> Result<Done> {
+    run_city_with(name, city, settings, log, None).await
+}
+
+/// Like [`run_city`], applying the builders' commands that arrive on `commands`.
+/// They are applied in order before the next tick is stepped, so that tick's
+/// records carry the `command` events and what they changed, and its keyframe
+/// shows the result. A paused city keeps them until a `speed` command or the
+/// operator resumes it.
+pub async fn run_city_with<L: Log>(
+    name: &str,
+    city: City,
+    settings: Settings,
+    log: L,
+    mut inbox: Option<mpsc::Receiver<Incoming>>,
+) -> Result<Done> {
     let mut speed = check_speed(settings.ticks_per_second)?;
     let mut control = settings.speed.clone();
-    if speed == 0 && control.is_none() {
+    if speed == 0 && control.is_none() && inbox.is_none() {
         bail!("the city starts paused and nothing can resume it");
     }
     let mut world = World::new(city);
@@ -140,6 +157,7 @@ pub async fn run_city<L: Log>(name: &str, city: City, settings: Settings, log: L
     let mut shards = vec![Shard::default(); world.districts()];
     let mut retries = 0u64;
     let mut report = Report::new(Instant::now());
+    let mut queue: VecDeque<Incoming> = VecDeque::new();
     loop {
         let tick = world.next_tick();
         if settings.stop_at == Some(tick) {
@@ -148,32 +166,58 @@ pub async fn run_city<L: Log>(name: &str, city: City, settings: Settings, log: L
                 retries,
             });
         }
-        let mut changed = None;
+        let mut wanted = speed;
         if parked {
-            let Some(control) = control.as_mut() else {
+            if control.is_none() && inbox.is_none() {
                 bail!("the city is paused and nothing can resume it");
-            };
-            let resumed = *control
-                .wait_for(|s| *s != 0)
-                .await
-                .context("the speed control was dropped while the city was paused")?;
-            speed = check_speed(resumed)?;
-            period = tick_period(speed);
-            // The first tick back is due at once.
-            timer = new_timer(period, true);
-            changed = Some(speed);
-            // Don't average the first report over the pause.
-            report = Report::new(Instant::now());
-        } else if let Some(control) = control.as_mut() {
-            let wanted = check_speed(*control.borrow_and_update())?;
-            if wanted != speed {
-                speed = wanted;
-                changed = Some(speed);
-                if speed != 0 {
-                    period = tick_period(speed);
-                    timer = new_timer(period, false);
+            }
+            loop {
+                tokio::select! {
+                    speed_set = wait_resumed(&mut control) => {
+                        wanted = check_speed(speed_set?)?;
+                        break;
+                    }
+                    got = next_incoming(&mut inbox) => match got {
+                        Some(got) => {
+                            let wakes = got.resumes();
+                            queue.push_back(got);
+                            if wakes {
+                                break;
+                            }
+                        }
+                        None => {
+                            inbox = None;
+                            if control.is_none() {
+                                bail!("the city is paused and nothing can resume it");
+                            }
+                        }
+                    },
                 }
             }
+        } else if let Some(control) = control.as_mut() {
+            wanted = check_speed(*control.borrow_and_update())?;
+        }
+        if let Some(inbox) = inbox.as_mut() {
+            while queue.len() < MAX_PER_TICK {
+                let Ok(got) = inbox.try_recv() else { break };
+                queue.push_back(got);
+            }
+        }
+        let taken: Vec<Incoming> = queue.drain(..queue.len().min(MAX_PER_TICK)).collect();
+        let mut commanded = apply_all(&mut world, taken, &mut wanted);
+        let mut changed = None;
+        if wanted != speed {
+            speed = wanted;
+            changed = Some(speed);
+            if speed != 0 {
+                period = tick_period(speed);
+                // The first tick back from a pause is due at once.
+                timer = new_timer(period, parked);
+            }
+        }
+        if parked {
+            // Don't average the first report over the pause.
+            report = Report::new(Instant::now());
         }
         if settings.paced {
             timer.tick().await;
@@ -182,6 +226,7 @@ pub async fn run_city<L: Log>(name: &str, city: City, settings: Settings, log: L
         let wall_us = unix_micros();
         let mut commits = JoinSet::new();
         for (district, step) in world.step().into_iter().enumerate() {
+            let commanded = std::mem::take(&mut commanded[district]);
             let shard = shards[district];
             let keyframe = step.keyframe.is_some();
             // A keyframe names itself, which the expected offset makes possible.
@@ -199,6 +244,7 @@ pub async fn run_city<L: Log>(name: &str, city: City, settings: Settings, log: L
                 events: changed
                     .map(|ticks_per_second| Event::Speed { ticks_per_second })
                     .into_iter()
+                    .chain(commanded)
                     .chain(step.events)
                     .collect(),
             };
@@ -244,6 +290,26 @@ pub async fn run_city<L: Log>(name: &str, city: City, settings: Settings, log: L
         if now.duration_since(report.since) >= REPORT_EVERY {
             report.log(name, now);
         }
+    }
+}
+
+/// The speed the operator's control resumes a paused city at, or never when
+/// there is no control.
+async fn wait_resumed(control: &mut Option<watch::Receiver<u8>>) -> Result<u8> {
+    match control {
+        Some(control) => Ok(*control
+            .wait_for(|s| *s != 0)
+            .await
+            .context("the speed control was dropped while the city was paused")?),
+        None => std::future::pending().await,
+    }
+}
+
+/// The next command, or never when there is no inbox.
+async fn next_incoming(inbox: &mut Option<mpsc::Receiver<Incoming>>) -> Option<Incoming> {
+    match inbox {
+        Some(inbox) => inbox.recv().await,
+        None => std::future::pending().await,
     }
 }
 
