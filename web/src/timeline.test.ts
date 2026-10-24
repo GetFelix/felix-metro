@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { TICKS_PER_DAY, TICKS_PER_HOUR } from './clock';
 import {
   STEP_TICKS,
-  createDragTick,
+  MIN_SPAN,
+  barSpan,
+  createSpanHold,
+  tickAtPointer,
   agoText,
   clampTick,
   dayBands,
@@ -64,13 +67,48 @@ describe('timeline maths', () => {
   });
 });
 
-describe('releasing the handle', () => {
-  it('keeps the tick of the last drag move when the span grew and the pointer did not', () => {
-    const drag = createDragTick();
-    const grown = { oldest: range.oldest, newest: range.newest + 400 };
-    const during = drag.at(range, 0.4, false);
-    expect(drag.at(grown, 0.4, true)).toBe(during);
-    // A release somewhere new is read against the span as it is.
-    expect(drag.at(grown, 0.5, true)).toBe(tickAtFraction(grown, 0.5));
+describe('a steady bar', () => {
+  it('maps a held drag to stable ticks while the city grows', () => {
+    const hold = createSpanHold();
+    hold.set(barSpan(0, 1000));
+    hold.hold();
+    const first = tickAtPointer(hold.current, 0.5);
+    let last = 1000;
+    for (let tip = 1100; tip < 20000; tip += 700) {
+      last = tip;
+      hold.set(barSpan(0, tip));
+      expect(tickAtPointer(hold.current, 0.5)).toBe(first);
+    }
+    // After the release the latest span is the one in use.
+    hold.release();
+    expect(hold.current.live).toBe(last);
+    expect(tickAtPointer(hold.current, 0.5)).not.toBe(first);
+  });
+
+  it('releases at the right end on the live head the drag began with', () => {
+    const hold = createSpanHold();
+    hold.set(barSpan(0, 3 * TICKS_PER_DAY));
+    hold.hold();
+    hold.set(barSpan(0, 3 * TICKS_PER_DAY + 500));
+    const held = hold.held!;
+    expect(tickAtPointer(held, 1)).toBe(held.live);
+    expect(tickAtPointer(held, 1)).toBe(3 * TICKS_PER_DAY);
+    // The caller's snap: the tip it tests against is the held one, so this is "live", not the near past.
+    expect(tickAtPointer(held, 1) >= held.live).toBe(true);
+  });
+
+  it('spans at least a day, with the live head short of the right end', () => {
+    const young = barSpan(480, 480 + 600);
+    expect(young.newest - young.oldest).toBe(MIN_SPAN);
+    expect(young.live).toBe(1080);
+    // The area right of the live head cannot be picked.
+    expect(tickAtPointer(young, 1)).toBe(young.live);
+    expect(tickAtPointer(young, 0)).toBe(480);
+    expect(dayBands(young).map((b) => b.day)).toEqual([1, 2]);
+    // An older city spans its whole history.
+    const old = barSpan(0, 3 * TICKS_PER_DAY);
+    expect(old.newest).toBe(old.live);
+    // A tip at the oldest moment still has a span to draw.
+    expect(barSpan(100, 100).live).toBe(101);
   });
 });

@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- The timeline bar holds still while it is dragged. Its scale used to follow the growing city, so in a
+  young city each pointer move mapped to a different moment and the drag flashed. A drag now keeps the
+  scale it began with, and releasing at the right end goes live. The bar spans at least one city day,
+  so the live head moves right across a fixed scale and the part after it is dimmed as not yet
+  happened, and it ignores a press until the span the city holds has been read.
+
 ## [0.2.0] - 2026-10-24
 
 ### Changed
