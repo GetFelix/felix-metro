@@ -10,7 +10,10 @@ const [appUrl, out] = process.argv.slice(2);
 if (!out) throw new Error('usage: check-seek.mjs <page url> <out dir>');
 mkdirSync(out, { recursive: true });
 const MINUTE = 60_000;
+// Finding and folding is held to a second. The first frame is only logged: CI draws in software, so its time says little;
+// it fails only past a generous bound that catches a hang.
 const BUDGET_MS = 1000;
+const DRAW_HANG_MS = 5000;
 
 const browser = await chromium.launch({
   args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'],
@@ -83,7 +86,9 @@ for (const t of targets) {
   if (r.offsets.some((o) => !Number.isInteger(o) || o < 0)) await fail(`offsets [${r.offsets}] are not offsets`);
   if (shown !== t) await fail(`the page shows tick ${shown}, not ${t}`);
   if (!/^Earlier/.test(pill ?? '')) await fail(`the page does not say it is showing the past: "${pill}"`);
-  if (r.ms > BUDGET_MS) misses.push(`seeking to ${t} took ${r.ms.toFixed(0)} ms, over ${BUDGET_MS} ms`);
+  if (r.seekMs > BUDGET_MS)
+    misses.push(`finding and folding tick ${t} took ${r.seekMs.toFixed(0)} ms, over ${BUDGET_MS} ms`);
+  if (r.ms > DRAW_HANG_MS) misses.push(`drawing tick ${t} took ${r.ms.toFixed(0)} ms, over ${DRAW_HANG_MS} ms`);
   await page.screenshot({ path: join(out, `at-${t}.png`) });
 }
 
@@ -95,7 +100,14 @@ for (const t of targets) {
       polling: 100,
       timeout: MINUTE,
     })
-    .catch(() => fail(`the city never drew at tick ${t}; the page said:\n${[...errors, ...warnings].join('\n')}`));
+    .catch(async () => {
+      const seen = await page
+        .evaluate(() =>
+          JSON.stringify({ seek: window.__seek, ready: window.__ready, body: document.body.innerText.slice(0, 300) }),
+        )
+        .catch((e) => String(e));
+      await fail(`the city never drew at tick ${t}; the page said:\n${[...errors, ...warnings].join('\n')}\n${seen}`);
+    });
   await page.waitForTimeout(500);
   const { tick, seekMs, drawMs, reads, ticks } = await page.evaluate(() => window.__seek);
   const shown = await page.evaluate(() => window.__live.tick);
