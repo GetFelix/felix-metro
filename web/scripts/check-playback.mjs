@@ -188,7 +188,14 @@ const backToLive = async (from, bound) => {
   await page.click('#back-live');
   await page
     .waitForFunction(() => window.__metro.shown().live, null, { polling: 50, timeout: bound * 1000 })
-    .catch(() => fail(`Back to live from tick ${seeked.tick} had not arrived after ${bound} s`));
+    .catch(async () => {
+      const where = await page.evaluate(() => ({
+        playback: window.__metro.playback(),
+        shown: window.__metro.shown(),
+        live: window.__metro.live().ticks,
+      }));
+      await fail(`Back to live from tick ${seeked.tick} had not arrived after ${bound} s: ${JSON.stringify(where)}`);
+    });
   return (Date.now() - began) / 1000;
 };
 
