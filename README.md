@@ -78,7 +78,7 @@ builder's token is applied by the sim and shows up in the page.
 
 Each [release](https://github.com/GetFelix/felix-metro/releases) has a compose bundle
 that pulls the published images instead of building them. You need Docker or Podman as
-described below.
+described below. The compose bundle runs Felix 0.6.1.
 
 ```sh
 curl -fsSL https://github.com/GetFelix/felix-metro/releases/download/v0.1.0/felix-metro-compose-0.1.0.tar.gz | tar xz
