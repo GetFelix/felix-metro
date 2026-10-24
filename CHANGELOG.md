@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- People on the pavements: a route of 8 tiles or less is walked (it was 4), so lunches, shopping and park trips are on foot. The harbor city at 2 by 2 peaks at 72 walkers instead of 20 and 72 cars instead of 91, and the busiest district holds about 21 walkers at lunch. Walkers are drawn about 1.3 times larger. The log rate is unchanged: trips are still route intents.
+
 ## [0.2.0] - 2026-10-24
 
 ### Changed

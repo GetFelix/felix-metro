@@ -291,3 +291,25 @@ fn the_development_area_does_not_shrink_the_population() {
         assert_eq!(used.len(), places.homes.len(), "every home is lived in");
     }
 }
+
+#[test]
+fn the_pavements_are_busy_at_the_rush_and_at_lunch() {
+    let city = City::generate("harbor", 2).unwrap();
+    let places = Places::new(&city);
+    let trips: Vec<Trip> = all(&places)
+        .flat_map(|i| {
+            let r = Resident::new(&city, &places, i).unwrap();
+            r.day_trips(&city, 0, &Congestion::FREE, 0).unwrap()
+        })
+        .collect();
+    let walkers = |tick: u32| {
+        trips
+            .iter()
+            .filter(|t| t.mode == Mode::Walk && (t.depart..=t.arrive()).contains(&tick))
+            .count()
+    };
+    let most = |from: u32, to: u32| (from..to).map(walkers).max().unwrap();
+    let h = crate::schedule::TICKS_PER_HOUR;
+    assert!(most(7 * h, 9 * h) >= 40);
+    assert!(most(12 * h, 13 * h) >= 25);
+}
