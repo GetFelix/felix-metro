@@ -240,9 +240,11 @@ const backToLive = async (from, bound, { play = true, within = Infinity, draw = 
     if (now.live) break;
     if (Date.now() - lastLog >= 1000) {
       const p = now.playback;
+      const m = p.marks;
+      const at = (v) => (v === null || v === undefined ? 'never' : `${(v - m.began).toFixed(0)} ms`);
       const fps = ((now.frames - lastFrames) * 1000) / (Date.now() - lastLog);
       console.log(
-        `  catch-up ${(elapsed / 1000).toFixed(1)} s: gap ${(p.tail - p.head).toFixed(0)}, head ${p.head?.toFixed(0)}, tail ${p.tail}, queued ${JSON.stringify(p.queued)}, ${fps.toFixed(1)} fps`,
+        `  catch-up ${(elapsed / 1000).toFixed(1)} s: gap ${(p.tail - p.head).toFixed(0)}, head ${p.head?.toFixed(0)}, tail ${p.tail}, queued ${JSON.stringify(p.queued)}, ${fps.toFixed(1)} fps, session ${m ? at(m.attached) : '-'}, first record ${m ? at(m.applied) : '-'} after the race began`,
       );
       lastLog = Date.now();
       lastFrames = now.frames;

@@ -362,7 +362,7 @@ well within the gateway's eight a person).
 
 Space and the pill's Play button play and pause from the past on screen. **Back to live** does not cut: the city's time
 races forward with the cars moving, at the city's own pace plus a steady gain that closes the distance in about three
-seconds (at most 960 ticks a second in all), paced by the wall clock so a slow frame covers the ticks it owes, and when the playhead is within a tick of the live state's newest tick the
+seconds (at most 960 ticks a second in all), paced by the wall clock. A timer moves the playhead and applies its records every 40 ms, off the render loop, so a catch-up takes about three seconds even where frames come once a second or slower; frames only draw the state (and also step the playhead by wall-clock time, so nothing is applied twice). When the playhead is within a tick of the live state's newest tick the
 page hands over. Within a second of the tip it hands over at once. If the session is not open at the click, the race
 starts anyway: the tick drawn, the sun and the bar's handle run on at the same pace, and the records follow when the
 session opens; if it has not opened in 1.5 s the page shows the live city, with no note. Space and Play do nothing during the race, when no

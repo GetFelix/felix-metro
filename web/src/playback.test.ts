@@ -346,6 +346,28 @@ describe('Playback', () => {
   });
 });
 
+describe('Playback timer', () => {
+  it('moves the head on with no frame drawn', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'setTimeout', 'clearTimeout', 'performance'] });
+    try {
+      const log = new FakeLog(1000);
+      const { p, state } = start(log, 100);
+      p.catchUp();
+      p.run(() => {});
+      await vi.advanceTimersByTimeAsync(10);
+      const before = p.head;
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(p.head).toBeGreaterThan(before + 50);
+      expect(state.latest).toBeGreaterThan(before + 50);
+      await vi.advanceTimersByTimeAsync(4000);
+      expect(p.atTip).toBe(true);
+      p.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe('handOver', () => {
   it('gives the live clock the playhead, so the next frame moves on from it without a jump', async () => {
     const log = new FakeLog(300);

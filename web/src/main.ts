@@ -99,6 +99,8 @@ declare global {
         joined: number | null;
         /** Whether the playback has its session; the tick drawn, which can run ahead of the head before it. */
         attached: boolean;
+        /** performance.now() when the playback began, got its session and first applied a record. */
+        marks: { began: number; attached: number | null; applied: number | null } | null;
         shown: number | null;
         /** The live tip when it joined. */
         tipAtJoin: number | null;
@@ -299,6 +301,8 @@ async function main() {
   let timelineFrame: ((tick: number) => void) | null = null;
   /** Moves a playback on and says which tick it draws, or null when nothing is playing. */
   let playFrame: ((dt: number) => number | null) | null = null;
+  /** Called after each timer step of a playback, to notice its failure or its arrival at the tip. */
+  let playbackTimer: (() => void) | null = null;
   /** Told the frame after the city changed has been drawn. */
   const frameWaiters: (() => void)[] = [];
   const pill = document.getElementById('pill')!;
@@ -562,6 +566,7 @@ async function main() {
         },
       });
       playback = p;
+      p.run(() => playbackTimer?.());
       return p;
     };
     /** Play from the past on screen; null when it cannot be, or when the page moved on while the session opened. */
@@ -816,7 +821,8 @@ async function main() {
         if (text !== agoShown) pastAgo.textContent = agoShown = text;
       }
     };
-    playFrame = (dt) => {
+    /** Notice a failure or the tip after the playback moved on; the tick to draw, or null when nothing is playing. */
+    const checkPlayback = (): number | null => {
       const p = playback;
       if (!p) return null;
       if (p.failure || state !== p.state) {
@@ -825,7 +831,6 @@ async function main() {
         snapLive();
         return null;
       }
-      p.advance(dt);
       if (p.atTip) {
         // The live clock carries on from the tick drawn, so the cars under way do not jump.
         handOver(p, clockTicks);
@@ -837,6 +842,12 @@ async function main() {
       pastTick = Math.floor(p.shown);
       return p.shown;
     };
+    // Frames only draw the playback's state; the timer in startPlayback moves it on, so a slow renderer does not slow it.
+    playFrame = (dt) => {
+      if (dt > 0) playback?.step();
+      return checkPlayback();
+    };
+    playbackTimer = checkPlayback;
     // A page opened in the past already has its history open, and no live tip to show the bar with.
     if (!hasLive) {
       void (async () => {
@@ -907,6 +918,7 @@ async function main() {
         joined: replay.joined,
         tipAtJoin: replay.tip,
         attached: playback?.attached ?? false,
+        marks: playback?.marks ?? null,
         shown: playback?.shown ?? null,
         tail: liveState?.latest ?? null,
         queued: playback?.queued ?? [],

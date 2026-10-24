@@ -35,6 +35,9 @@ const MIN_CLOSING_TPS = 8;
 /** The most wall-clock seconds one frame moves an ordinary playback, so a stalled tab does not leap. A catch-up is not capped. */
 const MAX_PLAY_DT = 1;
 
+/** How often the playback moves on by itself, so the head does not wait for a frame to be drawn. */
+const PUMP_MS = 40;
+
 const slot = (district: number) => `p${String(district).padStart(2, '0')}`;
 
 interface Queued {
@@ -181,6 +184,14 @@ export class Playback {
   /** A catch-up's playhead, which runs ahead of `head` while records are still arriving. */
   private pace: number;
   private pumps: Pump[] = [];
+  private timer: ReturnType<typeof setInterval> | null = null;
+  private lastStep = performance.now();
+  /** performance.now() when the playback began, when it got its session, and when it first applied a record. */
+  readonly marks: { began: number; attached: number | null; applied: number | null } = {
+    began: performance.now(),
+    attached: null,
+    applied: null,
+  };
 
   /** With no `source` the playback has no records yet: a catch-up still advances the tick drawn until {@link attach}. */
   constructor(
@@ -207,7 +218,29 @@ export class Playback {
     this.pumps = this.from.districts.map(
       (d, i) => new Pump(source, i, { offset: d.offset, tick: this.from.tick }, this.options.tail, fail),
     );
+    this.marks.attached = performance.now();
     for (const p of this.pumps) p.refill();
+  }
+
+  /**
+   * Move on by the wall-clock time since the last step. A frame and the timer both call it, so the head advances at the
+   * same pace whichever runs, and a slow renderer does not slow the catch-up.
+   */
+  step(): void {
+    const now = performance.now();
+    const dt = Math.max(0, (now - this.lastStep) / 1000);
+    this.lastStep = now;
+    this.advance(dt);
+  }
+
+  /** Step every {@link PUMP_MS} until closed, calling `after` each time (to notice the tip, for one). */
+  run(after: () => void): void {
+    if (this.timer) return;
+    this.lastStep = performance.now();
+    this.timer = setInterval(() => {
+      this.step();
+      after();
+    }, PUMP_MS);
   }
 
   /** Race to the live tip in about {@link CATCH_UP_SECONDS}, however far back the playhead is. */
@@ -271,6 +304,7 @@ export class Playback {
           this.options.onFail?.(this.failure);
           return;
         }
+        this.marks.applied ??= performance.now();
         if (this.state.apply(record) === 'gap') {
           this.failure ??= new Error(`district ${record.district} skipped to tick ${record.tick}`);
           this.options.onFail?.(this.failure);
@@ -283,6 +317,8 @@ export class Playback {
 
   /** Stop listening. The state keeps what was applied. */
   close(): void {
+    if (this.timer) clearInterval(this.timer);
+    this.timer = null;
     for (const p of this.pumps) p.close();
     this.options.release?.();
   }
