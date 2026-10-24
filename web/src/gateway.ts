@@ -197,12 +197,14 @@ export class Gateway {
 
   /**
    * Read the records of `shard` from `from` up to, not including, `end`: one page, as the broker's cap allows. Read
-   * the next page from its `nextOffset`. At most four reads are on the wire at once; the rest wait their turn.
+   * the next page from its `nextOffset`. At most four reads are on the wire at once; the rest wait their turn, and a
+   * read still waiting when `signal` aborts leaves the queue and fails with the signal's reason.
    */
-  async read(stream: string, shard: number, from: number, end?: number): Promise<Page> {
+  async read(stream: string, shard: number, from: number, end?: number, signal?: AbortSignal): Promise<Page> {
     for (let attempt = 0; ; attempt++) {
+      signal?.throwIfAborted();
       try {
-        return await this.limited(async () => {
+        return await this.limited(signal, async () => {
           const json = await this.request({ type: 'read', stream, shard, from, ...(end === undefined ? {} : { end }) });
           const records = (json.records as { offset: number; payload: string }[]).map((r) => ({
             offset: r.offset,
@@ -262,12 +264,25 @@ export class Gateway {
     });
   }
 
-  private async limited<T>(run: () => Promise<T>): Promise<T> {
+  private async limited<T>(signal: AbortSignal | undefined, run: () => Promise<T>): Promise<T> {
     if (this.ended) throw this.ended;
     // A finishing read passes its slot straight to the next waiter, so `reading` never dips and no newcomer can slip
     // in between.
     if (this.reading >= READS_IN_FLIGHT) {
-      await new Promise<void>((go, fail) => this.queuedReads.push({ go, fail }));
+      await new Promise<void>((go, fail) => {
+        const entry = { go, fail };
+        this.queuedReads.push(entry);
+        signal?.addEventListener(
+          'abort',
+          () => {
+            const at = this.queuedReads.indexOf(entry);
+            if (at < 0) return;
+            this.queuedReads.splice(at, 1);
+            fail(signal.reason);
+          },
+          { once: true },
+        );
+      });
     } else {
       this.reading++;
     }

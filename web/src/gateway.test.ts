@@ -151,6 +151,25 @@ describe('Gateway', () => {
     expect(onWire()).toHaveLength(5);
   });
 
+  it('takes an aborted read out of the queue, so it is never sent and the next in line is', async () => {
+    const { gateway, socket } = await joined();
+    const stop = new AbortController();
+    const first = Array.from({ length: 4 }, (_, i) => gateway.read('events', i, 0));
+    const stale = gateway.read('events', 4, 0, undefined, stop.signal);
+    const next = gateway.read('events', 5, 0);
+    await Promise.resolve();
+    const onWire = () => socket.sent.filter((m) => m.type === 'read');
+    expect(onWire()).toHaveLength(4);
+    stop.abort();
+    await expect(stale).rejects.toMatchObject({ name: 'AbortError' });
+    socket.say({ type: 'records', id: onWire()[0]!.id, records: [], next_offset: 0 });
+    await first[0];
+    await Promise.resolve();
+    // Shard 5 took the freed place; shard 4 was never sent.
+    expect(onWire().map((m) => m.shard)).toEqual([0, 1, 2, 3, 5]);
+    void next;
+  });
+
   it('turns a trimmed read into an error that names the oldest offset left', async () => {
     const { gateway, socket } = await joined();
     const page = gateway.read('events', 0, 1);

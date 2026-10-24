@@ -55,6 +55,15 @@ export async function keyframeOffset(
   district: number,
   districts: number,
 ): Promise<number> {
+  return (await keyframePointer(gateway, district, districts)).offset;
+}
+
+/** {@link keyframeOffset} with the log length the state read was taken at, or null when no pointer answered. */
+export async function keyframePointer(
+  gateway: Pick<Gateway, 'stateGet' | 'read'>,
+  district: number,
+  districts: number,
+): Promise<{ offset: number; asOf: number | null }> {
   const keys = new Set<string>();
   for (const routing of ROUTINGS) {
     try {
@@ -64,9 +73,9 @@ export async function keyframeOffset(
     }
   }
   for (const key of keys) {
-    let payload;
+    let payload, asOf;
     try {
-      ({ payload } = await gateway.stateGet(STREAM, 'keyframe', key));
+      ({ payload, asOf } = await gateway.stateGet(STREAM, 'keyframe', key));
     } catch (err) {
       // Asked under the wrong routing the gateway can refuse; the other routing may answer.
       if (err instanceof GatewayError && err.code !== 'closed') continue;
@@ -79,13 +88,13 @@ export async function keyframeOffset(
       page = await gateway.read(STREAM, district, offset, offset + 1);
     } catch (err) {
       // Retention has taken the keyframe; the caller starts from what is left.
-      if (err instanceof GatewayError && err.code === 'trimmed') return 0;
+      if (err instanceof GatewayError && err.code === 'trimmed') return { offset: 0, asOf };
       throw err;
     }
     const record = page.records[0] && parse(page.records[0].payload);
-    if (record && record.district === district && record.keyframe) return offset;
+    if (record && record.district === district && record.keyframe) return { offset, asOf };
   }
-  return 0;
+  return { offset: 0, asOf: null };
 }
 
 /** How many times a district tries to catch up, the last one taking the log as it is, before the session is dropped. */
