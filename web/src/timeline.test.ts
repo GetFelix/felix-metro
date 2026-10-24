@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { TICKS_PER_DAY, TICKS_PER_HOUR } from './clock';
 import {
   STEP_TICKS,
@@ -122,5 +122,75 @@ describe('picking up the handle while live', () => {
     // A press on the head, at the right end, maps to the live tick, so the first drag move is a no-op until it moves left.
     expect(tickAtPointer(span, 1)).toBe(span.live);
     expect(tickAtPointer(span, 0.9)).toBeLessThan(span.live);
+  });
+});
+
+describe('pressing the live head', () => {
+  type Fake = {
+    children: Fake[];
+    listeners: Record<string, ((e: unknown) => void)[]>;
+    [k: string]: unknown;
+  };
+  const fake = (): Fake => {
+    const f: Fake = {
+      children: [],
+      listeners: {},
+      className: '',
+      style: { setProperty() {}, cssText: '' },
+      dataset: {},
+      classList: { toggle() {} },
+      append(...c: Fake[]) {
+        f.children.push(...c);
+      },
+      replaceChildren() {
+        f.children = [];
+      },
+      setAttribute() {},
+      setPointerCapture: () => {},
+      focus() {},
+      getBoundingClientRect: () => ({ left: 0, width: 1000 }),
+      addEventListener(t: string, fn: (e: unknown) => void) {
+        (f.listeners[t] ??= []).push(fn);
+      },
+    };
+    return f;
+  };
+  const setup = async (live: boolean) => {
+    vi.stubGlobal('document', { createElement: fake });
+    const { createTimeline } = await import('./timeline');
+    const root = fake();
+    const moves: [number, string][] = [];
+    let lives = 0;
+    const bar = createTimeline(root as unknown as HTMLElement, {
+      onMove: (t, p) => moves.push([t, p]),
+      onStep() {},
+      onLive: () => lives++,
+      onEngage() {},
+    });
+    const tip = root.children.find((c) => c.className === 'strip')!.children.find((c) => c.className === 'tip')!;
+    const view = { ready: true, oldest: 0, newest: 2 * TICKS_PER_DAY, at: live ? 2 * TICKS_PER_DAY : 5000, live };
+    bar.update(view);
+    const fire = (type: string, extra: object) =>
+      root.listeners[type]!.forEach((fn) => fn({ button: 0, pointerId: 1, preventDefault() {}, ...extra }));
+    return { bar, tip, moves, fire, lives: () => lives };
+  };
+
+  it('goes live from the past without a drag', async () => {
+    const t = await setup(false);
+    t.fire('pointerdown', { target: t.tip, clientX: 1000 });
+    t.fire('pointerup', { target: t.tip, clientX: 990 });
+    expect(t.lives()).toBe(1);
+    expect(t.moves).toEqual([]);
+    expect(t.bar.dragging).toBe(false);
+  });
+
+  it('picks the handle up at once while live', async () => {
+    const t = await setup(true);
+    t.fire('pointerdown', { target: t.tip, clientX: 1000 });
+    expect(t.bar.dragging).toBe(true);
+    t.fire('pointermove', { target: t.tip, clientX: 500 });
+    expect(t.moves.at(-1)).toEqual([TICKS_PER_DAY, 'drag']);
+    t.fire('pointerup', { target: t.tip, clientX: 500 });
+    expect(t.lives()).toBe(0);
   });
 });

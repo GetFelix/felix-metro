@@ -172,6 +172,7 @@ export function createTimeline(root: HTMLElement, handlers: TimelineHandlers) {
 
   const hold = createSpanHold();
   let ready = false;
+  let isLive = false;
   let built = '';
   let dragging = false;
   let hover = false;
@@ -207,6 +208,12 @@ export function createTimeline(root: HTMLElement, handlers: TimelineHandlers) {
   };
   root.addEventListener('pointerdown', (e) => {
     if (!startsDrag(e.button)) return;
+    // Off live, the head is the way back: a drag from it would release a few ticks short of live and seek there.
+    if (e.target === tip && !isLive) {
+      e.preventDefault();
+      handlers.onLive();
+      return;
+    }
     root.setPointerCapture(e.pointerId);
     e.preventDefault();
     if (!ready) {
@@ -238,8 +245,9 @@ export function createTimeline(root: HTMLElement, handlers: TimelineHandlers) {
   root.addEventListener('pointerleave', () => ((hover = false), engage()));
   root.addEventListener('focusin', () => ((focused = true), engage()));
   root.addEventListener('focusout', () => ((focused = false), engage()));
-  tip.addEventListener('click', () => handlers.onLive());
   root.addEventListener('keydown', (e) => {
+    // The keys act on the live span, a drag on the one it began with; they do not mix.
+    if (dragging) return;
     const big = e.shiftKey;
     if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') handlers.onStep(-1, big);
     else if (e.key === 'ArrowRight' || e.key === 'ArrowUp') handlers.onStep(1, big);
@@ -273,6 +281,7 @@ export function createTimeline(root: HTMLElement, handlers: TimelineHandlers) {
     /** Draw the bar for `view`. Cheap to call every frame: only what changed is written. */
     update(view: TimelineView) {
       ready = view.ready;
+      isLive = view.live;
       if (ready && pending) {
         const e = pending;
         pending = null;
