@@ -161,6 +161,41 @@ commands the sim must refuse and checks each is recorded with its reason and cha
 nothing. It then waits for the district's next keyframe (up to a minute at the default speed)
 and checks it lists the built lot, and demolishes what it built. A `viewer` cannot publish.
 
+### Growing a neighbourhood
+
+`dev/builder-bot.mjs` builds like a mayor does, for demos and the clip. It signs in as `mayor`,
+sends a probe command and waits for its result (commands sent before the sim opens its
+subscription are lost), then raises a cluster of buildings in one district, one every
+`--interval` seconds, on the lots nearest a centre first. Homes go on suburban land, shops on
+corners and arterials, offices toward the centre of town and factories on industrial land.
+
+```sh
+node dev/builder-bot.mjs pinecrest --interval 2 --count 12 --json bot.ndjson
+```
+
+Most lots are ones residents go to, and the sim refuses to change those, so the bot asks the core
+crate's `city_json` example which lots those are (it needs `cargo`) and leaves them alone. A lot
+that still holds a building is demolished and then built on. Every command's result is read: a
+refusal (in use, occupied, busy, unsupported) moves on to the next lot, and no lot is sent twice.
+
+| Flag | Default | |
+|---|---|---|
+| `--interval <s>` | 2 | wall seconds after each build that took |
+| `--count <n>` | 12 | buildings to raise before stopping |
+| `--district <n>` | the district with the most lots it may change | where to grow |
+| `--centre <x,z>` | the densest spot of such lots | tile to grow around |
+| `--demolish-after <s>` | off | once done, wait this long and take buildings down again, newest first |
+| `--demolish <n>` | 3 | how many to take down |
+| `--json <path or ->` | off | a line of JSON for the start, each command with its tick, and the end |
+| `--side <n>` | 4, or `DISTRICTS_PER_SIDE` | districts a side of the city has |
+| `--city-file <path>` | run the example | the example's output, saved |
+| `--result-timeout <s>` | 30 | how long a command may go unanswered before it counts as lost |
+
+SIGINT or SIGTERM stops after the command in flight and writes the end line, which carries the mean
+tile of what was built for aiming a camera. It exits 1 if a command got no result or nothing was
+built. It places no roads; the sim refuses them. CI runs it for about 20 seconds and checks the
+log with `dev/check-builder-bot.mjs`.
+
 The sim runs at 4 ticks a second. Its speed endpoint accepts only loopback, so it is
 not published; `dev/speed.sh` runs `curl` inside the sim's container:
 

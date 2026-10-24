@@ -17,6 +17,7 @@
 - A resume queued behind a pause is no longer stranded, an operator setting that lands during a commanded change is no longer overwritten, a flood past what a paused city holds logs once per pause, and a closed command stream is logged as an error.
 - The sim keeps retrying to follow a city's command stream at startup instead of running without builders after one refusal.
 - `place road`, `zone` and `fork` are refused as unsupported for now.
+- `dev/builder-bot.mjs` grows a neighbourhood through the gateway for demos and the clip, reading every result and never retrying a refused lot. The dev scripts share `dev/lib/gateway.mjs`, and the core crate has a `city_json` example that prints a city with the lots residents go to.
 - The page's fold follows `road` events and a keyframe's road list.
 - `dev/check-commands.mjs` publishes commands as a mayor from a plain client; the
   dev-stack CI job runs it. It reads keyframe records too, fails when a result never
