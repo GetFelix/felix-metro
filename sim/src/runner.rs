@@ -162,6 +162,8 @@ pub async fn run_city<L: Log>(name: &str, city: City, settings: Settings, log: L
             // The first tick back is due at once.
             timer = new_timer(period, true);
             changed = Some(speed);
+            // Don't average the first report over the pause.
+            report = Report::new(Instant::now());
         } else if let Some(control) = control.as_mut() {
             let wanted = check_speed(*control.borrow_and_update())?;
             if wanted != speed {

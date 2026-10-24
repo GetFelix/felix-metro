@@ -42,6 +42,8 @@ records are written until a resume, which continues at the next tick with no bur
 city started with `SIM_TICKS_PER_SECOND=0` waits for its first resume. The endpoint is
 for operators; the builders' `speed` command will replace it.
 
+The endpoint binds loopback only, so in a container it is reached with `exec` or a port-forward from inside the container's network namespace, not through published ports.
+
 ## Entity keys
 
 District `i` lives on shard `i` of `metro.events.<city>`. Felix picks a shard from

@@ -487,6 +487,104 @@ async fn pause_commits_no_ticks_and_resume_continues_without_a_burst() {
     assert!(took.abs_diff(61_100) <= 100, "took {took} ms");
 }
 
+/// A tracing writer that keeps what it is given.
+#[derive(Clone, Default)]
+struct Captured(Arc<Mutex<Vec<u8>>>);
+
+impl std::io::Write for Captured {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(buf);
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_first_report_after_a_pause_does_not_average_over_it() {
+    // A process-wide subscriber: a per-test one loses to callsites that other
+    // parallel tests cached as disabled. Lines are picked out by city name.
+    static LOGS: std::sync::OnceLock<Captured> = std::sync::OnceLock::new();
+    let logs = LOGS.get_or_init(|| {
+        let sink = Captured::default();
+        let writer = sink.clone();
+        let _ = tracing::subscriber::set_global_default(
+            tracing_subscriber::fmt()
+                .with_ansi(false)
+                .with_writer(move || writer.clone())
+                .finish(),
+        );
+        sink
+    });
+    let (tx, rx) = watch::channel(8u8);
+    let log = Memory::steered(&[(9, 0)], tx.clone());
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_secs(60)).await;
+        tx.send_replace(16);
+    });
+    let mut s = settings(150);
+    s.ticks_per_second = 8;
+    s.speed = Some(rx);
+    run_city("report-after-pause", city(), s, log)
+        .await
+        .unwrap();
+    let text = String::from_utf8(logs.0.lock().unwrap().clone()).unwrap();
+    let rates: Vec<f64> = text
+        .lines()
+        .filter(|l| l.contains("ticks committed") && l.contains("city=\"report-after-pause\""))
+        .filter_map(|l| {
+            l.split(" hz=")
+                .nth(1)?
+                .split_whitespace()
+                .next()?
+                .parse()
+                .ok()
+        })
+        .collect();
+    assert!(!rates.is_empty(), "no report: {text}");
+    assert!(rates.iter().all(|hz| *hz >= 8.0), "{rates:?}");
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_flip_within_one_tick_nets_to_no_event() {
+    let (tx, rx) = watch::channel(4u8);
+    // 4 -> 0 -> 4 before the runner looks again.
+    let log = Memory::steered(&[(9, 0), (9, 4)], tx);
+    let mut s = settings(20);
+    s.speed = Some(rx);
+    run_city("harbor", city(), s, log.clone()).await.unwrap();
+    assert_whole(&log, 20);
+    for district in 0..4 {
+        for (tick, speed, event) in speeds(&log, district) {
+            assert_eq!((speed, event), (4, None), "district {district} tick {tick}");
+        }
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_resume_arriving_during_the_pause_ticks_commit_resumes_cleanly() {
+    let (tx, rx) = watch::channel(4u8);
+    // 0 lands on tick 10; the resume arrives while tick 10 is committing.
+    let log = Memory::steered(&[(9, 0), (10, 8)], tx);
+    let mut s = settings(20);
+    s.speed = Some(rx);
+    run_city("harbor", city(), s, log.clone()).await.unwrap();
+    assert_whole(&log, 20);
+    for district in 0..4 {
+        let events: Vec<_> = speeds(&log, district)
+            .into_iter()
+            .filter(|(_, _, e)| e.is_some())
+            .collect();
+        // The pause tick carries its event, and the resume tick another.
+        assert_eq!(
+            events,
+            [(10, 0, Some(0)), (11, 8, Some(8))],
+            "district {district}"
+        );
+    }
+}
+
 #[tokio::test(start_paused = true)]
 async fn a_city_can_start_paused_and_then_run() {
     let (tx, rx) = watch::channel(0u8);
@@ -526,6 +624,22 @@ async fn the_log_and_the_city_are_the_same_at_any_speed_and_a_seek_finds_its_tic
     resume.await.unwrap();
 
     for district in 0..4u16 {
+        // Pause lands on tick 200 and the resume on 201; the other changes
+        // sit on the tick after their trigger.
+        let changes: Vec<_> = speeds(&steered, district)
+            .into_iter()
+            .filter(|(_, _, e)| e.is_some())
+            .collect();
+        assert_eq!(
+            changes,
+            [
+                (100, 16, Some(16)),
+                (200, 0, Some(0)),
+                (201, 8, Some(8)),
+                (400, 4, Some(4))
+            ],
+            "district {district}"
+        );
         let (a, b) = (slow.records(district), steered.records(district));
         assert_eq!(a.len(), b.len());
         for (x, y) in a.iter().zip(&b) {

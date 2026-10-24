@@ -4,6 +4,7 @@
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::time::Duration;
 
 use anyhow::{Result, bail};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -44,54 +45,108 @@ pub async fn serve(
     }
 }
 
+/// How long a client gets to send its request.
+const READ_TIMEOUT: Duration = Duration::from_secs(5);
+/// A speed request is a few dozen bytes.
+const MAX_REQUEST: usize = 2048;
+
+/// A request turned away before it reached a city.
+struct Reject(&'static str, &'static str);
+
 async fn handle(
     mut stream: TcpStream,
     peer: SocketAddr,
     cities: &HashMap<String, watch::Sender<u8>>,
 ) -> Result<()> {
-    // A speed request is a few dozen bytes.
-    let mut buf = vec![0u8; 2048];
-    let mut len = 0;
-    let head_end = loop {
-        if let Some(i) = buf[..len].windows(4).position(|w| w == b"\r\n\r\n") {
-            break i + 4;
-        }
-        if len == buf.len() {
-            bail!("request too large");
-        }
-        let n = stream.read(&mut buf[len..]).await?;
-        if n == 0 {
-            bail!("closed before the request ended");
-        }
-        len += n;
+    let port = stream.local_addr()?.port();
+    let read = tokio::time::timeout(READ_TIMEOUT, read_request(&mut stream)).await;
+    let (status, text) = match read {
+        Err(_) => (
+            "408 Request Timeout",
+            "request not received in time\n".into(),
+        ),
+        Ok(Err(Reject(status, text))) => (status, format!("{text}\n")),
+        Ok(Ok((head, body))) => match check_origin(&head, port) {
+            Err(Reject(status, text)) => (status, format!("{text}\n")),
+            Ok(()) => {
+                let mut first = head.lines().next().unwrap_or("").split_whitespace();
+                let (method, path) = (first.next().unwrap_or(""), first.next().unwrap_or(""));
+                respond(method, path, &body, cities, peer)
+            }
+        },
     };
-    let head = String::from_utf8_lossy(&buf[..head_end]).into_owned();
-    let content_length = head
-        .lines()
-        .filter_map(|l| l.split_once(':'))
-        .find(|(k, _)| k.eq_ignore_ascii_case("content-length"))
-        .and_then(|(_, v)| v.trim().parse::<usize>().ok())
-        .unwrap_or(0);
-    if head_end + content_length > buf.len() {
-        bail!("request too large");
-    }
-    while len < head_end + content_length {
-        let n = stream.read(&mut buf[len..]).await?;
-        if n == 0 {
-            bail!("closed before the body ended");
-        }
-        len += n;
-    }
-    let body = String::from_utf8_lossy(&buf[head_end..head_end + content_length]).into_owned();
-    let mut first = head.lines().next().unwrap_or("").split_whitespace();
-    let (method, path) = (first.next().unwrap_or(""), first.next().unwrap_or(""));
-    let (status, text) = respond(method, path, &body, cities, peer);
     let reply = format!(
         "HTTP/1.1 {status}\r\ncontent-type: text/plain\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{text}",
         text.len()
     );
     stream.write_all(reply.as_bytes()).await?;
     stream.shutdown().await?;
+    Ok(())
+}
+
+async fn read_request(stream: &mut TcpStream) -> Result<(String, String), Reject> {
+    let io_err = |_| Reject("400 Bad Request", "could not read the request");
+    let mut buf = vec![0u8; MAX_REQUEST];
+    let mut len = 0;
+    let head_end = loop {
+        if let Some(i) = buf[..len].windows(4).position(|w| w == b"\r\n\r\n") {
+            break i + 4;
+        }
+        if len == buf.len() {
+            return Err(Reject("413 Payload Too Large", "request too large"));
+        }
+        let n = stream.read(&mut buf[len..]).await.map_err(io_err)?;
+        if n == 0 {
+            return Err(Reject("400 Bad Request", "closed before the request ended"));
+        }
+        len += n;
+    };
+    let head = String::from_utf8_lossy(&buf[..head_end]).into_owned();
+    let content_length = header(&head, "content-length")
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(0);
+    // Compared before adding: a huge Content-Length must not overflow.
+    if content_length > MAX_REQUEST - head_end {
+        return Err(Reject("413 Payload Too Large", "request too large"));
+    }
+    while len < head_end + content_length {
+        let n = stream.read(&mut buf[len..]).await.map_err(io_err)?;
+        if n == 0 {
+            return Err(Reject("400 Bad Request", "closed before the body ended"));
+        }
+        len += n;
+    }
+    let body = String::from_utf8_lossy(&buf[head_end..head_end + content_length]).into_owned();
+    Ok((head, body))
+}
+
+fn header<'a>(head: &'a str, name: &str) -> Option<&'a str> {
+    head.lines()
+        .skip(1)
+        .filter_map(|l| l.split_once(':'))
+        .find(|(k, _)| k.trim().eq_ignore_ascii_case(name))
+        .map(|(_, v)| v.trim())
+}
+
+/// A browser tab can reach loopback with a cross-origin request or a rebound
+/// DNS name. Browsers always send `Origin` on those and never on `curl`, and a
+/// rebound name shows up in `Host`.
+fn check_origin(head: &str, port: u16) -> Result<(), Reject> {
+    if header(head, "origin").is_some() {
+        return Err(Reject("403 Forbidden", "cross-origin requests are refused"));
+    }
+    let host_ok = header(head, "host").is_some_and(|h| {
+        let Some((name, p)) = h.rsplit_once(':') else {
+            return false;
+        };
+        p == port.to_string() && matches!(name, "127.0.0.1" | "localhost" | "[::1]")
+    });
+    if !host_ok {
+        return Err(Reject(
+            "403 Forbidden",
+            "the host must be loopback with the bound port",
+        ));
+    }
     Ok(())
 }
 
