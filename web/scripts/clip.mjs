@@ -298,16 +298,30 @@ if (canPlay) {
 
 // The last shot must be the live city: the "ago" label gone and Back to live hidden.
 const endsLive = await page.evaluate(
-  () => document.getElementById('past').classList.contains('hidden') && !document.getElementById('past-ago').offsetParent,
+  () =>
+    document.getElementById('past').classList.contains('hidden') && !document.getElementById('past-ago').offsetParent,
 );
 const endTick = Math.floor(lastInfo.tick);
-appendFileSync(shots, `end,${endTick},${lastInfo.clock},${lastInfo.cars},${lastInfo.walkers},${lastInfo.carsInView},${lastInfo.walkersInView}\n`);
+appendFileSync(
+  shots,
+  `end,${endTick},${lastInfo.clock},${lastInfo.cars},${lastInfo.walkers},${lastInfo.carsInView},${lastInfo.walkersInView}\n`,
+);
 log(`last frame: tick ${endTick}, ${endsLive ? 'live' : 'NOT live'}`);
 if (canPlay && !endsLive) errors.push('the clip does not end on the live city');
 if (errors.length) log(`page errors:\n${errors.join('\n')}`);
 writeFileSync(
   join(out, 'meta.json'),
-  JSON.stringify({ fps: FPS, frames: n, posterAt, width: W, height: H, played: canPlay, tier: TIER, endsLive, endTick }),
+  JSON.stringify({
+    fps: FPS,
+    frames: n,
+    posterAt,
+    width: W,
+    height: H,
+    played: canPlay,
+    tier: TIER,
+    endsLive,
+    endTick,
+  }),
 );
 log(`${n} frames in ${((Date.now() - started) / 60000).toFixed(1)} minutes`);
 await browser.close();
