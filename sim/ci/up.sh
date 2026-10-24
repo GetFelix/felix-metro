@@ -26,7 +26,7 @@ if ! "${compose[@]}" up --detach; then
 fi
 
 for _ in $(seq 1 90); do
-  if [[ -f state/seeded ]] && curl -fsS http://127.0.0.1:8080/ready >/dev/null 2>&1; then
+  if [[ -f state/seeded && -f state/finalized ]] && curl -fsS http://127.0.0.1:8080/ready >/dev/null 2>&1; then
     echo "Felix is ready: broker 127.0.0.1:5000, CA state/broker-cert.pem, token state/sim.token"
     exit 0
   fi

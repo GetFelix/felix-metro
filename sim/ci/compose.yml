@@ -71,5 +71,17 @@ services:
       seed:
         condition: service_completed_successfully
 
+  # Atomic commits stay off until the fleet finalizes them, which needs a
+  # serving broker.
+  finalize:
+    image: docker.io/library/node:24-alpine
+    command: ["node", "/app/finalize.mjs"]
+    volumes:
+      - ./finalize.mjs:/app/finalize.mjs:ro
+      - ./state:/state
+    depends_on:
+      broker:
+        condition: service_started
+
 volumes:
   felix-data:
