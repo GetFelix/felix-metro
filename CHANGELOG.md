@@ -9,6 +9,8 @@
   speed. The page opens on an evening commute with history to scrub through instead of an empty dark city.
   Warm-up ticks are stamped with wall times spread back from the start of the warm-up at the city's speed.
   A city with records, or one that starts paused, skips it; `SIM_WARMUP_HOURS=0` starts at midnight as before.
+- `dev/lib/gateway.mjs` skipped each keyframe resident one byte short, so a keyframe with events after it
+  misparsed once residents were mid-trip; the command check now reads them.
 - `GET /cities/<name>/warmup` on the sim's endpoint says whether a city is still warming up, and `dev/up.sh`
   (and the compose bundle's `up.sh`) waits for every city to go live.
 
