@@ -585,8 +585,8 @@ if (tier === 'high') {
 const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.4, 0.45, 1.0);
 composer.addPass(bloom);
 
-// Tilt-shift as a miniature photo: blur grows with distance from the focus
-// plane through the orbit target, so anything at that depth, however tall, stays sharp.
+// Distance haze: nothing is blurred up to the focus plane through the orbit target
+// plus a wide sharp band, then the blur grows toward the horizon.
 const depthRT = new THREE.WebGLRenderTarget(innerWidth, innerHeight);
 depthRT.depthTexture = new THREE.DepthTexture(innerWidth, innerHeight);
 const depthMat = new THREE.MeshBasicMaterial({ colorWrite: false });
@@ -595,7 +595,7 @@ const TiltShift = {
     tDiffuse: { value: null }, tDepth: { value: depthRT.depthTexture },
     resolution: { value: new THREE.Vector2(innerWidth, innerHeight) },
     cameraNear: { value: camera.near }, cameraFar: { value: camera.far },
-    focus: { value: 19 }, band: { value: 2.2 }, range: { value: 9.0 }, amount: { value: tier === 'low' ? 0 : 7.0 },
+    focus: { value: 19 }, band: { value: 25.0 }, range: { value: 40.0 }, amount: { value: tier === 'low' ? 0 : 3.5 },
   },
   vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
   fragmentShader: `
@@ -604,14 +604,14 @@ const TiltShift = {
     uniform float cameraNear, cameraFar, focus, band, range, amount; varying vec2 vUv;
     float dist(vec2 uv) { return -perspectiveDepthToViewZ(texture2D(tDepth, uv).x, cameraNear, cameraFar); }
     void main() {
-      float r = amount * smoothstep(0.0, range, abs(dist(vUv) - focus) - band);
+      float r = amount * smoothstep(0.0, range, dist(vUv) - focus - band);
       if (r < 0.01) { gl_FragColor = texture2D(tDiffuse, vUv); return; }
       vec4 sum = vec4(0.0); float w = 0.0;
       for (int i = 0; i < 12; i++) {
         float a = float(i) * 2.39996;
         vec2 o = vec2(cos(a), sin(a)) * sqrt(float(i) / 12.0) * r / resolution;
         // A sharp foreground pixel must not bleed into a blurred one behind it.
-        float rr = amount * smoothstep(0.0, range, abs(dist(vUv + o) - focus) - band);
+        float rr = amount * smoothstep(0.0, range, dist(vUv + o) - focus - band);
         float k = clamp(rr / max(r, 0.001), 0.25, 1.0);
         sum += texture2D(tDiffuse, vUv + o) * k; w += k;
       }
@@ -676,6 +676,7 @@ function frame() {
     scene.overrideMaterial = null;
     glows.forEach((g, i) => (g.visible = shown[i]));
     tilt.uniforms.focus.value = camera.position.distanceTo(controls.target);
+    tilt.uniforms.band.value = tilt.uniforms.focus.value + 6;
   }
   composer.render();
   requestAnimationFrame(frame);
