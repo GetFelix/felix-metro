@@ -89,6 +89,25 @@ describe('Traffic', () => {
     expect(made.cars).toBe(1);
   });
 
+  it('makes only so many new models in one update and the rest in the ones after it', () => {
+    const { f, made } = fleet();
+    const traffic = new Traffic(f, 0, 3);
+    const trips = Array.from({ length: 8 }, (_, i) => voyage(i, 2, 0, 100));
+    traffic.update(5, 0, trips);
+    expect(traffic.drawn).toBe(3);
+    expect(traffic.waiting).toBe(5);
+    traffic.update(5, 0, trips);
+    traffic.update(5, 0, trips);
+    expect(traffic.drawn).toBe(8);
+    expect(traffic.waiting).toBe(0);
+    expect(made.cars).toBe(8);
+    // Models the pool already holds cost nothing, so they are not held to the share.
+    traffic.update(200, 0, trips);
+    traffic.update(5, 0, trips);
+    expect(traffic.drawn).toBe(8);
+    expect(made.cars).toBe(8);
+  });
+
   it('keeps drawing a trip while the resident’s next one waits to leave', () => {
     const { f, made } = fleet();
     const traffic = new Traffic(f, 0);

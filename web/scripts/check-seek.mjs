@@ -17,9 +17,11 @@ const browser = await chromium.launch({
 });
 const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 const errors = [];
+const warnings = [];
 page.on('pageerror', (e) => errors.push(String(e)));
 page.on('console', (m) => {
   if (m.type() === 'error') errors.push(`console.error: ${m.text()}`);
+  if (m.type() === 'warning') warnings.push(m.text());
 });
 const fail = async (message) => {
   console.error(message);
@@ -73,7 +75,7 @@ for (const t of targets) {
   const pill = await page.locator('#pill').textContent();
   const shown = await page.evaluate(() => window.__live.tick);
   console.log(
-    `seek to tick ${t}: ${r.ms.toFixed(0)} ms from the call to the first frame, ${r.seekMs.toFixed(0)} ms of it finding and folding (${r.reads} reads in all, reads took ${r.stats.readMs.toFixed(0)} ms summed and ${r.stats.slowestMs.toFixed(0)} ms at the slowest, ${r.stats.pageSize} records a page), districts at [${r.ticks}], offsets [${r.offsets}], ${r.buildings} buildings, "${pill}"`,
+    `seek to tick ${t}: ${r.ms.toFixed(0)} ms from the call to the first frame, ${r.seekMs.toFixed(0)} ms of it finding and folding, every car placed by ${r.settledMs.toFixed(0)} ms (${r.reads} reads in all, reads took ${r.stats.readMs.toFixed(0)} ms summed and ${r.stats.slowestMs.toFixed(0)} ms at the slowest, ${r.stats.pageSize} records a page), districts at [${r.ticks}], offsets [${r.offsets}], ${r.buildings} buildings, "${pill}"`,
   );
   folded[t] = r;
   if (!r.exact || r.tick !== t) await fail(`asked for tick ${t}, got ${r.tick}`);
@@ -93,7 +95,7 @@ for (const t of targets) {
       polling: 100,
       timeout: MINUTE,
     })
-    .catch(() => fail(`the city never drew at tick ${t}`));
+    .catch(() => fail(`the city never drew at tick ${t}; the page said:\n${[...errors, ...warnings].join('\n')}`));
   await page.waitForTimeout(500);
   const { tick, seekMs, drawMs, reads, ticks } = await page.evaluate(() => window.__seek);
   const shown = await page.evaluate(() => window.__live.tick);

@@ -66,10 +66,19 @@ export class Traffic {
   private readonly to = [0, 0];
   private readonly pose: Pose = { x: 0, z: 0, heading: 0 };
 
-  /** `half` is how far tile 0 sits from the middle of the map, in tiles. */
+  /** Voyages left without a model by the last update, because it had made its share of new ones. */
+  waiting = 0;
+  private made = 0;
+
+  /**
+   * `half` is how far tile 0 sits from the middle of the map, in tiles. An update makes at most `newPerUpdate` models
+   * the pool cannot supply: a seek into a busy hour can ask for hundreds at once, and making them all would hold the
+   * frame for seconds. The rest are made by the updates after it.
+   */
   constructor(
     private readonly fleet: Fleet,
     private readonly half: number,
+    private readonly newPerUpdate = 16,
   ) {}
 
   /** Models in use right now. */
@@ -103,6 +112,8 @@ export class Traffic {
   update(tick: number, dt: number, voyages: Iterable<Voyage>): void {
     const whole = Math.floor(tick);
     const f = tick - whole;
+    this.waiting = 0;
+    this.made = 0;
     for (const v of voyages) {
       if (tick < v.depart || tick >= v.journey.arrive()) {
         this.release(v);
@@ -112,7 +123,14 @@ export class Traffic {
       v.journey.positionAt(whole + 1, this.b);
       let slot = this.slots.get(v.resident);
       if (slot && slot.voyage !== v) continue;
-      if (!slot) slot = this.take(v);
+      if (!slot) {
+        const taken = this.take(v);
+        if (!taken) {
+          this.waiting++;
+          continue;
+        }
+        slot = taken;
+      }
       const on = v.vehicle === 0;
       this.from[0] = this.a[0]! / 1000 - this.half;
       this.from[1] = this.a[1]! / 1000 - this.half;
@@ -126,10 +144,14 @@ export class Traffic {
     }
   }
 
-  private take(v: Voyage): Slot {
+  private take(v: Voyage): Slot | null {
     const kind = v.vehicle === 0 ? 'walk' : `car${v.vehicle}`;
-    const figure =
-      this.free.get(kind)?.pop() ?? (v.vehicle === 0 ? this.fleet.person(v.resident) : this.fleet.car(v.vehicle));
+    let figure = this.free.get(kind)?.pop();
+    if (!figure) {
+      if (this.made >= this.newPerUpdate) return null;
+      this.made++;
+      figure = v.vehicle === 0 ? this.fleet.person(v.resident) : this.fleet.car(v.vehicle);
+    }
     figure.o.visible = true;
     const slot = { figure, kind, heading: 0, voyage: v };
     this.slots.set(v.resident, slot);

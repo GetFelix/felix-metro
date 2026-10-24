@@ -64,6 +64,8 @@ declare global {
         ms: number;
         /** The part of `ms` spent finding and folding, before the city was drawn. */
         seekMs: number;
+        /** The ms until every car and walker of the moment has a model, which is after the first frame. */
+        settledMs: number;
         reads: number;
         stats: { readMs: number; slowestMs: number; pageSize: number };
       }>;
@@ -150,6 +152,8 @@ async function openHistory(name: string, districts: number, gateway: string | nu
   );
   const sessions = tried.flatMap((r) => (r.status === 'fulfilled' ? [r.value] : []));
   if (sessions.length === 0) throw new Error('the gateway would not open a session to read history');
+  // The gateway counts sessions until it sees them close, and a page opened next may be waiting on that.
+  addEventListener('pagehide', () => sessions.forEach((s) => s.close()));
   return new Seeker(sessions, districts * districts);
 }
 
@@ -398,6 +402,10 @@ async function main() {
           swap(next, result.tick);
           showPast(result);
           await new Promise<void>((done) => frameWaiters.push(done));
+          const drawnMs = performance.now() - started;
+          // Cars and walkers are made a share a frame, so the city fills in over the frames after the first.
+          let frames = 0;
+          while (traffic.waiting > 0 && frames++ < 600) await new Promise<void>((done) => frameWaiters.push(done));
           return {
             tick: result.tick,
             requested: result.requested,
@@ -406,8 +414,9 @@ async function main() {
             offsets: result.districts.map((d) => d.offset),
             buildings: next.built.size,
             sig: signature(next.built),
-            ms: performance.now() - started,
+            ms: drawnMs,
             seekMs,
+            settledMs: performance.now() - started,
             reads: opened.stats.reads,
             stats: { ...opened.stats },
           };
