@@ -13,6 +13,7 @@ import { CityState, type Building } from './city';
 import { TICKS_PER_HOUR, TickClock, cityTime } from './clock';
 import { connectLive } from './live';
 import { Gateway, GatewayError } from './gateway';
+import { Playback, handOver } from './playback';
 import { SeekError, Seeker, fold, tryFoldMore, type SeekResult } from './seek';
 import { Latest } from './scrub';
 import { agoText, createTimeline, stepTick, clampTick, type Range } from './timeline';
@@ -81,6 +82,17 @@ declare global {
       refresh(): Promise<void>;
       /** Hold each scrub seek this many ms before it is shown; 0 for none. */
       holdSeeks(ms: number): void;
+      /** Play or pause from the past on screen; false when there is nothing to play. */
+      play(): Promise<boolean>;
+      /** The playback behind the past on screen: where it started, every record it applied, and the tick it joined live at. */
+      playback(): {
+        playing: boolean;
+        catchingUp: boolean;
+        head: number | null;
+        started: number | null;
+        joined: number | null;
+        applied: [number, number, string][];
+      };
     };
     __quality?: {
       history: readonly Tier[];
@@ -146,15 +158,22 @@ async function follow(
   return live.refused ? null : { state, link };
 }
 
+/** Where the gateway is and how to sign in to it, or `null` when nothing here answers like one. */
+async function reach(gateway: string | null) {
+  const url = gateway ?? `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`;
+  const oidc = await fetchOidc(gateway ? url.replace(/^ws/, 'http').replace(/\/ws$/, '/') : location.origin + '/');
+  return oidc ? { url, oidc } : null;
+}
+
 /**
  * A history reader on connections of its own, so a seek never waits behind the live subscriptions. The sessions are
  * opened by the first seek and closed after a while idle, so a page not seeking holds none of the gateway's
  * per-person sessions. `null` when nothing here answers like a gateway.
  */
 async function openHistory(name: string, districts: number, gateway: string | null): Promise<Seeker | null> {
-  const url = gateway ?? `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`;
-  const oidc = await fetchOidc(gateway ? url.replace(/^ws/, 'http').replace(/\/ws$/, '/') : location.origin + '/');
-  if (!oidc) return null;
+  const reached = await reach(gateway);
+  if (!reached) return null;
+  const { url, oidc } = reached;
   const seeker = new Seeker(async () => {
     const token = await signIn(oidc);
     // The ones the gateway refuses are left out: history reads on fewer, and the live view's own session is never
@@ -243,6 +262,9 @@ async function main() {
   /** The tick the city is held at when it was opened in the past, with no live connection. */
   let pastTick: number | null = null;
   let seekDone = 0;
+  let seekInfo: NonNullable<Window['__seek']> | null = null;
+  /** The test hooks on `window` are for the CI checks and the console: they are installed under ?trace and in dev builds. */
+  const hooks = trace || import.meta.env.DEV;
   /** The history reader, made by the first seek and kept for the ones after it. */
   let history: Promise<Seeker | null> | null = null;
   const dropHistory = () => {
@@ -261,6 +283,8 @@ async function main() {
   let hasLive = false;
   /** Draws the bar and the past pill from the tick on screen; set once the page can scrub. */
   let timelineFrame: ((tick: number) => void) | null = null;
+  /** Moves a playback on and says which tick it draws, or null when nothing is playing. */
+  let playFrame: ((dt: number) => number | null) | null = null;
   /** Told the frame after the city changed has been drawn. */
   const frameWaiters: (() => void)[] = [];
   const pill = document.getElementById('pill')!;
@@ -292,13 +316,14 @@ async function main() {
       state = past.state;
       pastTick = past.result.tick;
       seekDone = performance.now();
-      window.__seek = {
+      seekInfo = {
         tick: past.result.tick,
         seekMs: past.seekMs,
         drawMs: null,
         reads: (await seeker())!.stats.reads,
         ticks: [...past.state.ticks],
       };
+      if (hooks) window.__seek = seekInfo;
       shownResult = past.result;
       if (!past.result.exact) note('That exact moment is missing; showing the closest one before it.');
     } else if (wantLive) {
@@ -373,8 +398,9 @@ async function main() {
   let last = performance.now();
   let shownHour = NaN;
   const day = document.getElementById('day')!;
+  let liveInfo: NonNullable<Window['__live']> | null = null;
   if (state && traffic) {
-    window.__live = {
+    liveInfo = {
       tick: NaN,
       speed: state.speed,
       voyages: 0,
@@ -388,6 +414,7 @@ async function main() {
         return true;
       },
     };
+    if (hooks) window.__live = liveInfo;
   }
   if (state && traffic && city) {
     const metro = new Metro(seed, districts);
@@ -404,6 +431,78 @@ async function main() {
       next.onVoyageEnd = (v) => traffic.release(v);
       state = next;
       pastTick = tick;
+    };
+
+    /** The past state on screen being played forward, or null. */
+    let playback: Playback | null = null;
+    /** Bumped when playback ends or the page leaves the past, so a start still opening its session can tell. */
+    let playMark = 0;
+    let opening = false;
+    const replay: { started: number | null; joined: number | null; applied: [number, number, string][] } = {
+      started: null,
+      joined: null,
+      applied: [],
+    };
+    const stopPlayback = () => {
+      playMark++;
+      if (!playback) return;
+      playback.close();
+      playback = null;
+      // The state is further on than the seek that made it.
+      shownResult = null;
+    };
+    /** Play from the past on screen; null when it cannot be, or when the page moved on while the session opened. */
+    const openPlayback = async (): Promise<Playback | null> => {
+      if (playback) return playback;
+      const from = shownResult;
+      if (!hasLive || !from || pastTick === null || opening) return null;
+      const mark = playMark;
+      const target = state!;
+      opening = true;
+      let session: Gateway | null = null;
+      try {
+        const reached = await reach(gateway);
+        if (!reached) return null;
+        session = await Gateway.connect(reached.url, seed, await signIn(reached.oidc));
+        if (mark !== playMark || state !== target) return null;
+        if (hooks) {
+          replay.started = from.tick;
+          replay.joined = null;
+          replay.applied = [];
+          target.onRecord = (d, t, r) => replay.applied.push([d, t, r]);
+        }
+        const opened = session;
+        session = null;
+        playback = new Playback(opened, target, from, {
+          tail: () => liveState!.latest,
+          onFail: (err) => console.warn('playback could not go on', err),
+          release: () => opened.close(),
+        });
+        return playback;
+      } catch (err) {
+        console.warn('the city could not be played from there', err);
+        return null;
+      } finally {
+        session?.close();
+        opening = false;
+      }
+    };
+    /** Show the live city at once, in place of the past. */
+    const snapLive = () => {
+      stopPlayback();
+      swap(liveState!, null);
+      shownResult = null;
+    };
+    const togglePlay = async (): Promise<boolean> => {
+      if (!hasLive || pastTick === null || scrubTarget !== null) return false;
+      if (playback) {
+        playback.paused = !playback.paused;
+        return true;
+      }
+      const p = await openPlayback();
+      if (!p) return false;
+      p.paused = false;
+      return true;
     };
 
     /** The seeker once the first seek has opened it, for what needs it without waiting. */
@@ -444,8 +543,14 @@ async function main() {
       }
       // A seek still running was dropped above; with nothing past drawn there is nothing to swap back.
       if (pastTick === null) return;
-      swap(liveState!, null);
-      shownResult = null;
+      if (playback?.catchingUp) return;
+      // The city races forward from where it is, then joins the live one; with no way to play it, it shows at once.
+      const mark = playMark;
+      void openPlayback().then((p) => {
+        if (mark !== playMark) return;
+        if (p) p.catchUp();
+        else if (!opening && !playback && pastTick !== null) snapLive();
+      });
     };
     /** Show a seek's result unless the handle has already moved to an hour whose keyframe is on screen. */
     const place = (result: SeekResult) => {
@@ -476,7 +581,7 @@ async function main() {
         const s = await seeker();
         if (!s) throw new Error('nothing here answers like a gateway');
         opened = s;
-        const result = await s.seek(tick);
+        const result = await s.seekOrNewest(tick);
         if (holdSeeks > 0) await new Promise((done) => setTimeout(done, holdSeeks));
         // Back to live came while this seek ran: what it found is no longer wanted.
         if (!current()) return;
@@ -505,6 +610,7 @@ async function main() {
       const to = clampTick({ oldest: range.oldest, newest: tip }, tick);
       // The tip is the live city: a step or a release within a city minute of it is going back to it.
       if (hasLive && !moving && to >= tip - LIVE_SNAP_TICKS) return goLive();
+      stopPlayback();
       scrubTarget = to;
       preview(to);
       scrubLatest.want(to, moving);
@@ -535,6 +641,14 @@ async function main() {
     const past = document.getElementById('past')!;
     const pastAgo = document.getElementById('past-ago')!;
     document.getElementById('back-live')!.addEventListener('click', goLive);
+    const playButton = document.getElementById('play') as HTMLButtonElement;
+    playButton.addEventListener('click', () => void togglePlay());
+    addEventListener('keydown', (e) => {
+      const target = e.target as HTMLElement | null;
+      if (e.key !== ' ' || e.repeat || target?.closest('button, input, [role="slider"]')) return;
+      e.preventDefault();
+      void togglePlay();
+    });
     let barShown = false;
     let wasPast: boolean | null = null;
     let agoShown = '';
@@ -560,9 +674,31 @@ async function main() {
         else if (!first) pill.classList.remove('hidden');
       }
       if (inPast) {
+        const label = playback && !playback.paused ? 'Pause' : 'Play';
+        if (playButton.textContent !== label) playButton.textContent = label;
+        playButton.hidden = !hasLive || (playback?.catchingUp ?? false);
         const text = usable ? agoText(tip - at) : 'Earlier';
         if (text !== agoShown) pastAgo.textContent = agoShown = text;
       }
+    };
+    playFrame = (dt) => {
+      const p = playback;
+      if (!p) return null;
+      if (p.failure || state !== p.state) {
+        if (p.failure) note('Playback stopped. Showing the city live.');
+        snapLive();
+        return null;
+      }
+      p.advance(dt);
+      if (p.atTip) {
+        // The live clock carries on from the tick drawn, so the cars under way do not jump.
+        handOver(p, clockTicks);
+        replay.joined = Math.floor(p.head);
+        snapLive();
+        return null;
+      }
+      pastTick = Math.floor(p.head);
+      return p.head;
     };
     // A page opened in the past already has its history open, and no live tip to show the bar with.
     if (!hasLive) {
@@ -571,12 +707,13 @@ async function main() {
         void refreshRange();
       })();
     }
-    window.__metro = {
+    const metroHooks: NonNullable<Window['__metro']> = {
       async prepare() {
         await (await seeker())?.warm();
       },
       async seek(tick) {
         const started = performance.now();
+        stopPlayback();
         try {
           const opened = await seeker();
           if (!opened) throw new Error('nothing here answers like a gateway');
@@ -619,7 +756,17 @@ async function main() {
       holdSeeks: (ms) => {
         holdSeeks = ms;
       },
+      play: () => togglePlay(),
+      playback: () => ({
+        playing: playback !== null && !playback.paused,
+        catchingUp: playback?.catchingUp ?? false,
+        head: playback?.head ?? null,
+        started: replay.started,
+        joined: replay.joined,
+        applied: replay.applied,
+      }),
     };
+    if (hooks) window.__metro = metroHooks;
   }
   let intro: ReturnType<typeof startIntro> | null = null;
   function frame() {
@@ -634,9 +781,11 @@ async function main() {
     move(cars, dt, true);
     move(people, dt, false);
     for (const p of people) p.mixer.update(dt);
-    if (state && traffic && window.__live) {
+    if (state && traffic && liveInfo) {
       // The clock runs on real time even when frames are slow, so it stays with the sim.
-      const tick = pastTick ?? clockTicks.advance(Math.min(1, frameMs / 1000), state.latest, state.speed, link.down);
+      const played = playFrame?.(still ? 0 : Math.min(1, frameMs / 1000)) ?? null;
+      const tick =
+        played ?? pastTick ?? clockTicks.advance(Math.min(1, frameMs / 1000), state.latest, state.speed, link.down);
       if (!Number.isNaN(tick)) {
         state.retire(Math.floor(tick));
         traffic.update(tick, still ? 0 : dt, state.active());
@@ -647,7 +796,7 @@ async function main() {
           day.textContent = `Day ${time.day}`;
         }
         timelineFrame?.(tick);
-        Object.assign(window.__live, {
+        Object.assign(liveInfo, {
           tick,
           speed: state.speed,
           voyages: state.voyages.size,
@@ -671,7 +820,7 @@ async function main() {
   const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
   if (city && !still && frozenHour === null && !reduced) intro = startIntro(camera, controls, performance.now());
   frame();
-  if (window.__seek) window.__seek.drawMs = performance.now() - seekDone;
+  if (seekInfo) seekInfo.drawMs = performance.now() - seekDone;
   document.body.dataset.ready = '1';
   window.__ready = true;
   loader.done(state !== null && showLoader);

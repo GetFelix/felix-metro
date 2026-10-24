@@ -5,9 +5,11 @@
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { chromium } from 'playwright';
+import { withTrace } from './url.mjs';
 
-const [appUrl, out] = process.argv.slice(2);
+const [pageUrl, out] = process.argv.slice(2);
 if (!out) throw new Error('usage: check-seek.mjs <page url> <out dir>');
+const appUrl = withTrace(pageUrl);
 mkdirSync(out, { recursive: true });
 const MINUTE = 60_000;
 // Finding and folding is held to a second, judged on the median of three warm seeks since runner variance is large. The

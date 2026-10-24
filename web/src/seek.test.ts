@@ -329,6 +329,12 @@ describe('seek', () => {
     expect(await seeker(h).seek(499)).toMatchObject({ tick: 499, exact: true });
   });
 
+  it('shows the newest tick every district has for a tick past it', async () => {
+    const h = new FakeHistory(2, ticks(500));
+    expect(await seeker(h).seekOrNewest(900)).toMatchObject({ tick: 499, requested: 499, exact: true });
+    expect(await seeker(h).seekOrNewest(300)).toMatchObject({ tick: 300 });
+  });
+
   it('starts at the oldest keyframe left once retention has trimmed the older ones', async () => {
     const h = new FakeHistory(2, ticks(1000));
     h.oldest = 300;

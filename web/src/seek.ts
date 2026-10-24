@@ -214,6 +214,21 @@ export class Seeker {
     }
   }
 
+  /**
+   * {@link seek}, except that a tick past the newest every district has shows that newest tick, which is what asking for
+   * "now" comes to when the districts are a tick apart.
+   */
+  async seekOrNewest(tick: number, options: SeekOptions = {}): Promise<SeekResult> {
+    try {
+      return await this.seek(tick, options);
+    } catch (err) {
+      if (err instanceof SeekError && err.reason === 'future' && err.nearest !== undefined) {
+        return this.seek(err.nearest, options);
+      }
+      throw err;
+    }
+  }
+
   /** Runs `work` with sessions open, and starts the idle timer once nothing is using them. */
   private async using<T>(work: () => Promise<T>): Promise<T> {
     this.busy++;
