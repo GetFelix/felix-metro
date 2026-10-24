@@ -37,7 +37,9 @@ pub struct Places {
     any: Vec<u32>,
     /// The connected piece of road each lot's door is on, by lot id.
     piece: Vec<u32>,
-    per_home: u32,
+    /// Fixed from the homes the city has before its development area is set aside, so the area does not
+    /// shrink the population.
+    population: u32,
 }
 
 impl Places {
@@ -56,13 +58,14 @@ impl Places {
             parks: Vec::new(),
             any: Vec::new(),
             piece: pieces(city),
-            per_home,
+            population: 0,
         };
-        for lot in city
-            .lots
-            .iter()
-            .filter(|l| l.door().is_some() && city.development.binary_search(&l.id).is_err())
-        {
+        let mut full_homes = 0u32;
+        for lot in city.lots.iter().filter(|l| l.door().is_some()) {
+            full_homes += u32::from(lot.zone == Zone::Suburban);
+            if city.development.binary_search(&lot.id).is_ok() {
+                continue;
+            }
             p.any.push(lot.id);
             match lot.zone {
                 Zone::Suburban => p.homes.push(lot.id),
@@ -75,12 +78,17 @@ impl Places {
                 Zone::Park => p.parks.push(lot.id),
             }
         }
+        p.population = if p.homes.is_empty() {
+            0
+        } else {
+            full_homes * per_home
+        };
         p
     }
 
     /// How many residents the city has.
     pub fn population(&self) -> u32 {
-        self.homes.len() as u32 * self.per_home
+        self.population
     }
 }
 
@@ -166,7 +174,9 @@ impl Resident {
     pub fn new(city: &City, places: &Places, index: u32) -> Option<Resident> {
         let mut rng = Rng::for_index(&format!("{}/resident", city.seed), index);
         let archetype = Archetype::from_roll(rng.below(100));
-        let home = places.homes[(index / places.per_home) as usize % places.homes.len()];
+        let home = places.homes[(u64::from(index) * places.homes.len() as u64
+            / u64::from(places.population.max(1))) as usize
+            % places.homes.len()];
         let work_list = match archetype {
             Archetype::Shift | Archetype::Night => &places.factories,
             Archetype::Shopkeeper => &places.shops,

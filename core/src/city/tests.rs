@@ -42,10 +42,10 @@ fn all_cities() -> Vec<(String, City)> {
 
 #[test]
 fn layouts_are_pinned() {
-    assert_eq!(city_of("harbor", 2).hash(), 0xe287_6ca2_2c51_26c4);
-    assert_eq!(city_of("harbor", 4).hash(), 0x0f2c_ceea_2949_8504);
-    assert_eq!(city_of("pinecrest", 2).hash(), 0x205a_1949_527d_8bbd);
-    assert_eq!(city_of("pinecrest", 4).hash(), 0xaf6a_b54a_6a33_9710);
+    assert_eq!(city_of("harbor", 2).hash(), 0xc0fc_17c3_1802_33dd);
+    assert_eq!(city_of("harbor", 4).hash(), 0x4016_779b_54a4_52f3);
+    assert_eq!(city_of("pinecrest", 2).hash(), 0xfe15_de1a_4852_fe43);
+    assert_eq!(city_of("pinecrest", 4).hash(), 0x43f1_1989_8d89_adaa);
 }
 
 #[test]
@@ -540,7 +540,7 @@ fn the_development_area_is_empty_ground_in_one_district() {
         let side = city.districts_per_side;
         if side >= 2 {
             assert!(
-                (20..=30).contains(&area.len()),
+                (14..=16).contains(&area.len()),
                 "{name}: {} lots",
                 area.len()
             );

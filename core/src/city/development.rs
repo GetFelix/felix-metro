@@ -9,8 +9,8 @@ use crate::kinds::BuildingKind;
 
 /// Lots in the area: a window holding fewer than `MIN` is not used unless nothing else fits, and one holding
 /// more than `MAX` keeps the lots nearest its middle.
-const MIN: usize = 20;
-const MAX: usize = 30;
+const MIN: usize = 14;
+const MAX: usize = 16;
 /// Window sizes tried, in tiles. They are wide enough to span a street or two, since blocks are small.
 const WINDOWS: [(i32, i32); 8] = [
     (5, 5),

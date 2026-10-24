@@ -186,10 +186,13 @@ const summary = { built: 0, demolished: 0, refused: 0, unanswered: 0, sent: 0 };
 const built = [];
 const tried = new Set();
 let session = null;
+// The lot a --rebuild demolished and has not yet rebuilt or restored, so a hard exit can still report it.
+let bare = null;
 
 function finish(reason, code) {
   if (finished) return;
   finished = true;
+  if (bare) emit({ type: "orphan", lot: bare.id, kind: bare.kind, restored: false });
   const xs = built.map((b) => b.x);
   const zs = built.map((b) => b.z);
   const mean = (a) => a.reduce((s, v) => s + v, 0) / a.length;
@@ -270,12 +273,16 @@ for (const lot of order) {
     const result = await send("demolish", lot, demolish(lot.id), lot.kind);
     if (result !== APPLIED && result !== EMPTY) continue;
     cleared = result === APPLIED;
+    if (cleared) bare = lot;
   }
   const kind = kindFor(world, byTile, lot);
-  if ((await send("build", lot, build(lot.id, kind, lot.facing), kind)) !== APPLIED) {
+  const placed = (await send("build", lot, build(lot.id, kind, lot.facing), kind)) === APPLIED;
+  if (placed) bare = null;
+  if (!placed) {
     if (cleared) {
       // The old building is gone and nothing replaced it: put it back, and say so either way.
       const restored = (await send("build", lot, build(lot.id, lot.kind, lot.facing), lot.kind, "restore")) === APPLIED;
+      bare = null;
       emit({ type: "orphan", lot: lot.id, kind: lot.kind, restored });
       log(`lot ${lot.id} was demolished and the build was refused: ${restored ? "old building restored" : "LEFT BARE"}`);
     }

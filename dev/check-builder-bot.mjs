@@ -20,6 +20,8 @@ const start = lines.find((l) => l.type === "start");
 const end = lines.find((l) => l.type === "end");
 if (!start) fail("no start line");
 if (!end) fail("no end line, the bot did not finish");
+const left = lines.find((l) => l.type === "orphan" && !l.restored);
+if (left) fail(`lot ${left.lot} was demolished and left bare`);
 const commands = lines.filter((l) => l.type === "build" || l.type === "demolish");
 if (commands.length !== end.sent) fail(`${commands.length} commands logged but ${end.sent} sent`);
 const lost = commands.filter((c) => c.result === null || c.result === undefined);

@@ -44,12 +44,12 @@
 
 ### The city
 
-- Each city sets aside a development area of 20 to 30 empty lots in one district, for builders. Residents never
+- Each city sets aside a development area of 14 to 16 empty lots in one district, for builders. Residents never
   choose them as home, shop, park or work, so the sim accepts builds there, and the page draws them as bare
   earth. `City::development`, the city JSON and `City::hash` carry it. This changes every seed's layout hash and
-  residents (golden hashes updated): the harbor city at 2 by 2 now has 390 residents (was 522) and up to 71 cars
-  at once (was 104), and the step-time test loads 64 residents a home to stay at its 1,000 a district. Pinecrest
-  loses 23 lots to it, harbor 22.
+  residents (golden hashes updated): the harbor city at 2 by 2 keeps its 522 residents (the area's lots still count toward the population) and up to 91 cars
+  at once, and the step-time test loads 64 residents a home to stay at its 1,000 a district. Pinecrest
+  loses 15 lots to it, harbor 14.
 - Rush hour is busier. A city has six residents per home instead of two, office
   workers arrive 07:45 to 08:15 and leave 17:00 to 17:30, shopkeepers arrive 07:45 to
   08:30 and leave 17:00 to 18:30, office

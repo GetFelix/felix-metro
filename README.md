@@ -17,7 +17,7 @@ and play forward from there.
 
 ## What you will be able to do
 
-- Watch a generated city go about its day in 3D: residents commute, shop and go home, and the sun rises and sets. Rush hour at 08:00 and 17:15 puts up to about 30 cars and 7 walkers on the streets of the busiest district, and about 70 cars across the harbor city at 2 by 2 (390 residents; `cargo run --release -p felix-metro-core --example density -- harbor 2` prints the counts). The log averages about 8 KB/s over a day at 20,000 residents and peaks near 17 KB/s in the busiest minute of the rush, from the hourly snapshots of each district landing together, which #95 tracks (`cargo test -p felix-metro-sim --release report_load -- --ignored --nocapture` measures it).
+- Watch a generated city go about its day in 3D: residents commute, shop and go home, and the sun rises and sets. Rush hour at 08:00 and 17:15 puts up to about 30 cars and 7 walkers on the streets of the busiest district, and about 90 cars across the harbor city at 2 by 2 (522 residents; `cargo run --release -p felix-metro-core --example density -- harbor 2` prints the counts). The log averages about 8 KB/s over a day at 20,000 residents and peaks near 17 KB/s in the busiest minute of the rush, from the hourly snapshots of each district landing together, which #95 tracks (`cargo test -p felix-metro-sim --release report_load -- --ignored --nocapture` measures it).
 - Drag the timeline back to any moment the log holds and see the city exactly as it was
 - Let go and watch it play forward and catch up to live
 - Follow one resident or car through their day
@@ -174,7 +174,7 @@ node dev/builder-bot.mjs pinecrest --interval 2 --count 12 --json bot.ndjson
 ```
 
 Almost every lot is one residents go to, and the sim refuses to change those. Each city therefore
-sets aside a development area of 20 to 30 empty lots in one district (22 in `harbor`, 23 in
+sets aside a development area of 14 to 16 empty lots in one district (14 in `harbor`, 15 in
 `pinecrest` at 2 by 2) that no resident visits, drawn as bare earth until something is built.
 The bot asks the core crate's `city_json` example for it (it needs `cargo`), grows there first,
 and puts homes on it. It never demolishes by default: a lot that holds a building is skipped.
