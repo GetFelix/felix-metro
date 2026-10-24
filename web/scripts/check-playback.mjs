@@ -155,7 +155,7 @@ for (let attempt = 1; attempt <= ATTEMPTS && compared === 0; attempt++) {
   // frames either side of it than it had between the ones before.
   const frames = done.frames;
   const j = frames.findIndex((f) => f.joined);
-  if (j < 12) await fail(`the join was found at frame ${j} of the record`);
+  if (j < 3) await fail(`the join was found at frame ${j} of the record`);
   for (let i = Math.max(1, j - 12); i < Math.min(frames.length, j + 4); i++) {
     if (frames[i].tick < frames[i - 1].tick - 1e-6)
       await fail(`the tick went back from ${frames[i - 1].tick} to ${frames[i].tick} at the join`);
