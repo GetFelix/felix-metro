@@ -224,8 +224,23 @@ const backToLive = async (from, bound, { play = true, within = Infinity, draw = 
   }));
   const gap = before.tip - before.head;
   if (gap > within) return { skipped: true, gap };
-  const began = Date.now();
+  // Playwright waits for the button to hold still across animation frames before it clicks, which costs seconds at a
+  // frame a second. The race starts at the click event, so that is where the time is counted from.
+  await page.evaluate(() => {
+    window.__longTasks = [];
+    window.__clickAt = null;
+    new PerformanceObserver((list) => {
+      for (const e of list.getEntries()) window.__longTasks.push([Math.round(e.startTime), Math.round(e.duration)]);
+    }).observe({ entryTypes: ['longtask'] });
+    document.getElementById('back-live').addEventListener('click', () => (window.__clickAt = Date.now()), {
+      capture: true,
+      once: true,
+    });
+  });
+  const asked = Date.now();
   await page.click('#back-live');
+  const began = (await page.evaluate(() => window.__clickAt)) ?? asked;
+  console.log(`  the click event came ${began - asked} ms after the click was asked for`);
   let movedMs = null;
   let lastLog = began;
   let lastFrames = before.frames;
@@ -237,7 +252,11 @@ const backToLive = async (from, bound, { play = true, within = Infinity, draw = 
     }));
     const elapsed = Date.now() - began;
     if (movedMs === null && ((now.playback.shown ?? before.drawn) > before.drawn || now.live)) movedMs = elapsed;
-    if (now.live) break;
+    if (now.live) {
+      const long = await page.evaluate(() => window.__longTasks.filter((t) => t[1] >= 500));
+      console.log(`  long tasks (start ms, duration ms): ${JSON.stringify(long)}`);
+      break;
+    }
     if (Date.now() - lastLog >= 1000) {
       const p = now.playback;
       const m = p.marks;
@@ -254,6 +273,7 @@ const backToLive = async (from, bound, { play = true, within = Infinity, draw = 
         playback: { ...window.__metro.playback(), applied: undefined },
         shown: window.__metro.shown(),
         live: window.__metro.live().ticks,
+        longTasks: window.__longTasks.filter((t) => t[1] >= 500),
       }));
       await fail(
         `Back to live from tick ${seeked.tick} (${gap} ticks behind at the click) had not arrived after ${bound} s: ${JSON.stringify(where)}`,
