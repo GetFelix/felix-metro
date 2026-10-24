@@ -653,7 +653,7 @@ async function main() {
     draw(now, now - last, still ? 0 : Math.min(clock.getDelta(), 0.05));
   }
   /** Draw one frame `dt` seconds on from the last. */
-  function draw(now: number, frameMs: number, dt: number) {
+  function draw(now: number, frameMs: number, dt: number, paint = true) {
     if (intro && !intro.step(now)) intro = null;
     last = now;
     if (!capture) quality.tick(frameMs);
@@ -688,7 +688,7 @@ async function main() {
     }
     if (capture) camera.lookAt(controls.target);
     else controls.update();
-    post!.render(controls.target);
+    if (paint) post!.render(controls.target);
     for (const done of frameWaiters.splice(0)) done();
     // A live state the page has left keeps taking records; let its finished trips go.
     if (liveState && liveState !== state) liveState.retire(liveState.latest);
@@ -731,9 +731,10 @@ async function main() {
         }
         const dt = lastMs === null ? 0 : Math.max(0, (tMs - lastMs) / 1000);
         lastMs = tMs;
-        draw(performance.now(), 1000 / 30, dt);
-        // Cars and walkers get their models a share a frame; draw on, without moving, until all of them have one.
-        for (let i = 0; i < 600 && traffic && traffic.waiting > 0; i++) draw(performance.now(), 0, 0);
+        draw(performance.now(), 1000 / 30, dt, false);
+        // Cars and walkers get their models a share a frame; update on, without drawing, until all of them have one.
+        for (let i = 0; i < 600 && traffic && traffic.waiting > 0; i++) draw(performance.now(), 0, 0, false);
+        draw(performance.now(), 0, 0);
         const where = traffic?.where() ?? [];
         const cars = where.filter((w) => w.car);
         const walkers = where.filter((w) => !w.car);

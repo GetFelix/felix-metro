@@ -78,13 +78,16 @@ await page.waitForTimeout(1500);
 // Now let the sim run on at a gentle pace; every frame waits for the tick it needs.
 speed(4);
 
-const shot = (n) => page.screenshot({ type: 'jpeg', quality: 95 });
+const shot = () => page.screenshot({ type: 'jpeg', quality: 95, timeout: 180_000 });
 let n = 0;
 let lastInfo = null;
 const capture = async (tMs, extra) => {
   if (extra) await extra();
+  const began = Date.now();
   lastInfo = await page.evaluate((t) => window.__capture.frame(t), tMs);
+  const drawn = Date.now();
   writeFileSync(join(frames, `f${String(n++).padStart(5, '0')}.jpg`), await shot());
+  if (n <= 3) log(`frame ${n}: ${drawn - began} ms to draw, ${Date.now() - drawn} ms to capture`);
   return lastInfo;
 };
 
