@@ -54,7 +54,7 @@ there. [docs/design.md](docs/design.md) has the details.
 
 | M | Milestone | State |
 |---|---|---|
-| 0 | The look, locked | Planned |
+| 0 | The look, locked | In progress: style frame, assets, daylight, post-processing and quality tiers done; instanced traffic, the UI shell and camera controls open |
 | 1 | A live city | Done |
 | 2 | Time travel | In progress: keyframes, seeking and the timeline scrubber done |
 | 3 | Follow a life | Planned |
