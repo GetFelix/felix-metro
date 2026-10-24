@@ -197,6 +197,15 @@ jobs:
         working-directory: web
         timeout-minutes: 10
         run: node scripts/check-seek.mjs 'http://127.0.0.1:8088/?tier=low' live-frames/seek
+      # The timeline bar over the live city: a pointer drag across hours faster than a seek completes and arrow-key steps.
+      # Every sampled frame has the city drawn and the clock follows the handle; at rest the city is at the handle's tick.
+      # Screenshots of the bar live, while dragging and in the past are in the artifact.
+      - name: The timeline scrubs the city without blank frames
+        working-directory: web
+        timeout-minutes: 15
+        run: |
+          ../dev/speed.sh harbor 16
+          node scripts/check-scrub.mjs 'http://127.0.0.1:8088/?tier=low' live-frames/scrub
       # The page at /#pinecrest lists the cities the sim registered. Lakeside is seeded but held back by the sim; dev/city.sh
       # starts it and registers it while the page is open, and the page lists it without a reload and opens it on a choice.
       - name: The city list picks up a city created after the page loaded

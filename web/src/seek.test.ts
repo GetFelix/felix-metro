@@ -9,7 +9,7 @@ vi.mock('./core/felix_metro_core.js', () => ({
   districtKey: (district: number, _shards: number, routing: string) => `${routing}.${district}`,
 }));
 vi.mock('./auth', () => ({ signIn: async () => 'token' }));
-const { Seeker, SeekError, fold } = await import('./seek');
+const { Seeker, SeekError, fold, foldMore, continues } = await import('./seek');
 
 const city = { lots: [] } as unknown as City;
 const trips: Trips = { trip: () => undefined };
@@ -181,6 +181,68 @@ describe('seek', () => {
     // None of the keyframe's hour again.
     expect(h.reads.length - reads).toBeLessThanOrEqual(2 * 4);
     expect(s.stats.hits).toBeGreaterThan(0);
+  });
+
+  it('asks for the newest record once for seeks close together', async () => {
+    const h = new FakeHistory(2, ticks(1000));
+    const s = seeker(h);
+    const asked = vi.spyOn(h, 'stateGet');
+    await s.seek(500);
+    const first = asked.mock.calls.length;
+    expect(first).toBeGreaterThan(0);
+    await s.seek(600);
+    await s.seek(450);
+    expect(asked.mock.calls.length).toBe(first);
+  });
+
+  it('asks again for a tick past the cached newest before calling it the future', async () => {
+    const h = new FakeHistory(2, ticks(1000));
+    const s = seeker(h);
+    await s.seek(900);
+    h.logs = new FakeHistory(2, ticks(1100)).logs;
+    expect((await s.seek(1050)).tick).toBe(1050);
+  });
+
+  it('holds the keyframe of an hour it has seeked into, to draw at once', async () => {
+    const s = seeker(new FakeHistory(2, ticks(1000)));
+    expect(s.cachedKeyframe(300)).toBeNull();
+    await s.seek(300);
+    const kf = s.cachedKeyframe(400)!;
+    expect(kf.tick).toBe(240);
+    expect(kf.exact).toBe(false);
+    expect(kf.districts.every((d) => d.records.length === 1 && d.records[0]!.keyframe)).toBe(true);
+    const state = new CityState(city, trips, 2);
+    fold(state, kf);
+    expect(state.ticks).toEqual([240, 240]);
+    expect(state.built.get(5)).toEqual({ kind: 1, rotation: 0 });
+    expect(s.cachedKeyframe(100)).toBeNull();
+  });
+
+  it('a seek ahead in the same hour folds only the records after the last one', async () => {
+    const s = seeker(new FakeHistory(2, ticks(1000)));
+    const state = new CityState(city, trips, 2);
+    const a = await s.seek(260);
+    fold(state, a);
+    const b = await s.seek(400);
+    expect(continues(a, b)).toBe(true);
+    const taken: number[] = [];
+    state.onRecord = (_d, t) => taken.push(t);
+    foldMore(state, a, b);
+    expect(state.ticks).toEqual([400, 400]);
+    // Only the 140 ticks past 260 in each district, not the 160 from the keyframe.
+    expect(taken.length).toBe(2 * 140);
+    expect(Math.min(...taken)).toBe(261);
+    const straight = new CityState(city, trips, 2);
+    fold(straight, b);
+    expect([...state.built]).toEqual([...straight.built]);
+  });
+
+  it('a move back, or into another hour, is not a continuation', async () => {
+    const s = seeker(new FakeHistory(2, ticks(1000)));
+    const a = await s.seek(300);
+    expect(continues(a, await s.seek(260))).toBe(false);
+    expect(continues(a, await s.seek(500))).toBe(false);
+    expect(continues(await s.seek(500), await s.seek(520))).toBe(true);
   });
 
   it('a backward move refolds from the keyframe and matches a straight fold', async () => {
