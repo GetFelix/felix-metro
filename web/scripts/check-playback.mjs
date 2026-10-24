@@ -227,23 +227,16 @@ const backToLive = async (from, bound, { play = true, within = Infinity, draw = 
   }));
   const gap = before.tip - before.head;
   if (gap > within) return { skipped: true, gap };
-  // Playwright waits for the button to hold still across animation frames before it clicks, which costs seconds at a
-  // frame a second. The race starts at the click event, so that is where the time is counted from.
+  // A scripted click: Playwright's own waits for the button to hold still across animation frames, which costs seconds at
+  // a frame a second and lets the tip move on before the click lands.
   await page.evaluate(() => {
     window.__longTasks = [];
-    window.__clickAt = null;
     new PerformanceObserver((list) => {
       for (const e of list.getEntries()) window.__longTasks.push([Math.round(e.startTime), Math.round(e.duration)]);
     }).observe({ entryTypes: ['longtask'] });
-    document.getElementById('back-live').addEventListener('click', () => (window.__clickAt = Date.now()), {
-      capture: true,
-      once: true,
-    });
   });
-  const asked = Date.now();
-  await page.click('#back-live');
-  const began = (await page.evaluate(() => window.__clickAt)) ?? asked;
-  console.log(`  the click event came ${began - asked} ms after the click was asked for`);
+  const began = Date.now();
+  await page.evaluate(() => document.getElementById('back-live').click());
   let movedMs = null;
   let lastLog = began;
   let lastFrames = before.frames;
