@@ -261,13 +261,19 @@ A paused city holds up to 1,024 commands. Further ones are remembered only as
 who sent them and their id, up to another 1,024, and are recorded in district 0
 with result 9 once the held commands have run, after the city resumes. The
 command that resumes the city is always held. Past 2,048 commands the sim drops
-the extra with a warning, because remembering every command would use unbounded
+the extra, logging one warning when the dropping starts and a count when the pause ends, because remembering every command would use unbounded
 memory while nothing is ticking. A running city reads at most 256 a tick and
 never skips a tick for commands.
 
 The operator's endpoint and the `speed` command write one value. The last to
 change it wins, a commanded speed stays until someone sets another, and a
-`speed` event is recorded once per actual change.
+`speed` event is recorded once per actual change. The sim reads the operator's
+setting right before it applies a tick's commands, so a command applied after it
+overrides it, and it reports a commanded speed only if the operator has set
+nothing since that read; a newer operator setting is applied on the next tick.
+A `speed` command that resumes a paused city is never left waiting behind
+commands queued ahead of it: the city keeps working through its queue until it
+is empty or paused with no resume in it.
 
 On a restart the sim begins again at tick 0 with the generated city: what
 builders built (`World.built`) is not persisted, and the log's older epoch
@@ -280,7 +286,7 @@ moved shard by resubscribing at the offset after the last command it delivered
 (or at the tail it first joined, if none yet), so nothing is skipped or
 repeated. An error it reports is the last thing that subscription yields: the
 follower logs it, waits a second and asks the same subscription again, and if
-it then reports the stream closed the follower stops and the city runs without
+it then reports the stream closed the follower logs an error naming the city and stops, and the city runs without
 builders until the sim restarts.
 
 | Result | Meaning |

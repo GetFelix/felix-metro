@@ -9,7 +9,7 @@ use felix_metro_core::record::{
     REFUSED_UNSUPPORTED, RESULT_APPLIED, principal_hash, split_stamp,
 };
 use tokio::sync::mpsc;
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 
 use crate::control::check_speed;
 use crate::felix::Connection;
@@ -98,7 +98,10 @@ pub fn follow(
                     }
                 }
                 Ok(None) => {
-                    warn!(city, "the command stream closed");
+                    error!(
+                        city,
+                        "the command stream closed; the city runs without builders until the sim restarts"
+                    );
                     return;
                 }
                 Err(err) => {

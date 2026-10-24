@@ -177,42 +177,61 @@ pub async fn run_city_with<L: Log>(
             if control.is_none() && inbox.is_none() {
                 bail!("the city is paused and nothing can resume it");
             }
-            loop {
-                tokio::select! {
-                    speed_set = wait_resumed(&mut control) => {
-                        wanted = check_speed(speed_set?)?;
-                        break;
+            // A resume still in the queue (left behind by a pause that came
+            // ahead of it) is already here: waiting would strand it.
+            if let Some(at) = queue.iter().find_map(Incoming::resumes_at) {
+                wanted = at;
+            } else {
+                let mut dropped = 0u64;
+                loop {
+                    tokio::select! {
+                        speed_set = wait_resumed(&mut control) => {
+                            wanted = check_speed(speed_set?)?;
+                            break;
+                        }
+                        got = next_incoming(&mut inbox) => match got {
+                            Some(got) => {
+                                let wakes = got.resumes_at();
+                                // The command that resumes the city is always kept, or it could not.
+                                if wakes.is_some() || queue.len() < MAX_HELD {
+                                    queue.push_back(got);
+                                } else if refused.len() < MAX_REFUSED {
+                                    refused.push_back(got);
+                                } else {
+                                    dropped += 1;
+                                    if dropped == 1 {
+                                        warn!(city = name, "the paused city holds no more commands; dropping the rest");
+                                    }
+                                }
+                                if let Some(at) = wakes {
+                                    // Commands queued ahead of it may take several ticks to apply.
+                                    wanted = at;
+                                    break;
+                                }
+                            }
+                            None => {
+                                inbox = None;
+                                if control.is_none() {
+                                    bail!("the city is paused and nothing can resume it");
+                                }
+                            }
+                        },
                     }
-                    got = next_incoming(&mut inbox) => match got {
-                        Some(got) => {
-                            let wakes = got.resumes_at();
-                            // The command that resumes the city is always kept, or it could not.
-                            if wakes.is_some() || queue.len() < MAX_HELD {
-                                queue.push_back(got);
-                            } else if refused.len() < MAX_REFUSED {
-                                refused.push_back(got);
-                            } else {
-                                warn!(city = name, "dropped a command: the paused city holds no more");
-                            }
-                            if let Some(at) = wakes {
-                                // Commands queued ahead of it may take several ticks to apply.
-                                wanted = at;
-                                break;
-                            }
-                        }
-                        None => {
-                            inbox = None;
-                            if control.is_none() {
-                                bail!("the city is paused and nothing can resume it");
-                            }
-                        }
-                    },
+                }
+                if dropped > 0 {
+                    warn!(
+                        city = name,
+                        dropped, "commands dropped while the city was paused"
+                    );
                 }
             }
-        } else if let Some(control) = control.as_mut()
+        }
+        // Read right before the commands apply, so a later command overrides
+        // an earlier operator setting and the write-back below can tell a
+        // setting that arrives after this read.
+        if let Some(control) = control.as_mut()
             && control.has_changed().unwrap_or(false)
         {
-            // Only a new setting overrides what a command chose.
             wanted = check_speed(*control.borrow_and_update())?;
         }
         if let Some(inbox) = inbox.as_mut() {
@@ -233,11 +252,7 @@ pub async fn run_city_with<L: Log>(
             speed = wanted;
             changed = Some(speed);
             if let Some(out) = &settings.speed_out {
-                out.send_replace(speed);
-                if let Some(control) = control.as_mut() {
-                    // Our own write is not a new setting to act on.
-                    control.borrow_and_update();
-                }
+                publish_speed(out, control.as_mut(), speed);
             }
             if speed != 0 {
                 period = tick_period(speed);
@@ -321,6 +336,33 @@ pub async fn run_city_with<L: Log>(
             report.log(name, now);
         }
     }
+}
+
+/// Reports a commanded `speed` on the operator's watch, unless the operator
+/// set something after the runner last read it: that setting is newer and is
+/// applied on the next tick. Returns whether it wrote.
+fn publish_speed(
+    out: &watch::Sender<u8>,
+    control: Option<&mut watch::Receiver<u8>>,
+    speed: u8,
+) -> bool {
+    let Some(control) = control else {
+        out.send_replace(speed);
+        return true;
+    };
+    // The check runs under the sender's lock, so no setting slips in after it.
+    let wrote = out.send_if_modified(|current| {
+        if control.has_changed().unwrap_or(false) {
+            return false;
+        }
+        *current = speed;
+        true
+    });
+    if wrote {
+        // Our own write is not a new setting to act on.
+        control.borrow_and_update();
+    }
+    wrote
 }
 
 /// The speed the operator's control resumes a paused city at, or never when

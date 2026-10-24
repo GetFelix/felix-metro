@@ -886,6 +886,13 @@ mod builders {
         assert_eq!(all, vec![0, 0]);
     }
 
+    /// A hang is a failure: a stranded command parks the city for good.
+    async fn bounded<T>(what: &str, run: impl Future<Output = T>) -> T {
+        tokio::time::timeout(Duration::from_secs(600), run)
+            .await
+            .unwrap_or_else(|_| panic!("{what}: the city never finished"))
+    }
+
     fn speed_command(id: u32, ticks_per_second: u8) -> Incoming {
         command("mayor", id, Command::Speed { ticks_per_second })
     }
@@ -914,9 +921,12 @@ mod builders {
         send.try_send(speed_command(1, 8)).unwrap();
         let (s, tx) = wired(6, 4);
         let log = Memory::healthy();
-        run_city_with("harbor", harbor(), s, log.clone(), Some(inbox))
-            .await
-            .unwrap();
+        bounded(
+            "a_commanded_speed_sticks_when_the_operator_watch_is_wired",
+            run_city_with("harbor", harbor(), s, log.clone(), Some(inbox)),
+        )
+        .await
+        .unwrap();
         for district in 0..4 {
             assert!(log.records(district).iter().all(|r| r.header.speed == 8));
             assert_eq!(speed_events(&log, district), 1, "district {district}");
@@ -936,9 +946,12 @@ mod builders {
             send.send(speed_command(2, 4)).await.unwrap();
             send
         });
-        run_city_with("harbor", harbor(), s, log.clone(), Some(inbox))
-            .await
-            .unwrap();
+        bounded(
+            "a_commanded_pause_holds_until_something_resumes_the_city",
+            run_city_with("harbor", harbor(), s, log.clone(), Some(inbox)),
+        )
+        .await
+        .unwrap();
         drop(resume);
         assert!(
             started.elapsed() >= Duration::from_secs(5),
@@ -1009,9 +1022,12 @@ mod builders {
         let ticks = (MAX_HELD / MAX_PER_TICK) as u32 + 4;
         let (s, _tx) = wired(ticks, 0);
         let log = Memory::healthy();
-        run_city_with("harbor", harbor(), s, log.clone(), Some(inbox))
-            .await
-            .unwrap();
+        bounded(
+            "a_paused_city_holds_a_bounded_queue_and_refuses_the_rest_once_resumed",
+            run_city_with("harbor", harbor(), s, log.clone(), Some(inbox)),
+        )
+        .await
+        .unwrap();
         // The sim never skipped a tick.
         assert_whole(&log, ticks);
         let mut results: HashMap<u32, u8> = HashMap::new();
@@ -1029,5 +1045,98 @@ mod builders {
         assert_eq!(busy, extra);
         assert_eq!(results[&resume_id], RESULT_APPLIED);
         drop(send);
+    }
+
+    fn build(id: u32, lot: u32) -> Incoming {
+        command(
+            "mayor",
+            id,
+            Command::Build {
+                lot,
+                kind: 2,
+                rotation: 0,
+            },
+        )
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_resume_behind_a_pause_in_the_queue_is_not_stranded() {
+        use crate::commands::MAX_PER_TICK;
+        let lot = free_lot(&World::new(harbor()));
+        let extra = 300;
+        let (send, inbox) = mpsc::channel(extra + 8);
+        send.try_send(speed_command(1, 0)).unwrap();
+        for id in 2..(extra as u32 + 2) {
+            send.try_send(build(id, lot)).unwrap();
+        }
+        let resume_id = extra as u32 + 2;
+        send.try_send(speed_command(resume_id, 4)).unwrap();
+        assert!(extra + 2 > MAX_PER_TICK);
+        let (s, _tx) = wired(8, 0);
+        let log = Memory::healthy();
+        bounded(
+            "resume",
+            run_city_with("harbor", harbor(), s, log.clone(), Some(inbox)),
+        )
+        .await
+        .unwrap();
+        assert_whole(&log, 8);
+        let mut ids: Vec<u32> = (0..4)
+            .flat_map(|d| command_events(&log, d))
+            .map(|c| c.2)
+            .collect();
+        ids.sort();
+        assert_eq!(ids, (1..=resume_id).collect::<Vec<_>>());
+        assert_eq!(log.records(0).last().unwrap().header.speed, 4);
+        drop(send);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_flood_past_what_a_paused_city_remembers_stays_bounded_and_resumes() {
+        use crate::commands::{MAX_HELD, MAX_REFUSED};
+        use felix_metro_core::record::REFUSED_BUSY;
+        let sent = MAX_HELD + MAX_REFUSED + 500;
+        let (send, inbox) = mpsc::channel(sent + 4);
+        let lot = free_lot(&World::new(harbor()));
+        for id in 1..=sent as u32 {
+            send.try_send(build(id, lot)).unwrap();
+        }
+        let resume_id = sent as u32 + 1;
+        send.try_send(speed_command(resume_id, 4)).unwrap();
+        let ticks = 24;
+        let (s, _tx) = wired(ticks, 0);
+        let log = Memory::healthy();
+        bounded(
+            "flood",
+            run_city_with("harbor", harbor(), s, log.clone(), Some(inbox)),
+        )
+        .await
+        .unwrap();
+        assert_whole(&log, ticks);
+        let results: Vec<(u32, u8)> = (0..4)
+            .flat_map(|d| command_events(&log, d))
+            .map(|c| (c.2, c.3))
+            .collect();
+        // Held, remembered-to-refuse and the resume get a result; the rest were dropped.
+        assert_eq!(results.len(), MAX_HELD + MAX_REFUSED + 1);
+        let busy = results.iter().filter(|r| r.1 == REFUSED_BUSY).count();
+        assert_eq!(busy, MAX_REFUSED);
+        assert!(results.contains(&(resume_id, RESULT_APPLIED)));
+        drop(send);
+    }
+
+    #[test]
+    fn an_operator_setting_after_the_runner_read_is_not_overwritten() {
+        let (tx, mut rx) = watch::channel(4u8);
+        // The runner read 4, then the operator set 16 before the write-back.
+        tx.send_replace(16);
+        assert!(!publish_speed(&tx, Some(&mut rx), 8));
+        assert_eq!(*tx.borrow(), 16);
+        assert!(rx.has_changed().unwrap(), "the setting is still to be read");
+        // With nothing newer, the commanded speed is reported and not re-read.
+        rx.borrow_and_update();
+        assert!(publish_speed(&tx, Some(&mut rx), 8));
+        assert_eq!(*tx.borrow(), 8);
+        assert!(!rx.has_changed().unwrap());
     }
 }
