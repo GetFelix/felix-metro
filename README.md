@@ -7,7 +7,7 @@ A 3D city simulator that runs in the browser, built on
 is stored in durable Felix streams, so you can scrub back to any earlier moment
 and play forward from there.
 
-> **Status:** a live city runs end to end. The sim steps it, the browser draws it live, and a city picker switches between cities. Time travel, following a resident and building are not built yet. The [style frame](prototype/style-frame.html) shows the look. The plan is in
+> **Status:** a live city runs end to end. The sim steps it, the browser draws it live, and a city picker switches between cities. Opening the city at an earlier moment works (`/?at=<tick>#harbor` draws it there, paused); the timeline to scrub it, playing forward from there, following a resident and building are not built yet. The [style frame](prototype/style-frame.html) shows the look. The plan is in
 > [docs/design.md](docs/design.md) and the work is tracked in
 > [milestones](https://github.com/GetFelix/felix-metro/milestones).
 
@@ -56,7 +56,7 @@ there. [docs/design.md](docs/design.md) has the details.
 |---|---|---|
 | 0 | The look, locked | Planned |
 | 1 | A live city | Done |
-| 2 | Time travel | Planned |
+| 2 | Time travel | In progress: keyframes and seeking done |
 | 3 | Follow a life | Planned |
 | 4 | Build | Planned |
 | 5 | Branching timelines | Planned |

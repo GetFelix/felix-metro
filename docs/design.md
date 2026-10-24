@@ -326,6 +326,23 @@ To draw tick `T`:
 3. Read from the keyframe to `T` with a bounded `read` and apply the events.
 4. Draw. Cars in the middle of a trip are placed by interpolating their route at `T`.
 
+In the browser, `web/src/seek.ts` does this on a connection of its own, so a seek never waits behind the live
+subscriptions. One `Seeker` lives for the page: its session and caches carry from seek to seek, a newer seek cancels
+an older one (its queued reads leave the gateway's queue), identical reads in flight are shared, and the districts are
+read concurrently over two connections taken in turn (opened by the first seek, closed after 30 s idle and opened again by the next, so a page that is not seeking holds none of the gateway's eight sessions a person may have), the pages of a range together once the first has said how big a page is. A seek returns each district's records from its keyframe and the offset of the tick's record, which
+is where a live subscription resumes, plus one.
+
+The log is ordered by `(epoch, tick)`. A restarted sim takes the next epoch, so the newest epoch that reaches a tick is the
+one shown, and a tick that landed twice is applied once. The estimate starts from the cached keyframe of `T`'s hour, or
+else the newest keyframe the state key points at, and a log that is not one record a tick falls back to bisection between the
+offsets known to be below and above `T`. A tick the log skipped shows the nearest earlier tick every district has, and the
+result says it is not exact; a tick past the newest is refused as not yet happened. Retention that has taken the named
+keyframe moves the start to the next hour boundary still kept, and a seek is `unretained` before it. Records are cached per
+district for about two city hours and keyframes for four city days, so a second seek in the same hour reads only the
+ticks past what is held. After folding, every district must be at `T`, or the seek fails. `?at=<tick>` opens the page at a
+tick with no live connection until the timeline exists, and `window.__metro.seek(tick)` does the same in an open page,
+which is what CI measures against the one-second budget.
+
 At most 240 tick records per district separate a keyframe from `T`. That is a
 few hundred KB at the target scale, read in parallel across districts.
 

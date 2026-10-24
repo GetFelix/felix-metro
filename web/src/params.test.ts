@@ -15,6 +15,7 @@ describe('parseParams', () => {
       districts: 2,
       live: true,
       gateway: null,
+      at: null,
       trace: false,
     });
   });
@@ -50,5 +51,13 @@ describe('parseParams', () => {
     expect(parseParams('?districts=3').districts).toBe(3);
     expect(parseParams('?districts=0').districts).toBe(2);
     expect(parseParams('?districts=99').districts).toBe(16);
+  });
+
+  it('takes a tick to open the city at, and only a whole one', () => {
+    expect(parseParams('?at=1234').at).toBe(1234);
+    expect(parseParams('').at).toBeNull();
+    for (const bad of ['?at=', '?at=-5', '?at=1.5', '?at=soon']) expect(parseParams(bad).at).toBeNull();
+    // `t` stays the frozen hour.
+    expect(parseParams('?t=18.5&at=40')).toMatchObject({ frozenHour: 18.5, at: 40 });
   });
 });

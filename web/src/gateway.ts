@@ -83,6 +83,9 @@ export interface StateValue {
   asOf: number;
 }
 
+/** The gateway refuses a read that starts after the log's last record, and says so in words only. */
+export const pastEnd = (err: unknown): boolean => err instanceof GatewayError && /past the end/.test(err.message);
+
 /** An error the gateway answered with. */
 export class GatewayError extends Error {
   override name = 'GatewayError';
@@ -197,12 +200,14 @@ export class Gateway {
 
   /**
    * Read the records of `shard` from `from` up to, not including, `end`: one page, as the broker's cap allows. Read
-   * the next page from its `nextOffset`. At most four reads are on the wire at once; the rest wait their turn.
+   * the next page from its `nextOffset`. At most four reads are on the wire at once; the rest wait their turn, and a
+   * read still waiting when `signal` aborts leaves the queue and fails with the signal's reason.
    */
-  async read(stream: string, shard: number, from: number, end?: number): Promise<Page> {
+  async read(stream: string, shard: number, from: number, end?: number, signal?: AbortSignal): Promise<Page> {
     for (let attempt = 0; ; attempt++) {
+      signal?.throwIfAborted();
       try {
-        return await this.limited(async () => {
+        return await this.limited(signal, async () => {
           const json = await this.request({ type: 'read', stream, shard, from, ...(end === undefined ? {} : { end }) });
           const records = (json.records as { offset: number; payload: string }[]).map((r) => ({
             offset: r.offset,
@@ -211,7 +216,8 @@ export class Gateway {
           return { records, nextOffset: json.next_offset as number };
         });
       } catch (err) {
-        if (!(err instanceof GatewayError) || err.code !== 'read_failed' || attempt >= READ_RETRIES) throw err;
+        if (!(err instanceof GatewayError) || err.code !== 'read_failed' || attempt >= READ_RETRIES || pastEnd(err))
+          throw err;
         await new Promise((r) => setTimeout(r, READ_RETRY_MS * 2 ** attempt));
       }
     }
@@ -262,12 +268,31 @@ export class Gateway {
     });
   }
 
-  private async limited<T>(run: () => Promise<T>): Promise<T> {
+  private async limited<T>(signal: AbortSignal | undefined, run: () => Promise<T>): Promise<T> {
     if (this.ended) throw this.ended;
     // A finishing read passes its slot straight to the next waiter, so `reading` never dips and no newcomer can slip
     // in between.
     if (this.reading >= READS_IN_FLIGHT) {
-      await new Promise<void>((go, fail) => this.queuedReads.push({ go, fail }));
+      await new Promise<void>((go, fail) => {
+        const stop = () => {
+          const at = this.queuedReads.indexOf(entry);
+          if (at < 0) return;
+          this.queuedReads.splice(at, 1);
+          fail(signal!.reason);
+        };
+        const entry = {
+          go: () => {
+            signal?.removeEventListener('abort', stop);
+            go();
+          },
+          fail: (err: Error) => {
+            signal?.removeEventListener('abort', stop);
+            fail(err);
+          },
+        };
+        this.queuedReads.push(entry);
+        signal?.addEventListener('abort', stop, { once: true });
+      });
     } else {
       this.reading++;
     }

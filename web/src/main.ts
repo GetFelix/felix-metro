@@ -8,10 +8,12 @@ import { createRenderer } from './renderer';
 import { createCity, move } from './scene';
 import init, { generate, Metro } from './core/felix_metro_core.js';
 import { parseCity, type City } from './layout';
-import { beforeSignIn, fetchOidc } from './auth';
+import { beforeSignIn, fetchOidc, signIn } from './auth';
 import { CityState, type Building } from './city';
 import { TickClock, cityTime } from './clock';
 import { connectLive } from './live';
+import { Gateway, GatewayError } from './gateway';
+import { SeekError, Seeker, fold, type SeekResult } from './seek';
 import { createLoader, type Loader } from './loader';
 import { createPicker } from './picker';
 import { displayName } from './registry';
@@ -36,6 +38,40 @@ declare global {
     };
     /** What became of each record the page took, as `[district, tick, result]`; only under ?trace. */
     __trace?: [number, number, string][];
+    /** The seek behind a page opened with ?at: the tick shown, and the ms to find and fold the city, and the ms after that to its first frame. */
+    __seek?: {
+      tick: number;
+      seekMs: number;
+      drawMs: number | null;
+      reads: number;
+      /** The newest tick each district was folded to; every one is `tick` when the fold is whole. */
+      ticks: number[];
+    };
+    /** Seeking in the open page, for the CI check and the console; the timeline will call the same thing. */
+    __metro?: {
+      /** Open the history connection ahead of the first seek. */
+      prepare(): Promise<void>;
+      /** Draw the city at `tick`; resolves after the first frame that shows it. */
+      seek(tick: number): Promise<{
+        tick: number;
+        requested: number;
+        exact: boolean;
+        /** Each district's folded tick, and the offset of its record at `tick`. */
+        ticks: number[];
+        offsets: number[];
+        buildings: number;
+        sig: string;
+        ms: number;
+        /** The part of `ms` spent finding and folding, before the city was drawn. */
+        seekMs: number;
+        /** The ms until every car and walker of the moment has a model, which is after the first frame. */
+        settledMs: number;
+        reads: number;
+        stats: { readMs: number; slowestMs: number; pageSize: number };
+      }>;
+      /** The state the live connection feeds: its districts' ticks and buildings. */
+      live(): { ticks: number[]; buildings: number; sig: string };
+    };
     __quality?: {
       history: readonly Tier[];
       memory: { tier: Tier; textures: number; geometries: number }[];
@@ -100,6 +136,65 @@ async function follow(
   return live.refused ? null : { state, link };
 }
 
+/**
+ * A history reader on connections of its own, so a seek never waits behind the live subscriptions. The sessions are
+ * opened by the first seek and closed after a while idle, so a page not seeking holds none of the gateway's
+ * per-person sessions. `null` when nothing here answers like a gateway.
+ */
+async function openHistory(name: string, districts: number, gateway: string | null): Promise<Seeker | null> {
+  const url = gateway ?? `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`;
+  const oidc = await fetchOidc(gateway ? url.replace(/^ws/, 'http').replace(/\/ws$/, '/') : location.origin + '/');
+  if (!oidc) return null;
+  const seeker = new Seeker(async () => {
+    const token = await signIn(oidc);
+    // The ones the gateway refuses are left out: history reads on fewer, and the live view's own session is never
+    // what gives way.
+    const tried = await Promise.allSettled(
+      Array.from({ length: HISTORY_SESSIONS }, () => Gateway.connect(url, name, token)),
+    );
+    const sessions = tried.flatMap((r) => (r.status === 'fulfilled' ? [r.value] : []));
+    if (sessions.length === 0) throw new Error('the gateway would not open a session to read history');
+    return sessions;
+  }, districts * districts);
+  // The gateway counts sessions until it sees them close, and a page opened next may be waiting on that.
+  addEventListener('pagehide', () => seeker.close());
+  return seeker;
+}
+
+/** A short word on screen for something that did not work out, gone after a few seconds. */
+function note(text: string): void {
+  const el = document.createElement('p');
+  el.style.cssText =
+    'position:fixed;left:16px;bottom:16px;margin:0;padding:8px 12px;border-radius:8px;background:#000c;color:#fff;font:14px sans-serif;pointer-events:none';
+  el.textContent = text;
+  document.body.append(el);
+  setTimeout(() => el.remove(), 6000);
+}
+
+/** What to tell a person when a moment could not be opened. */
+function whyNot(err: unknown): string {
+  if (err instanceof SeekError && err.reason === 'unretained') return 'That moment is no longer kept.';
+  if (err instanceof SeekError && err.reason === 'future') return 'That moment has not happened yet.';
+  return 'That moment could not be opened.';
+}
+
+/** Buildings as one string, so two states can be compared without listing them. */
+function signature(built: ReadonlyMap<number, Building>): string {
+  const parts = [...built].sort((a, b) => a[0] - b[0]).map(([lot, b]) => `${lot}:${b.kind}:${b.rotation}`);
+  let h = 5381;
+  for (const c of parts.join(',')) h = (Math.imul(h, 33) ^ c.charCodeAt(0)) >>> 0;
+  return h.toString(16);
+}
+
+/** How long ago a wall time was, in the words the page uses for it. */
+function ago(wallUs: number): string {
+  const minutes = Math.max(0, Math.round((Date.now() - wallUs / 1000) / 60_000));
+  return minutes < 60 ? `${minutes} min ago` : `${Math.floor(minutes / 60)} h ${minutes % 60} m ago`;
+}
+
+/** Connections history is read over: two sessions keep eight reads in flight, and the gateway allows eight a person. */
+const HISTORY_SESSIONS = 2;
+
 /** Districts on a side when `?districts` does not say. */
 const DEFAULT_DISTRICTS = 2;
 
@@ -117,6 +212,7 @@ async function main() {
     districts,
     live: wantLive,
     gateway,
+    at,
     trace,
   } = parseParams(returned?.search ?? location.search, returned?.hash ?? location.hash);
   if (!ui) document.querySelectorAll('.chip').forEach((e) => e.classList.add('hidden'));
@@ -140,13 +236,65 @@ async function main() {
   let city: City | null = null;
   let state: CityState | null = null;
   let link: Link = { down: false };
+  /** The tick the city is held at when it was opened in the past, with no live connection. */
+  let pastTick: number | null = null;
+  let seekDone = 0;
+  /** The history reader, made by the first seek and kept for the ones after it. */
+  let history: Promise<Seeker | null> | null = null;
+  const dropHistory = () => {
+    void history?.then(
+      (s) => s?.close(),
+      () => {},
+    );
+    history = null;
+  };
+  const seeker = () => (history ??= openHistory(seed, districts, gateway));
+  const showPast = (result: SeekResult) => {
+    pill.textContent = `Earlier · ${ago(result.districts[0]!.records.at(-1)!.wallUs)}`;
+    pill.classList.add('late');
+    pill.classList.remove('hidden');
+    if (!result.exact) note('That exact moment is missing; showing the closest one before it.');
+  };
+  /** Told the frame after the city changed has been drawn. */
+  const frameWaiters: (() => void)[] = [];
   const pill = document.getElementById('pill')!;
   if (layout === 'city') {
     await init();
     city = parseCity(generate(seed, districts));
     document.title = `Felix Metro: ${seed}`;
     document.getElementById('subtitle')!.textContent = displayName(seed);
-    if (wantLive) {
+    let past: { state: CityState; result: SeekResult; seekMs: number } | null = null;
+    if (at !== null && !wantLive) note('Opening an earlier moment needs the live connection.');
+    if (wantLive && at !== null) {
+      try {
+        const started = performance.now();
+        const opened = await seeker();
+        if (!opened) throw new Error('nothing here answers like a gateway');
+        const result = await opened.seek(at);
+        const folded = new CityState(city, new Metro(seed, districts), districts * districts);
+        fold(folded, result);
+        for (let d = 0; d < districts * districts; d++) loader.ready(d);
+        past = { state: folded, result, seekMs: performance.now() - started };
+      } catch (err) {
+        // A moment the city does not hold, or no way to ask: show it live instead.
+        console.warn('the city could not be opened at that moment', err);
+        note(`${whyNot(err)} Showing the city live.`);
+        dropHistory();
+      }
+    }
+    if (past) {
+      state = past.state;
+      pastTick = past.result.tick;
+      seekDone = performance.now();
+      window.__seek = {
+        tick: past.result.tick,
+        seekMs: past.seekMs,
+        drawMs: null,
+        reads: (await seeker())!.stats.reads,
+        ticks: [...past.state.ticks],
+      };
+      showPast(past.result);
+    } else if (wantLive) {
       const joined = await follow(city, new Metro(seed, districts), seed, districts, gateway, pill, loader, trace);
       state = joined?.state ?? null;
       link = joined?.link ?? link;
@@ -179,13 +327,22 @@ async function main() {
 
   const slider = document.getElementById('hour') as HTMLInputElement;
   const clockTicks = new TickClock();
+  /** The buildings on screen, to work out what a different state changes. */
+  const shown = new Map(drawn);
+  const showLot = (lot: number, b: Building | null) => {
+    void setLot(lot, b);
+    if (b) shown.set(lot, b);
+    else shown.delete(lot);
+  };
+  /** The state the live connection feeds, which keeps taking records while the page is held in the past. */
+  const liveState = state;
   const traffic = state && fleet ? new Traffic(fleet, city ? (city.tiles - 1) / 2 : 0) : null;
   if (state && traffic) {
     // The sun follows the tick the page draws, so the slider is only a readout.
     slider.disabled = true;
     document.getElementById('timeline')!.dataset.live = '';
-    state.onLot = (lot, b) => void setLot(lot, b);
-    for (const [lot, b] of state.changesSince(drawn)) void setLot(lot, b);
+    state.onLot = showLot;
+    for (const [lot, b] of state.changesSince(drawn)) showLot(lot, b);
     state.onVoyageEnd = (v) => traffic.release(v);
     hour = cityTime(Math.max(0, state.latest - 1)).hour;
   }
@@ -224,6 +381,65 @@ async function main() {
       },
     };
   }
+  if (state && traffic && city) {
+    const metro = new Metro(seed, districts);
+    const summary = (s: CityState) => ({ ticks: [...s.ticks], buildings: s.built.size, sig: signature(s.built) });
+    /** Draw `next` in place of the state on screen, which is let go; the live one keeps filling in the background. */
+    const swap = (next: CityState, tick: number) => {
+      const old = state!;
+      if (old !== liveState) old.retire(Infinity);
+      else for (const v of old.active()) traffic.release(v);
+      old.onLot = null;
+      old.onVoyageEnd = null;
+      for (const [lot, b] of next.changesSince(shown)) showLot(lot, b);
+      next.onLot = showLot;
+      next.onVoyageEnd = (v) => traffic.release(v);
+      state = next;
+      pastTick = tick;
+    };
+    window.__metro = {
+      async prepare() {
+        await (await seeker())?.warm();
+      },
+      async seek(tick) {
+        const started = performance.now();
+        try {
+          const opened = await seeker();
+          if (!opened) throw new Error('nothing here answers like a gateway');
+          const result = await opened.seek(tick);
+          const next = new CityState(city!, metro, districts * districts);
+          fold(next, result);
+          const seekMs = performance.now() - started;
+          swap(next, result.tick);
+          showPast(result);
+          await new Promise<void>((done) => frameWaiters.push(done));
+          const drawnMs = performance.now() - started;
+          // Cars and walkers are made a share a frame, so the city fills in over the frames after the first.
+          let frames = 0;
+          while (traffic.waiting > 0 && frames++ < 600) await new Promise<void>((done) => frameWaiters.push(done));
+          return {
+            tick: result.tick,
+            requested: result.requested,
+            exact: result.exact,
+            ticks: [...next.ticks],
+            offsets: result.districts.map((d) => d.offset),
+            buildings: next.built.size,
+            sig: signature(next.built),
+            ms: drawnMs,
+            seekMs,
+            settledMs: performance.now() - started,
+            reads: opened.stats.reads,
+            stats: { ...opened.stats },
+          };
+        } catch (err) {
+          if (!(err instanceof DOMException && err.name === 'AbortError')) note(whyNot(err));
+          if (err instanceof GatewayError && err.code === 'closed') dropHistory();
+          throw err;
+        }
+      },
+      live: () => summary(liveState!),
+    };
+  }
   let intro: ReturnType<typeof startIntro> | null = null;
   function frame() {
     const now = performance.now();
@@ -239,7 +455,7 @@ async function main() {
     for (const p of people) p.mixer.update(dt);
     if (state && traffic && window.__live) {
       // The clock runs on real time even when frames are slow, so it stays with the sim.
-      const tick = clockTicks.advance(Math.min(1, frameMs / 1000), state.latest, state.speed, link.down);
+      const tick = pastTick ?? clockTicks.advance(Math.min(1, frameMs / 1000), state.latest, state.speed, link.down);
       if (!Number.isNaN(tick)) {
         state.retire(Math.floor(tick));
         traffic.update(tick, still ? 0 : dt, state.active());
@@ -259,6 +475,9 @@ async function main() {
     }
     controls.update();
     post!.render(controls.target);
+    for (const done of frameWaiters.splice(0)) done();
+    // A live state the page has left keeps taking records; let its finished trips go.
+    if (liveState && liveState !== state) liveState.retire(liveState.latest);
     if (window.__quality && memory[memory.length - 1]?.tier !== quality.tier) {
       const { textures, geometries } = renderer.info.memory;
       memory.push({ tier: quality.tier, textures, geometries });
@@ -270,6 +489,7 @@ async function main() {
   const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
   if (city && !still && frozenHour === null && !reduced) intro = startIntro(camera, controls, performance.now());
   frame();
+  if (window.__seek) window.__seek.drawMs = performance.now() - seekDone;
   document.body.dataset.ready = '1';
   window.__ready = true;
   loader.done(state !== null && showLoader);

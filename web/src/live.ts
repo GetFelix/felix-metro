@@ -35,7 +35,7 @@ export interface LiveOptions {
 
 const slot = (district: number) => `d${String(district).padStart(2, '0')}`;
 
-function parse(bytes: Uint8Array): TickRecord | null {
+export function parse(bytes: Uint8Array): TickRecord | null {
   try {
     const record = JSON.parse(decodeRecord(bytes));
     return record.kind === 'tick' ? (record as TickRecord) : null;
@@ -50,7 +50,24 @@ function parse(bytes: Uint8Array): TickRecord | null {
  * entity key, which depends on how the stream hashes keys; Felix does not say, so each is tried and a pointer is
  * trusted only if the record it names is that district's keyframe. Zero, the start of the log, when there is none.
  */
-async function keyframeOffset(gateway: Gateway, district: number, districts: number): Promise<number> {
+export async function keyframeOffset(
+  gateway: Pick<Gateway, 'stateGet' | 'read'>,
+  district: number,
+  districts: number,
+): Promise<number> {
+  return (await keyframePointer(gateway, district, districts)).offset;
+}
+
+/**
+ * {@link keyframeOffset} with the log length the state read was taken at, or null when no pointer answered. A caller that
+ * only wants the length passes `verify` false and skips the read that checks the pointer.
+ */
+export async function keyframePointer(
+  gateway: Pick<Gateway, 'stateGet' | 'read'>,
+  district: number,
+  districts: number,
+  verify = true,
+): Promise<{ offset: number; asOf: number | null }> {
   const keys = new Set<string>();
   for (const routing of ROUTINGS) {
     try {
@@ -60,9 +77,9 @@ async function keyframeOffset(gateway: Gateway, district: number, districts: num
     }
   }
   for (const key of keys) {
-    let payload;
+    let payload, asOf;
     try {
-      ({ payload } = await gateway.stateGet(STREAM, 'keyframe', key));
+      ({ payload, asOf } = await gateway.stateGet(STREAM, 'keyframe', key));
     } catch (err) {
       // Asked under the wrong routing the gateway can refuse; the other routing may answer.
       if (err instanceof GatewayError && err.code !== 'closed') continue;
@@ -70,18 +87,19 @@ async function keyframeOffset(gateway: Gateway, district: number, districts: num
     }
     if (!payload || payload.length < 8) continue;
     const offset = Number(new DataView(payload.buffer, payload.byteOffset, payload.byteLength).getBigUint64(0, true));
+    if (!verify) return { offset, asOf };
     let page;
     try {
       page = await gateway.read(STREAM, district, offset, offset + 1);
     } catch (err) {
       // Retention has taken the keyframe; the caller starts from what is left.
-      if (err instanceof GatewayError && err.code === 'trimmed') return 0;
+      if (err instanceof GatewayError && err.code === 'trimmed') return { offset: 0, asOf };
       throw err;
     }
     const record = page.records[0] && parse(page.records[0].payload);
-    if (record && record.district === district && record.keyframe) return offset;
+    if (record && record.district === district && record.keyframe) return { offset, asOf };
   }
-  return 0;
+  return { offset: 0, asOf: null };
 }
 
 /** How many times a district tries to catch up, the last one taking the log as it is, before the session is dropped. */
