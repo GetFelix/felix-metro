@@ -180,6 +180,11 @@ jobs:
           dev/speed.sh harbor 16
           [[ "$(dev/speed.sh harbor)" == "16" ]]
           dev/speed.sh harbor 4
+      # A script with a mayor token and no Origin header publishes build commands through the gateway: each shows up as a
+      # `command` event, with its sender, and a `built` event in the district of its lot within a tick. Commands the sim
+      # refuses are recorded with their reason and change nothing; a viewer cannot publish.
+      - name: A mayor's commands are applied, attributed and refused as they should be
+        run: node dev/check-commands.mjs pinecrest
       # The page at /#harbor signs in as `viewer`, follows the city through the gateway and draws it: the tick on
       # screen advances, cars are drawn and move, and the sun follows the tick. The sim runs at 4x so the commute and
       # the evening arrive in minutes. Screenshots of a day moment, dusk and a street are in the artifact.

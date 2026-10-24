@@ -1,12 +1,15 @@
 //! One city's state and the rules that advance it a tick at a time.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 use felix_metro_core::record::{
-    BuildingDiff, Counts, Doing, Event, Keyframe, Leg, ResidentState, Vehicle,
+    BuildingDiff, Command, Counts, Doing, Event, Keyframe, Leg, NO_BUILDING, REFUSED_BAD_KIND,
+    REFUSED_EMPTY, REFUSED_IN_USE, REFUSED_OCCUPIED, REFUSED_UNKNOWN, REFUSED_UNSUPPORTED,
+    RESULT_APPLIED, ResidentState, Vehicle,
 };
 use felix_metro_core::{
-    Activity, City, Congestion, Mode, Places, Resident, TICKS_PER_DAY, TICKS_PER_HOUR, Trip,
+    Activity, BuildingKind, City, Congestion, Mode, Places, Resident, TICKS_PER_DAY,
+    TICKS_PER_HOUR, Trip,
 };
 
 /// Ticks between keyframes: one city hour.
@@ -52,7 +55,7 @@ enum State {
 }
 
 pub(crate) struct World {
-    city: City,
+    pub(crate) city: City,
     people: Vec<Person>,
     /// The next tick to step.
     tick: u32,
@@ -60,6 +63,28 @@ pub(crate) struct World {
     cars: Vec<u16>,
     /// The lots whose building was changed after generation, by lot.
     built: BTreeMap<u32, BuildingDiff>,
+    /// Lots a resident's schedule sends them to. Demolishing one would strand
+    /// the people who go there.
+    pub(crate) in_use: HashSet<u32>,
+}
+
+/// What a command did: the district it touched and the events to record there.
+/// A refusal has only the `command` event's result to tell it apart.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct Applied {
+    pub(crate) district: u16,
+    pub(crate) result: u8,
+    pub(crate) events: Vec<Event>,
+}
+
+impl Applied {
+    fn refused(district: u16, result: u8) -> Applied {
+        Applied {
+            district,
+            result,
+            events: Vec::new(),
+        }
+    }
 }
 
 impl World {
@@ -71,7 +96,7 @@ impl World {
     }
 
     pub(crate) fn with_places(city: City, places: &Places) -> World {
-        let people = (0..places.population())
+        let people: Vec<Person> = (0..places.population())
             .filter_map(|index| Resident::new(&city, places, index))
             .map(|resident| Person {
                 resident,
@@ -81,12 +106,108 @@ impl World {
             })
             .collect();
         let cars = vec![0; city.segments.len()];
+        let in_use = people
+            .iter()
+            .flat_map(|p| p.resident.schedule.blocks.iter().map(|b| b.lot))
+            .collect();
         World {
             city,
             people,
             tick: 0,
             cars,
             built: BTreeMap::new(),
+            in_use,
+        }
+    }
+
+    /// The building on `lot` now: kind and rotation.
+    pub(crate) fn building(&self, lot: u32) -> Option<(u16, u8)> {
+        let generated = self.city.lots.get(lot as usize)?;
+        Some(match self.built.get(&lot) {
+            Some(diff) => (diff.kind, diff.rotation),
+            None => (u16::from(generated.kind.0), generated.facing),
+        })
+    }
+
+    /// Carries out a `place road`, `zone`, `build` or `demolish` before the
+    /// next step, so that tick's keyframe and events already show it. A
+    /// refusal changes nothing. `speed` and `fork` are the runner's.
+    pub(crate) fn apply(&mut self, command: &Command) -> Applied {
+        match *command {
+            Command::Build {
+                lot,
+                kind,
+                rotation,
+            } => {
+                let Some((now, _)) = self.building(lot) else {
+                    return Applied::refused(0, REFUSED_UNKNOWN);
+                };
+                let district = self.city.lots[lot as usize].district;
+                if kind >= u16::from(BuildingKind::TREE_FIRST) || rotation > 3 {
+                    return Applied::refused(district, REFUSED_BAD_KIND);
+                }
+                if !is_empty(now) {
+                    return Applied::refused(district, REFUSED_OCCUPIED);
+                }
+                // A park residents go to stays one.
+                if self.in_use.contains(&lot) {
+                    return Applied::refused(district, REFUSED_IN_USE);
+                }
+                self.built.insert(
+                    lot,
+                    BuildingDiff {
+                        lot,
+                        kind,
+                        rotation,
+                    },
+                );
+                Applied {
+                    district,
+                    result: RESULT_APPLIED,
+                    events: vec![Event::Built {
+                        lot,
+                        kind,
+                        rotation,
+                    }],
+                }
+            }
+            Command::Demolish { lot } => {
+                let Some((kind, rotation)) = self.building(lot) else {
+                    return Applied::refused(0, REFUSED_UNKNOWN);
+                };
+                let district = self.city.lots[lot as usize].district;
+                if is_empty(kind) {
+                    return Applied::refused(district, REFUSED_EMPTY);
+                }
+                if self.in_use.contains(&lot) {
+                    return Applied::refused(district, REFUSED_IN_USE);
+                }
+                self.built.insert(
+                    lot,
+                    BuildingDiff {
+                        lot,
+                        kind: NO_BUILDING,
+                        rotation: 0,
+                    },
+                );
+                Applied {
+                    district,
+                    result: RESULT_APPLIED,
+                    events: vec![Event::Demolished {
+                        lot,
+                        kind,
+                        rotation,
+                    }],
+                }
+            }
+            // A road changes the graph every route and the page's own copy of
+            // the city are built on, and a zone has no record to carry it.
+            Command::PlaceRoad { .. } | Command::Zone { .. } => {
+                Applied::refused(0, REFUSED_UNSUPPORTED)
+            }
+            Command::Speed { .. } | Command::Fork { .. } => {
+                Applied::refused(0, REFUSED_UNSUPPORTED)
+            }
         }
     }
 
@@ -310,6 +431,12 @@ fn vehicle_state(trip: &Trip, kind: u8, leg: usize, progress: u16) -> Vehicle {
         progress,
         route,
     }
+}
+
+/// A lot with nothing on it that a builder would count: bare, or only trees and
+/// plaza props.
+fn is_empty(kind: u16) -> bool {
+    kind == NO_BUILDING || kind >= u16::from(BuildingKind::TREE_FIRST)
 }
 
 fn district_of(city: &City, trip: &Trip, tick: u32) -> u16 {

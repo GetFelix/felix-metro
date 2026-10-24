@@ -1,17 +1,19 @@
 //! A city's clock: steps the world, commits one record per district per tick
 //! and waits for every answer before the next tick.
 
+use std::collections::VecDeque;
 use std::future::Future;
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use felix_metro_core::City;
 use felix_metro_core::record::{Event, Header, TickRecord};
-use tokio::sync::watch;
+use tokio::sync::{mpsc, watch};
 use tokio::task::JoinSet;
 use tokio::time::{Instant, MissedTickBehavior};
 use tracing::{info, warn};
 
+use crate::commands::{Incoming, MAX_HELD, MAX_PER_TICK, MAX_REFUSED, apply_all, refuse_busy};
 use crate::control::check_speed;
 use crate::latency::Window;
 use crate::world::World;
@@ -58,6 +60,10 @@ pub struct Settings {
     /// Changes the speed while the run is going. The runner reads it between
     /// ticks, so a change lands on the next tick.
     pub speed: Option<watch::Receiver<u8>>,
+    /// Where a commanded speed is written, so the operator's endpoint reports
+    /// what the city runs at. Without it the runner still keeps the command
+    /// and reads `speed` only when it changes.
+    pub speed_out: Option<watch::Sender<u8>>,
     /// Wait out each tick's period. Tests turn this off to run a day in seconds.
     pub paced: bool,
     /// Stop before stepping this tick. `None` runs until stopped.
@@ -81,6 +87,7 @@ impl Default for Settings {
             epoch: 0,
             ticks_per_second: 4,
             speed: None,
+            speed_out: None,
             paced: true,
             stop_at: None,
             commit_timeout: Duration::from_secs(5),
@@ -120,9 +127,24 @@ struct Shard {
 /// Changing to 0 commits that tick as the last one, then the clock waits; a
 /// resume continues at the next tick with no catch-up burst.
 pub async fn run_city<L: Log>(name: &str, city: City, settings: Settings, log: L) -> Result<Done> {
+    run_city_with(name, city, settings, log, None).await
+}
+
+/// Like [`run_city`], applying the builders' commands that arrive on `commands`.
+/// They are applied in order before the next tick is stepped, so that tick's
+/// records carry the `command` events and what they changed, and its keyframe
+/// shows the result. A paused city keeps them until a `speed` command or the
+/// operator resumes it.
+pub async fn run_city_with<L: Log>(
+    name: &str,
+    city: City,
+    settings: Settings,
+    log: L,
+    mut inbox: Option<mpsc::Receiver<Incoming>>,
+) -> Result<Done> {
     let mut speed = check_speed(settings.ticks_per_second)?;
     let mut control = settings.speed.clone();
-    if speed == 0 && control.is_none() {
+    if speed == 0 && control.is_none() && inbox.is_none() {
         bail!("the city starts paused and nothing can resume it");
     }
     let mut world = World::new(city);
@@ -140,6 +162,8 @@ pub async fn run_city<L: Log>(name: &str, city: City, settings: Settings, log: L
     let mut shards = vec![Shard::default(); world.districts()];
     let mut retries = 0u64;
     let mut report = Report::new(Instant::now());
+    let mut queue: VecDeque<Incoming> = VecDeque::new();
+    let mut refused: VecDeque<Incoming> = VecDeque::new();
     loop {
         let tick = world.next_tick();
         if settings.stop_at == Some(tick) {
@@ -148,32 +172,97 @@ pub async fn run_city<L: Log>(name: &str, city: City, settings: Settings, log: L
                 retries,
             });
         }
-        let mut changed = None;
+        let mut wanted = speed;
         if parked {
-            let Some(control) = control.as_mut() else {
+            if control.is_none() && inbox.is_none() {
                 bail!("the city is paused and nothing can resume it");
-            };
-            let resumed = *control
-                .wait_for(|s| *s != 0)
-                .await
-                .context("the speed control was dropped while the city was paused")?;
-            speed = check_speed(resumed)?;
-            period = tick_period(speed);
-            // The first tick back is due at once.
-            timer = new_timer(period, true);
-            changed = Some(speed);
-            // Don't average the first report over the pause.
-            report = Report::new(Instant::now());
-        } else if let Some(control) = control.as_mut() {
-            let wanted = check_speed(*control.borrow_and_update())?;
-            if wanted != speed {
-                speed = wanted;
-                changed = Some(speed);
-                if speed != 0 {
-                    period = tick_period(speed);
-                    timer = new_timer(period, false);
+            }
+            // A resume still in the queue (left behind by a pause that came
+            // ahead of it) is already here: waiting would strand it.
+            if let Some(at) = queue.iter().find_map(Incoming::resumes_at) {
+                wanted = at;
+            } else {
+                let mut dropped = 0u64;
+                loop {
+                    tokio::select! {
+                        speed_set = wait_resumed(&mut control) => {
+                            wanted = check_speed(speed_set?)?;
+                            break;
+                        }
+                        got = next_incoming(&mut inbox) => match got {
+                            Some(got) => {
+                                let wakes = got.resumes_at();
+                                // The command that resumes the city is always kept, or it could not.
+                                if wakes.is_some() || queue.len() < MAX_HELD {
+                                    queue.push_back(got);
+                                } else if refused.len() < MAX_REFUSED {
+                                    refused.push_back(got);
+                                } else {
+                                    dropped += 1;
+                                    if dropped == 1 {
+                                        warn!(city = name, "the paused city holds no more commands; dropping the rest");
+                                    }
+                                }
+                                if let Some(at) = wakes {
+                                    // Commands queued ahead of it may take several ticks to apply.
+                                    wanted = at;
+                                    break;
+                                }
+                            }
+                            None => {
+                                inbox = None;
+                                if control.is_none() {
+                                    bail!("the city is paused and nothing can resume it");
+                                }
+                            }
+                        },
+                    }
+                }
+                if dropped > 0 {
+                    warn!(
+                        city = name,
+                        dropped, "commands dropped while the city was paused"
+                    );
                 }
             }
+        }
+        // Read right before the commands apply, so a later command overrides
+        // an earlier operator setting and the write-back below can tell a
+        // setting that arrives after this read.
+        if let Some(control) = control.as_mut()
+            && control.has_changed().unwrap_or(false)
+        {
+            wanted = check_speed(*control.borrow_and_update())?;
+        }
+        if let Some(inbox) = inbox.as_mut() {
+            while queue.len() < MAX_PER_TICK {
+                let Ok(got) = inbox.try_recv() else { break };
+                queue.push_back(got);
+            }
+        }
+        let taken: Vec<Incoming> = queue.drain(..queue.len().min(MAX_PER_TICK)).collect();
+        let room = MAX_PER_TICK - taken.len();
+        let mut commanded = apply_all(&mut world, taken, &mut wanted);
+        // Commands the paused city had no room for are refused once its queue is clear.
+        if queue.is_empty() {
+            commanded[0].extend(refused.drain(..refused.len().min(room)).map(refuse_busy));
+        }
+        let mut changed = None;
+        if wanted != speed {
+            speed = wanted;
+            changed = Some(speed);
+            if let Some(out) = &settings.speed_out {
+                publish_speed(out, control.as_mut(), speed);
+            }
+            if speed != 0 {
+                period = tick_period(speed);
+                // The first tick back from a pause is due at once.
+                timer = new_timer(period, parked);
+            }
+        }
+        if parked {
+            // Don't average the first report over the pause.
+            report = Report::new(Instant::now());
         }
         if settings.paced {
             timer.tick().await;
@@ -182,6 +271,7 @@ pub async fn run_city<L: Log>(name: &str, city: City, settings: Settings, log: L
         let wall_us = unix_micros();
         let mut commits = JoinSet::new();
         for (district, step) in world.step().into_iter().enumerate() {
+            let commanded = std::mem::take(&mut commanded[district]);
             let shard = shards[district];
             let keyframe = step.keyframe.is_some();
             // A keyframe names itself, which the expected offset makes possible.
@@ -199,6 +289,7 @@ pub async fn run_city<L: Log>(name: &str, city: City, settings: Settings, log: L
                 events: changed
                     .map(|ticks_per_second| Event::Speed { ticks_per_second })
                     .into_iter()
+                    .chain(commanded)
                     .chain(step.events)
                     .collect(),
             };
@@ -244,6 +335,61 @@ pub async fn run_city<L: Log>(name: &str, city: City, settings: Settings, log: L
         if now.duration_since(report.since) >= REPORT_EVERY {
             report.log(name, now);
         }
+    }
+}
+
+/// Reports a commanded `speed` on the operator's watch, unless the operator
+/// set something after the runner last read it: that setting is newer and is
+/// applied on the next tick. Returns whether it wrote.
+fn publish_speed(
+    out: &watch::Sender<u8>,
+    control: Option<&mut watch::Receiver<u8>>,
+    speed: u8,
+) -> bool {
+    let Some(control) = control else {
+        out.send_replace(speed);
+        return true;
+    };
+    // The check runs under the sender's lock, so no setting slips in after it.
+    let wrote = out.send_if_modified(|current| {
+        if control.has_changed().unwrap_or(false) {
+            return false;
+        }
+        *current = speed;
+        true
+    });
+    if wrote {
+        // Our own write is not a new setting to act on.
+        control.borrow_and_update();
+    }
+    wrote
+}
+
+/// The speed the operator's control resumes a paused city at, or never when
+/// there is no control.
+async fn wait_resumed(control: &mut Option<watch::Receiver<u8>>) -> Result<u8> {
+    let Some(control) = control else {
+        return std::future::pending().await;
+    };
+    // Waits for a new setting: a value already there is what a command
+    // replaced, not an instruction to resume.
+    loop {
+        control
+            .changed()
+            .await
+            .context("the speed control was dropped while the city was paused")?;
+        let set = *control.borrow_and_update();
+        if set != 0 {
+            return Ok(set);
+        }
+    }
+}
+
+/// The next command, or never when there is no inbox.
+async fn next_incoming(inbox: &mut Option<mpsc::Receiver<Incoming>>) -> Option<Incoming> {
+    match inbox {
+        Some(inbox) => inbox.recv().await,
+        None => std::future::pending().await,
     }
 }
 

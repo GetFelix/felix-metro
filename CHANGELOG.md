@@ -1,6 +1,26 @@
 # Changelog
 
-## Unreleased
+## [Unreleased]
+
+### Building
+
+- The sim reads each city's command stream and applies `build` and `demolish` before
+  the next tick. Every command is recorded as a `command` event with a hash of who
+  sent it and a result, in the district it touched, beside the `built` or
+  `demolished` event it caused. A refused command is recorded with its reason and
+  changes nothing.
+- The `speed` command sets the city's speed and resumes a paused city. The loopback
+  endpoint stays for operators.
+- A commanded speed is the city's speed: the operator endpoint reports it, and it holds
+  until someone sets another. A paused city holds a bounded queue of commands and
+  records the overflow as refused (result 9) once it resumes.
+- A resume queued behind a pause is no longer stranded, an operator setting that lands during a commanded change is no longer overwritten, a flood past what a paused city holds logs once per pause, and a closed command stream is logged as an error.
+- The sim keeps retrying to follow a city's command stream at startup instead of running without builders after one refusal.
+- `place road`, `zone` and `fork` are refused as unsupported for now.
+- The page's fold follows `road` events and a keyframe's road list.
+- `dev/check-commands.mjs` publishes commands as a mayor from a plain client; the
+  dev-stack CI job runs it. It reads keyframe records too, fails when a result never
+  appears, and checks a later keyframe lists the built lot.
 
 ### The city
 
@@ -12,9 +32,9 @@
   The harbor city at 2 by 2 districts has 522 residents (was 174) and up to 104
   cars on the road at once (was 18). A seed generates different residents and
   schedules than before; there is no compatibility with logs written earlier.
-- The log is sized for its peak. A 20,000-resident city averages about 8 KB/s a
+- The rush writes more than the 10 KB/s goal. A 20,000-resident city averages about 8 KB/s a
   day but writes about 17 KB/s in the busiest minute of the rush, when every
-  district's hourly keyframe lands with the commute. The README and design say so.
+  district's hourly keyframe lands with the commute. The README and design say so; #95 tracks bringing it back.
 
 ### The look
 

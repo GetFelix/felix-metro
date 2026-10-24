@@ -17,7 +17,7 @@ and play forward from there.
 
 ## What you will be able to do
 
-- Watch a generated city go about its day in 3D: residents commute, shop and go home, and the sun rises and sets. Rush hour at 08:00 and 17:15 puts up to about 40 cars and 10 walkers on the streets of the busiest district, and about 100 cars across the harbor city at 2 by 2 (522 residents; `cargo run --release -p felix-metro-core --example density -- harbor 2` prints the counts). The log averages about 8 KB/s over a day at 20,000 residents and peaks near 17 KB/s in the busiest minute of the rush, from the hourly snapshots of each district landing together (`cargo test -p felix-metro-sim --release report_load -- --ignored --nocapture` measures it).
+- Watch a generated city go about its day in 3D: residents commute, shop and go home, and the sun rises and sets. Rush hour at 08:00 and 17:15 puts up to about 40 cars and 10 walkers on the streets of the busiest district, and about 100 cars across the harbor city at 2 by 2 (522 residents; `cargo run --release -p felix-metro-core --example density -- harbor 2` prints the counts). The log averages about 8 KB/s over a day at 20,000 residents and peaks near 17 KB/s in the busiest minute of the rush, from the hourly snapshots of each district landing together, which #95 tracks (`cargo test -p felix-metro-sim --release report_load -- --ignored --nocapture` measures it).
 - Drag the timeline back to any moment the log holds and see the city exactly as it was
 - Let go and watch it play forward and catch up to live
 - Follow one resident or car through their day
@@ -58,7 +58,7 @@ there. [docs/design.md](docs/design.md) has the details.
 | 1 | A live city | Done |
 | 2 | Time travel | In progress: keyframes, seeking and the timeline scrubber done |
 | 3 | Follow a life | Planned |
-| 4 | Build | Planned |
+| 4 | Build | In progress: the sim applies build, demolish and speed commands and records who sent them; placement tools in the page, roads and zones are not built yet |
 | 5 | Branching timelines | Planned |
 | 6 | Scale and failover | Planned |
 | 7 | Self-hosting | Planned |
@@ -70,8 +70,9 @@ city. If the connection drops, a `Reconnecting…` pill shows, the city keeps mo
 the page reads what it missed from the log and carries on in order. If retention has
 already dropped what it missed, it restarts that district from the newest keyframe left.
 A city the gateway refuses (a misspelled name, or no access) shows a message instead of
-retrying. The city name in the top left opens a list of every city. Scrubbing back in time, following a resident and
-building are not built yet.
+retrying. The city name in the top left opens a list of every city. Following a resident and the page's own
+building tools are not built yet; a command published to the city's command stream by any client with a
+builder's token is applied by the sim and shows up in the page.
 
 ## Install a release
 
@@ -145,6 +146,20 @@ To watch ticks arrive the way a browser gets them, through the gateway (needs No
 ```sh
 node dev/check-ticks.mjs harbor pinecrest
 ```
+
+To build the way a mayor does, from a plain client with no browser (needs Node 22), publish
+commands through the gateway and watch them come back as events:
+
+```sh
+node dev/check-commands.mjs pinecrest
+```
+
+It signs in as `mayor` (`GET /token?sub=mayor` on the dev IdP, no `Origin` header),
+publishes `build` commands until one takes, and checks that the district of that lot
+records the command with its sender and the `built` event within a tick. It then sends
+commands the sim must refuse and checks each is recorded with its reason and changes
+nothing. It then waits for the district's next keyframe (up to a minute at the default speed)
+and checks it lists the built lot, and demolishes what it built. A `viewer` cannot publish.
 
 The sim runs at 4 ticks a second. Its speed endpoint accepts only loopback, so it is
 not published; `dev/speed.sh` runs `curl` inside the sim's container:

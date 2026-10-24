@@ -35,7 +35,7 @@ enough to keep days of it.
 
 1. **Rewind to any moment, quickly.** From any position on the timeline, the city is drawn at that moment in under a second.
 2. **Rewind, then follow live with no gap.** Playing forward from the past joins live delivery without a missing or repeated event.
-3. **A small log.** A city of 20,000 residents writes about 8 KB/s over a day and about 17 KB/s in the busiest minute of the rush, so a week of history is a few gigabytes on one broker.
+3. **A small log.** A city of 20,000 residents writes on the order of 10 KB/s, so a week of history is a few gigabytes on one broker. Today's rush peaks near 17 KB/s, see #95.
 4. **One authority that survives a restart.** The simulation is fenced at the broker, and a replacement picks up from the log where the last one stopped.
 5. **Forks are cheap.** A branch starts from a keyframe of the parent and owes it nothing after that.
 
@@ -116,7 +116,7 @@ not needed at the target scale and is left out.
 - **Speed changes the tick rate, not the tick.** Pause, 1×, 2× and 4× step at 0, 4, 8 and 16 Hz. A tick always covers the same city time, so the tick number stays a linear clock and seeking and interpolation never need to know the speed. The log costs the same per city day at any speed; only its rate per real second changes.
 - **Speed belongs to the city, not the viewer.** It is set on the sim, written in every tick header, and changed with a `speed` event, so a seek can turn wall time into ticks across speed changes. A viewer's playback speed while scrubbing is separate and local.
 - **A speed change takes effect between ticks.** The sim reads the requested speed after every district has answered a tick, so the next tick's header carries the new speed and each district's record for it holds a `speed` event; no other tick has one. Changing to 0 commits that tick as the last one (header speed 0), then the clock stops: no records are written while paused and the city clock does not move. A resume continues at the next tick, due at once and at the new rate from then on, with no catch-up burst. Only 0, 4, 8 and 16 are accepted. Seeking goes by tick number and offset, and nothing in `core` reads the speed.
-- **Until builders get a control, the operator sets it** with `SIM_TICKS_PER_SECOND` at start and a loopback-only HTTP endpoint on the sim (`PUT /cities/<name>/speed`). The `speed` command from the command stream replaces the endpoint.
+- **The operator sets it** with `SIM_TICKS_PER_SECOND` at start and a loopback-only HTTP endpoint on the sim (`PUT /cities/<name>/speed`). A builder's `speed` command from the command stream does the same, and a nonzero one resumes a paused city.
 - **The tick number is the city's clock.** Every record carries it. "The city at 08:15 on day 3" is a tick number, and the city at a tick is every district rewound to that tick.
 - **Offsets are per district.** Districts are aligned by tick, never by offset.
 
@@ -239,7 +239,7 @@ the residents.
 20,000 residents at about 10 bytes each (measured: a district of 200 residents writes a 1.8 KB keyframe) is about 200 KB per city hour, about
 3.4 KB/s. Events, keyframes and record headers together come to about 8.4 KB/s averaged over a day, or under 1 GB a day.
 
-The mean hides the rush. Trips cluster around 08:00 and 17:15, and the hourly keyframe of every district lands on the same tick (08:00 and 17:00 are both on the hour). Measured on a harbor city with 1,260 residents in each of four districts, the same load as 20,000 residents in 16, the busiest minute of the morning rush writes 3.7 KB/s and of the evening rush 4.2 KB/s, which is 14.6 and 16.5 KB/s at 20,000 residents, and one district's busiest minute is 1.5 KB/s. The worst single tick is a district's keyframe, about 20 KB, against under 600 B for a tick without one. `report_load` in `sim/src/world/tests.rs` prints these. Sizing for the log is therefore about 17 KB/s at peak, not the 10 KB/s the daily mean suggests.
+The mean hides the rush. Trips cluster around 08:00 and 17:15, and the hourly keyframe of every district lands on the same tick (08:00 and 17:00 are both on the hour). Measured on a harbor city with 1,260 residents in each of four districts, the same load as 20,000 residents in 16, the busiest minute of the morning rush writes 3.7 KB/s and of the evening rush 4.2 KB/s, which is 14.6 and 16.5 KB/s at 20,000 residents, and one district's busiest minute is 1.5 KB/s. The worst single tick is a district's keyframe, about 20 KB, against under 600 B for a tick without one. `report_load` in `sim/src/world/tests.rs` prints these. Bringing the peak back to the 10 KB/s goal is tracked in #95.
 The counts are what the stats sparkline plots.
 
 ### Commands and the registry
@@ -247,7 +247,65 @@ The counts are what the stats sparkline plots.
 A command record is the kind byte, a command id `u32`, the builder's display
 name, a tag and fields. It carries no principal: the gateway's `stamp_sender`
 adds who sent it outside the payload, and the sim copies that principal hash
-with the name into the `command` event of the district it touched.
+with the name into the `command` event of the district it touched. The hash is
+FNV-1a over the principal's UTF-8 bytes, so the same builder always has the same
+hash and the log never holds the principal.
+
+The sim reads the stream from its tail and applies commands in order before it
+steps the next tick, at most 256 a tick. That tick's records carry the `command`
+event, then what it changed (`built` or `demolished`), in the district of the
+lot, and its keyframe already shows the change. A refused command records only
+the `command` event, with a result code, and the city steps as if it had not
+been sent. A command with no district, such as a malformed record or a lot past
+the last, is recorded in district 0.
+
+A paused city holds up to 1,024 commands. Further ones are remembered only as
+who sent them and their id, up to another 1,024, and are recorded in district 0
+with result 9 once the held commands have run, after the city resumes. The
+command that resumes the city is always held. Past 2,048 commands the sim drops
+the extra, logging one warning when the dropping starts and a count when the pause ends, because remembering every command would use unbounded
+memory while nothing is ticking. A running city reads at most 256 a tick and
+never skips a tick for commands.
+
+The operator's endpoint and the `speed` command write one value. The last to
+change it wins, a commanded speed stays until someone sets another, and a
+`speed` event is recorded once per actual change. The sim reads the operator's
+setting right before it applies a tick's commands, so a command applied after it
+overrides it, and it reports a commanded speed only if the operator has set
+nothing since that read; a newer operator setting is applied on the next tick.
+A `speed` command that resumes a paused city is never left waiting behind
+commands queued ahead of it: the city keeps working through its queue until it
+is empty or paused with no resume in it.
+
+On a restart the sim begins again at tick 0 with the generated city: what
+builders built (`World.built`) is not persisted, and the log's older epoch
+still shows it. The command follower starts at the stream's tail, so commands sent while the
+sim was down are not run. It opens the subscription in the background and
+retries every second until the broker accepts it (a broker still electing
+leaders refuses at startup), so commands sent before it opens are not seen.
+Once open, the Felix client's subscription survives a lost connection or a
+moved shard by resubscribing at the offset after the last command it delivered
+(or at the tail it first joined, if none yet), so nothing is skipped or
+repeated. An error it reports is the last thing that subscription yields: the
+follower logs it, waits a second and asks the same subscription again, and if
+it then reports the stream closed the follower logs an error naming the city and stops, and the city runs without
+builders until the sim restarts.
+
+| Result | Meaning |
+|---|---|
+| 0 | applied |
+| 1 | not a command record |
+| 2 | lot or node does not exist |
+| 3 | `build` on a lot that has a building |
+| 4 | `demolish` on a lot with nothing on it |
+| 5 | `build` of a kind that is not a building, or a rotation past 3 |
+| 6 | `speed` other than 0, 4, 8 or 16 |
+| 7 | not carried out yet: `place road`, `zone` and `fork` |
+| 8 | the lot is one residents go to |
+| 9 | sent while the city was paused with more commands waiting than it holds; send it again |
+
+Lots residents go to (homes, workplaces, parks) cannot be built over or demolished,
+because the schedules that send people there do not change.
 
 The display name comes from the ID token's name claim, chosen client-side, so it
 is whatever the builder chose and is shown as given. The record layer only

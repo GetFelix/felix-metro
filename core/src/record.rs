@@ -46,6 +46,29 @@ pub const ROAD_OPENED: u8 = 1;
 pub const ROAD_ADDED: u8 = 2;
 pub const ROAD_REMOVED: u8 = 3;
 
+/// `command` event results. 0 is applied; everything else is a refusal that
+/// changed nothing in the city.
+pub const RESULT_APPLIED: u8 = 0;
+/// The record did not decode, or its name or fields were out of range.
+pub const REFUSED_MALFORMED: u8 = 1;
+/// A lot or node index past the end of the city.
+pub const REFUSED_UNKNOWN: u8 = 2;
+/// `build` on a lot that already has a building.
+pub const REFUSED_OCCUPIED: u8 = 3;
+/// `demolish` on a lot with nothing on it.
+pub const REFUSED_EMPTY: u8 = 4;
+/// `build` with a kind or rotation the city has no model for.
+pub const REFUSED_BAD_KIND: u8 = 5;
+/// `speed` other than 0, 4, 8 or 16.
+pub const REFUSED_BAD_SPEED: u8 = 6;
+/// A command this build of the sim does not carry out yet.
+pub const REFUSED_UNSUPPORTED: u8 = 7;
+/// `demolish` on a building residents live or work in.
+pub const REFUSED_IN_USE: u8 = 8;
+/// Sent while the city was paused with more commands waiting than the sim
+/// holds. Not carried out; send it again.
+pub const REFUSED_BUSY: u8 = 9;
+
 /// Why a record could not be read.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DecodeError {
@@ -312,6 +335,24 @@ pub enum Command {
         tick: u32,
         name: String,
     },
+}
+
+/// The 64-bit hash of a Felix principal that a `command` event carries: FNV-1a
+/// over its UTF-8 bytes. It names who built without putting the principal in
+/// the log; the same principal always gives the same hash.
+pub fn principal_hash(principal: &str) -> u64 {
+    principal.bytes().fold(0xcbf2_9ce4_8422_2325, |hash, byte| {
+        (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3)
+    })
+}
+
+/// Splits a payload the gateway stamped (`stamp_sender`): a big-endian `u16`
+/// length, the publisher's principal, then the record. `None` when the stamp is
+/// missing, cut short or not UTF-8.
+pub fn split_stamp(payload: &[u8]) -> Option<(&str, &[u8])> {
+    let len = usize::from(u16::from_be_bytes([*payload.first()?, *payload.get(1)?]));
+    let principal = std::str::from_utf8(payload.get(2..2 + len)?).ok()?;
+    Some((principal, &payload[2 + len..]))
 }
 
 /// An entry in the `metro.cities` registry.
