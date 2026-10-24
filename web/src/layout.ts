@@ -5,6 +5,7 @@ export interface Lot {
   id: number;
   x: number;
   z: number;
+  district: number;
   zone: string;
   kind: number;
   /** Quarter turns from facing south: 0 south, 1 east, 2 north, 3 west. */

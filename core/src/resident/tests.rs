@@ -176,3 +176,68 @@ fn nothing_to_pick_is_none() {
         None
     );
 }
+
+/// A trip the way a reader of the log has it: from the legs alone.
+fn same_trip(city: &City, a: &Trip, b: &Trip) {
+    assert_eq!(a.mode, b.mode);
+    assert_eq!(a.depart, b.depart);
+    assert_eq!(a.legs(), b.legs());
+    assert_eq!(a.arrive(), b.arrive());
+    for tick in a.depart..=a.arrive() + 1 {
+        assert_eq!(a.position_at(city, tick), b.position_at(city, tick));
+    }
+}
+
+#[test]
+fn a_trip_event_gives_back_the_trip_it_came_from() {
+    let jam: Vec<u16> = (0..4096).map(|i| (i % 5) as u16 * 6).collect();
+    let mut checked = 0;
+    for city in cities() {
+        let places = Places::new(&city);
+        for index in all(&places).step_by(3) {
+            let r = Resident::new(&city, &places, index).unwrap();
+            for cong in [Congestion::FREE, Congestion::new(&jam)] {
+                for day in [0, 1] {
+                    let free_at = day * TICKS_PER_DAY;
+                    for trip in r.day_trips(&city, day, &cong, free_at).unwrap() {
+                        let mode = trip.mode;
+                        let back = r
+                            .trip_from_route(&city, trip.depart, &trip.legs(), mode)
+                            .unwrap_or_else(|| panic!("{} resident {index}", city.seed));
+                        same_trip(&city, &trip, &back);
+                        checked += 1;
+                    }
+                }
+            }
+        }
+    }
+    assert!(checked > 2000, "{checked}");
+}
+
+#[test]
+fn legs_that_join_no_doors_are_no_trip() {
+    let city = City::generate("harbor", 2).unwrap();
+    let places = Places::new(&city);
+    let r = Resident::new(&city, &places, 0).unwrap();
+    let trip = r
+        .day_trips(&city, 0, &Congestion::FREE, 0)
+        .unwrap()
+        .remove(0);
+    let mut legs = trip.legs();
+    assert!(
+        r.trip_from_route(&city, trip.depart, &[], trip.mode)
+            .is_none()
+    );
+    legs.reverse();
+    if legs.len() > 1 {
+        assert!(
+            r.trip_from_route(&city, trip.depart, &legs, trip.mode)
+                .is_none()
+        );
+    }
+    legs[0].segment = u32::MAX;
+    assert!(
+        r.trip_from_route(&city, trip.depart, &legs, trip.mode)
+            .is_none()
+    );
+}

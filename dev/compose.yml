@@ -166,6 +166,10 @@ services:
       dockerfile: dev/web.Dockerfile
     ports:
       - "127.0.0.1:8088:80"
+    # nginx resolves the gateway's name when it starts.
+    depends_on:
+      gateway:
+        condition: service_started
 
 volumes:
   felix-data:

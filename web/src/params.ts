@@ -18,8 +18,13 @@ export interface Params {
   /** The seed, from the hash. */
   seed: string;
   districts: number;
+  /** Follow the city's log through the gateway; false draws it with no traffic, as when no gateway answers. */
+  live: boolean;
+  /** The gateway's WebSocket URL, or null for `/ws` on the page's own origin. */
+  gateway: string | null;
 }
 
+// ?live=0 skips the gateway and draws the city alone, ?gateway=ws://host:8787/ws names a gateway other than the page's own.
 // ?layout=frame draws the style frame's city instead of the generated one, ?districts=3 sets the districts per side
 // (2 by default) and the hash picks the seed (/#harbor).
 // ?t=18.5 freezes the clock at that hour, ?still freezes motion, ?tier=low|medium|high forces a tier, ?ui=0 hides the
@@ -37,5 +42,7 @@ export function parseParams(search: string, hash = ''): Params {
     layout: params.get('layout') === 'frame' ? 'frame' : 'city',
     seed: seedFromHash(hash),
     districts: Math.min(16, Math.max(1, parseInt(params.get('districts') ?? '2', 10) || 2)),
+    live: params.get('live') !== '0',
+    gateway: params.get('gateway'),
   };
 }

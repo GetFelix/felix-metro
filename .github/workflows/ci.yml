@@ -161,12 +161,14 @@ jobs:
   dev-stack:
     name: dev-stack
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
       # Felix, the gateway, the sim for harbor and pinecrest, and the web app, all built and started from dev/compose.yml.
       - run: dev/up.sh
       # A client signs in through the IdP, joins each city at the gateway and follows every district's shard live.
@@ -178,5 +180,21 @@ jobs:
           dev/speed.sh harbor 16
           [[ "$(dev/speed.sh harbor)" == "16" ]]
           dev/speed.sh harbor 4
+      # The page at /#harbor signs in as `viewer`, follows the city through the gateway and draws it: the tick on
+      # screen advances, cars are drawn and move, and the sun follows the tick. The sim runs at 4x so the commute and
+      # the evening arrive in minutes. Screenshots of a day moment, dusk and a street are in the artifact.
+      - name: The page shows residents commuting in time with the sim
+        working-directory: web
+        timeout-minutes: 30
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+          ../dev/speed.sh harbor 16
+          node scripts/check-live.mjs 'http://127.0.0.1:8088/?tier=medium#harbor' live-frames
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-city
+          path: web/live-frames
       - if: failure()
         run: docker compose -f dev/compose.yml logs --no-color

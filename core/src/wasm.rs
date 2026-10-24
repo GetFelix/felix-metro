@@ -1,5 +1,7 @@
 //! The browser's view of the crate.
 
+use std::{collections::HashMap, rc::Rc};
+
 use wasm_bindgen::prelude::*;
 
 fn city(seed: &str, districts_per_side: u16) -> Result<crate::City, JsError> {
@@ -57,4 +59,87 @@ pub fn district_key(district: u32, shards: u32, routing: &str) -> Result<String,
         crate::Routing::from_name(routing).ok_or_else(|| JsError::new("unknown routing"))?;
     crate::district_key(district, shards, routing)
         .ok_or_else(|| JsError::new("no key puts this district on a shard"))
+}
+
+/// A city and its residents, for turning `trip` events into positions.
+#[wasm_bindgen]
+pub struct Metro {
+    city: Rc<crate::City>,
+    places: crate::Places,
+    residents: HashMap<u32, Option<crate::Resident>>,
+}
+
+#[wasm_bindgen]
+impl Metro {
+    /// Throws when the seed or district count is not allowed.
+    #[wasm_bindgen(constructor)]
+    pub fn new(seed: &str, districts_per_side: u16) -> Result<Metro, JsError> {
+        let city = city(seed, districts_per_side)?;
+        let places = crate::Places::new(&city);
+        Ok(Metro {
+            city: Rc::new(city),
+            places,
+            residents: HashMap::new(),
+        })
+    }
+
+    /// The trip a `trip` event describes, or `undefined` when the resident has
+    /// no trip with these legs. `route` is segment and speed pairs, flat, as
+    /// in the event; `vehicle` 0 is on foot.
+    pub fn trip(
+        &mut self,
+        resident: u32,
+        vehicle: u8,
+        depart: u32,
+        route: &[u32],
+    ) -> Option<Journey> {
+        let legs: Vec<_> = route
+            .chunks_exact(2)
+            .map(|p| crate::record::Leg {
+                segment: p[0],
+                speed: p[1] as u8,
+            })
+            .collect();
+        let (city, places) = (&self.city, &self.places);
+        let known = self.residents.entry(resident).or_insert_with(|| {
+            (resident < places.population())
+                .then(|| crate::Resident::new(city, places, resident))
+                .flatten()
+        });
+        let mode = if vehicle == 0 {
+            crate::Mode::Walk
+        } else {
+            crate::Mode::Drive
+        };
+        let trip = known.as_ref()?.trip_from_route(city, depart, &legs, mode)?;
+        Some(Journey {
+            city: Rc::clone(&self.city),
+            trip,
+        })
+    }
+}
+
+/// One trip, placed by tick.
+#[wasm_bindgen]
+pub struct Journey {
+    city: Rc<crate::City>,
+    trip: crate::Trip,
+}
+
+#[wasm_bindgen]
+impl Journey {
+    /// The tick the trip ends.
+    pub fn arrive(&self) -> u32 {
+        self.trip.arrive()
+    }
+
+    /// Writes thousandths of a tile from the city's north-west corner, x then z, into `out`.
+    #[wasm_bindgen(js_name = positionAt)]
+    pub fn position_at(&self, tick: u32, out: &mut [u32]) {
+        let p = self.trip.position_at(&self.city, tick);
+        if let [x, z, ..] = out {
+            *x = p.x;
+            *z = p.z;
+        }
+    }
 }

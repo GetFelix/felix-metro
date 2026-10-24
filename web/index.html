@@ -95,6 +95,36 @@
           sans-serif;
         margin-right: 6px;
       }
+      .pill {
+        margin-left: 12px;
+        padding: 3px 8px;
+        border-radius: 999px;
+        background: rgba(255, 96, 56, 0.18);
+        color: var(--coral);
+        font:
+          600 11px/1 Inter,
+          sans-serif;
+        letter-spacing: 0.06em;
+        animation: breathe 2s ease-in-out infinite;
+      }
+      .pill.late {
+        background: rgba(255, 190, 60, 0.16);
+        color: var(--amber);
+        letter-spacing: 0;
+      }
+      @keyframes breathe {
+        50% {
+          opacity: 0.55;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .pill {
+          animation: none;
+        }
+      }
+      .timeline[data-live] input {
+        pointer-events: none;
+      }
       .timeline {
         left: 50%;
         bottom: 18px;
@@ -166,7 +196,9 @@
       <img src="brand/felix-metro-mark.png" alt="" />
       <div>Felix Metro<small id="subtitle">style frame</small></div>
     </div>
-    <div class="chip clock"><span>Day 3</span><b id="clock">18:30</b></div>
+    <div class="chip clock">
+      <span id="day">Day 3</span><b id="clock">18:30</b><i class="pill hidden" id="pill">LIVE</i>
+    </div>
     <div class="chip timeline" id="timeline">
       <div class="track" id="track" style="--p: 77%">
         <div class="rail"></div>

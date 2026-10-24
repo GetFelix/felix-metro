@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use felix_metro_core::record::{Doing, Event, Header, TickRecord};
-use felix_metro_core::{City, TICKS_PER_DAY};
+use felix_metro_core::{City, Mode, Places, Resident, TICKS_PER_DAY};
 
 use super::*;
 
@@ -79,6 +79,49 @@ fn a_day_has_trips_and_each_one_arrives() {
     assert!(trips > world.residents(), "{trips} trips");
     // Whoever is still out at midnight is on the way home or to work.
     assert_eq!(trips - arrivals, leaving.len());
+}
+
+#[test]
+fn a_reader_of_the_log_places_every_trip_and_ends_it_when_the_sim_does() {
+    // The browser has only the `trip` event: it must rebuild the trip from it, congestion and all.
+    for side in [2, 3] {
+        let (world, ticks) = day("harbor", side);
+        let city = &world.city;
+        let places = Places::new(city);
+        let mut ends: HashMap<u32, u32> = HashMap::new();
+        let (mut placed, mut seen) = (0, 0);
+        for (tick, step) in ticks.iter().enumerate() {
+            for event in step.iter().flat_map(|d| &d.events) {
+                match event {
+                    Event::Trip {
+                        resident,
+                        vehicle,
+                        depart,
+                        route,
+                    } => {
+                        let mode = if *vehicle == 0 {
+                            Mode::Walk
+                        } else {
+                            Mode::Drive
+                        };
+                        let trip = Resident::new(city, &places, *resident)
+                            .unwrap()
+                            .trip_from_route(city, *depart, route, mode)
+                            .unwrap_or_else(|| panic!("resident {resident} at {depart}"));
+                        ends.insert(*resident, trip.arrive());
+                        placed += 1;
+                    }
+                    Event::Arrived { resident, .. } => {
+                        assert_eq!(ends[resident] as usize, tick, "resident {resident}");
+                        seen += 1;
+                    }
+                    _ => {}
+                }
+            }
+        }
+        assert!(placed > world.residents());
+        assert!(seen > 0);
+    }
 }
 
 #[test]

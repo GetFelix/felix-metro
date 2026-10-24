@@ -5,9 +5,10 @@
 use crate::{
     City, Zone,
     names::resident_name,
+    record::Leg,
     rng::{FNV_OFFSET, Rng, fnv1a},
-    route::{Congestion, Trip, route},
-    schedule::{Activity, Anchors, Archetype, Schedule},
+    route::{Congestion, Mode, Trip, route},
+    schedule::{Activity, Anchors, Archetype, Schedule, TICKS_PER_DAY},
 };
 
 #[cfg(test)]
@@ -213,6 +214,35 @@ impl Resident {
         let from = city.lots[blocks[block].lot as usize].door()?;
         let to = city.lots[blocks[(block + 1) % blocks.len()].lot as usize].door()?;
         route(city, from, to, depart, cong)
+    }
+
+    /// The trip a `trip` event for this resident describes: the block whose
+    /// doors the legs join, and if more than one does, the one that was due
+    /// to leave most recently before `depart`. `None` if no block's trip has
+    /// these legs.
+    pub fn trip_from_route(
+        &self,
+        city: &City,
+        depart: u32,
+        legs: &[Leg],
+        mode: Mode,
+    ) -> Option<Trip> {
+        let blocks = &self.schedule.blocks;
+        let day = depart / TICKS_PER_DAY;
+        (0..blocks.len())
+            .filter_map(|block| {
+                let from = city.lots[blocks[block].lot as usize].door()?;
+                let to = city.lots[blocks[(block + 1) % blocks.len()].lot as usize].door()?;
+                let trip = Trip::from_route(city, from, to, depart, legs, mode)?;
+                let due = [day.saturating_sub(1), day]
+                    .map(|d| self.schedule.leave_tick(block, d))
+                    .into_iter()
+                    .filter(|&t| t <= depart)
+                    .max();
+                Some((depart - due.unwrap_or(0), trip))
+            })
+            .min_by_key(|(gap, _)| *gap)
+            .map(|(_, trip)| trip)
     }
 
     /// Every trip of day `day`, in order. A trip leaves at its scheduled tick,

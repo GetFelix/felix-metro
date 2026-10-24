@@ -55,6 +55,14 @@ export default defineConfig({
       },
     },
   },
-  server: { fs: { allow: ['..'] } },
+  // A gateway on the host answers /oidc and /ws for the dev server, as the dev stack's web container does.
+  server: {
+    fs: { allow: ['..'] },
+    proxy: {
+      '/oidc': 'http://127.0.0.1:8787',
+      '/ws': { target: 'ws://127.0.0.1:8787', ws: true },
+    },
+  },
+  preview: { proxy: {} },
   test: { environment: 'node' },
 });

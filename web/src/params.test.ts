@@ -13,7 +13,15 @@ describe('parseParams', () => {
       layout: 'city',
       seed: 'harbor',
       districts: 2,
+      live: true,
+      gateway: null,
     });
+  });
+
+  it('follows the gateway unless told not to, and takes another gateway’s address', () => {
+    expect(parseParams('?live=0').live).toBe(false);
+    expect(parseParams('?live=1').live).toBe(true);
+    expect(parseParams('?gateway=ws://127.0.0.1:8787/ws').gateway).toBe('ws://127.0.0.1:8787/ws');
   });
 
   it('reads the frozen hour, still, tier, ui and hud flags', () => {
