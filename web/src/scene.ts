@@ -14,6 +14,7 @@ import { KINDS } from './kinds';
 const TREE_FIRST = 38; // kinds from here are trees and plaza props: no building
 import { NO_BUILDING, type Building } from './city';
 import type { Fleet } from './traffic';
+import { ConstructionFx, type LotAccess } from './construction-fx';
 
 // Seeded so the frame is identical on every load.
 let seed = 7;
@@ -120,6 +121,7 @@ export async function createCity(
   initial: ReadonlyMap<number, Building> = new Map(),
 ) {
   let setLotDrawn: (id: number, building: Building | null) => Promise<void> = async () => {};
+  let lots: LotAccess = { objects: () => [], ghosts: () => [], setGhost: () => {}, centre: () => [0, 0] };
   const span = city ? Math.max(1, city.tiles / FRAME_TILES) : 1;
   const half = city ? (city.tiles - 1) / 2 : 0;
   const scene = new THREE.Scene();
@@ -371,17 +373,32 @@ export async function createCity(
     }
 
     // What stands on each lot, so a building that changes can take its old one down.
-    const lotObjects = new Map<number, Promise<THREE.Object3D>[]>();
+    interface Drawn {
+      jobs: Promise<THREE.Object3D>[];
+      /** The jobs that have finished, for what animates a lot. */
+      objects: THREE.Object3D[];
+    }
+    const lotObjects = new Map<number, Drawn>();
     const site = new Set(c.development);
-    function drawLot(lot: City['lots'][number], kind: number, facingTurns: number, rnd: () => number, first: boolean) {
-      const mine: Promise<THREE.Object3D>[] = [];
+    // The building coming down on a lot just demolished; the lot itself is already empty.
+    const ghostObjects = new Map<number, Drawn>();
+    function drawLot(
+      lot: City['lots'][number],
+      kind: number,
+      facingTurns: number,
+      rnd: () => number,
+      first: boolean,
+      ghost = false,
+    ) {
+      const mine: Drawn = { jobs: [], objects: [] };
       const put = (...args: Parameters<typeof place>) => {
         const job = place(...args);
-        mine.push(job);
+        mine.jobs.push(job);
+        void job.then((o) => mine.objects.push(o));
         jobs.push(job);
       };
       const choose = <T>(a: readonly T[]): T => a[Math.floor(rnd() * a.length)]!;
-      lotObjects.set(lot.id, mine);
+      (ghost ? ghostObjects : lotObjects).set(lot.id, mine);
       const x = wx(lot.x),
         z = wx(lot.z);
       if (site.has(lot.id) && (kind === NO_BUILDING || kind >= TREE_FIRST)) {
@@ -391,7 +408,8 @@ export async function createCity(
         plot.position.set(x, 0.006, z);
         plot.receiveShadow = true;
         scene.add(plot);
-        mine.push(Promise.resolve(plot));
+        mine.jobs.push(Promise.resolve(plot));
+        mine.objects.push(plot);
         return;
       }
       const paved = lot.zone === 'downtown' || lot.zone === 'commercial' || lot.zone === 'industrial';
@@ -403,7 +421,7 @@ export async function createCity(
       const look = lotLook(pack, model);
       const rotY = facingAngle(facingTurns);
       const lit = rnd() < 0.75 ? choose([0.6, 1, 1.4]) : 0;
-      if (paved) put('roads', 'tile-low', x, z);
+      if (paved && !ghost) put('roads', 'tile-low', x, z);
       if (first && lot.id === c.tower) return; // drawn below with its crown
       if (look === 'skyscraper') {
         put(pack, model, x, z, rotY, 0.7, lit ? 0.3 : 0, Math.floor(rnd() * 6));
@@ -440,14 +458,29 @@ export async function createCity(
     setLotDrawn = async (id, building) => {
       const lot = c.lots[id];
       if (!lot || id === c.tower) return;
-      const old = lotObjects.get(id) ?? [];
+      const old = lotObjects.get(id)?.jobs ?? [];
       lotObjects.delete(id);
       for (const job of old) scene.remove(await job);
       const kind = building?.kind ?? lot.kind;
       let n = 0;
       const rnd = () => unitHash(id * 64 + kind, n++);
       drawLot(lot, kind, building?.rotation ?? lot.facing, rnd, false);
-      await Promise.all(lotObjects.get(id) ?? []);
+      await Promise.all(lotObjects.get(id)?.jobs ?? []);
+    };
+    lots = {
+      objects: (id) => lotObjects.get(id)?.objects ?? [],
+      ghosts: (id) => ghostObjects.get(id)?.objects ?? [],
+      setGhost(id, building) {
+        const old = ghostObjects.get(id)?.jobs ?? [];
+        ghostObjects.delete(id);
+        for (const job of old) void job.then((o) => scene.remove(o));
+        const lot = c.lots[id];
+        if (!building || !lot) return;
+        let n = 0;
+        const rnd = () => unitHash(id * 64 + building.kind, n++);
+        drawLot(lot, building.kind, building.rotation, rnd, false, true);
+      },
+      centre: (id) => [wx(c.lots[id]!.x), wx(c.lots[id]!.z)],
     };
 
     // Trees past the map, except along the sea.
@@ -722,8 +755,13 @@ export async function createCity(
       })()
     : null;
 
+  // Scaffolds and dust are left out on the low tier; buildings still rise and fall.
+  const construction = new ConstructionFx(scene, lots, tier !== 'low');
+
   return {
     scene,
+    construction,
+    lots,
     cars,
     people,
     glows,

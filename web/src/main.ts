@@ -362,7 +362,7 @@ async function main() {
     ? createCamera(renderer.domElement, span * 1.2, new THREE.Vector3())
     : createCamera(renderer.domElement);
   const drawn: ReadonlyMap<number, Building> = new Map(state?.built);
-  const { scene, cars, people, glows, setTime, setShadows, fleet, setLot } = await createCity(
+  const { scene, construction, cars, people, glows, setTime, setShadows, fleet, setLot } = await createCity(
     renderer,
     quality.tier,
     city,
@@ -377,6 +377,7 @@ async function main() {
     post?.dispose();
     renderer.setPixelRatio(Math.min(devicePixelRatio, s.pixelRatioCap));
     setShadows(s.shadows, s.shadowMapSize);
+    construction.setEffects(tier !== 'low');
     if (traffic) traffic.cap = s.movers;
     post = createPost(renderer, scene, camera, passesFor(tier), glows);
     setTime(hour, post.bloom);
@@ -960,6 +961,8 @@ async function main() {
       if (!Number.isNaN(tick)) {
         state.retire(Math.floor(tick));
         traffic.update(tick, still ? 0 : dt, state.active());
+        state.settle(tick);
+        construction.update(tick, state.rising, state.falling);
         const time = cityTime(scrubTarget ?? tick);
         if (frozenHour === null && !(Math.abs(time.hour - shownHour) <= 0.004)) {
           shownHour = hour = time.hour;

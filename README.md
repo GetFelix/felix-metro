@@ -58,7 +58,7 @@ there. [docs/design.md](docs/design.md) has the details.
 | 1 | A live city | Done |
 | 2 | Time travel | In progress: keyframes, seeking, the timeline scrubber and rewind then follow done |
 | 3 | Follow a life | Planned |
-| 4 | Build | In progress: the sim applies build, demolish and speed commands and records who sent them; placement tools in the page, roads and zones are not built yet |
+| 4 | Build | In progress: the sim applies build, demolish and speed commands and records who sent them, and the page animates a building going up (scaffold) or coming down (dust) over 8 ticks, backwards when you rewind; placement tools in the page, roads and zones are not built yet |
 | 5 | Branching timelines | Planned |
 | 6 | Scale and failover | Planned |
 | 7 | Self-hosting | Planned |
@@ -72,7 +72,7 @@ already dropped what it missed, it restarts that district from the newest keyfra
 A city the gateway refuses (a misspelled name, or no access) shows a message instead of
 retrying. The city name in the top left opens a list of every city. Following a resident and the page's own
 building tools are not built yet; a command published to the city's command stream by any client with a
-builder's token is applied by the sim and shows up in the page.
+builder's token is applied by the sim and shows up in the page, rising over 8 ticks of city time inside a scaffold (a demolished building scales down in a puff of dust). Rewind through it and it comes down again; the low quality tier skips the scaffold and the dust.
 
 ## Install a release
 
@@ -221,6 +221,13 @@ seed against a broker for the sim's integration test.
 - [docs/design.md](docs/design.md): the design, data model and build order
 - [docs/art.md](docs/art.md): art direction, the asset packs and the style frame
 - [Felix docs](https://docs.getfelix.dev/)
+
+## Felix version
+
+The Felix release this repo builds on is in [`.felix-version`](.felix-version).
+When Felix publishes a release, a bot opens a "chore: use Felix <version>" PR
+that moves every pin listed in [`.github/felix-bump.sh`](.github/felix-bump.sh)
+and the lockfiles, and merges it once CI passes. Prereleases are skipped.
 
 ## Contributing
 

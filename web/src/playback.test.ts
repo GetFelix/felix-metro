@@ -96,7 +96,7 @@ const seeked = (log: FakeLog, at: number) => {
     tick: at,
     requested: at,
     exact: true,
-    districts: Array.from({ length: DISTRICTS }, () => ({ records: [], offset: at })),
+    districts: Array.from({ length: DISTRICTS }, () => ({ records: [], offset: at, before: [] })),
   } as SeekResult;
   return { state, result };
 };
