@@ -55,7 +55,7 @@ jobs:
           command -v ffmpeg >/dev/null || sudo apt-get install -y ffmpeg
           at="$(node -p "require('./meta.json').posterAt")"
           ffmpeg -y -framerate 30 -i frames/f%05d.jpg -vf scale=in_range=pc:out_range=tv,format=yuv420p -c:v libx264 -profile:v high \
-            -crf 22 -preset slow -movflags +faststart -an "metro-$CITY.mp4"
+            -crf 32 -maxrate 700k -bufsize 1400k -preset slow -movflags +faststart -an "metro-$CITY.mp4"
           ffmpeg -y -ss "$at" -i "metro-$CITY.mp4" -frames:v 1 -c:v libwebp -quality 82 "metro-$CITY.webp"
           ffmpeg -y -ss "$at" -i "metro-$CITY.mp4" -frames:v 1 -q:v 3 "metro-$CITY.jpg"
           ffprobe -v error -show_entries stream=codec_name,profile,width,height,r_frame_rate,pix_fmt,bit_rate:format=duration,size \
@@ -63,6 +63,25 @@ jobs:
       - name: An mp4 was written
         if: ${{ !inputs.timing }}
         run: test -s "web/clip-out/metro-$CITY.mp4"
+      # The clip ends back on the live city: no "ago" label, Back to live gone, a live tick on the last row.
+      - name: The last shot is live
+        if: ${{ !inputs.timing }}
+        working-directory: web/clip-out
+        run: |
+          node -e "
+            const m = require('./meta.json');
+            const last = require('fs').readFileSync('shots.csv', 'utf8').trim().split('\n').pop().split(',');
+            console.log('meta', JSON.stringify(m), 'last row', last.join(','));
+            if (m.played && !m.endsLive) { console.error('the clip does not end on the live city'); process.exit(1); }
+            if (m.played && !(Number(last[1]) > 0 && last[0] === 'end')) { console.error('shots.csv has no live end row'); process.exit(1); }
+          "
+      # The site wants a clip of 0.5-3 MB.
+      - name: The mp4 is a size the site can take
+        if: ${{ !inputs.timing }}
+        run: |
+          size=$(stat -c %s "web/clip-out/metro-$CITY.mp4")
+          echo "mp4 is $size bytes"
+          test "$size" -ge 500000 && test "$size" -le 3000000
       # A few frames to look at without downloading the whole set.
       - name: Pick sample frames
         if: always()

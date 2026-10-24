@@ -146,7 +146,10 @@ const capture = async (tMs, extra) => {
 };
 
 const k = SECONDS / 30;
-const T = { rush: 8 * k, dusk: 16 * k, scrub: 22 * k, play: 27 * k, live: 30 * k };
+// The catch-up to live runs for as long as it takes (see below); `live` is where it is expected to end, and the clip
+// then holds the live city for LIVE_HOLD seconds.
+const LIVE_HOLD = 2;
+const T = { rush: 8 * k, dusk: 16 * k, scrub: 22 * k, play: 24.5 * k, live: (30 - LIVE_HOLD) * k };
 const ms = (s) => Math.round(s * 1000);
 const tiles = await page.evaluate(() => window.__capture.tiles);
 const sp = Math.max(1, tiles / 17) * 1.2;
@@ -275,16 +278,36 @@ if (canPlay) {
   // while frames are slow to draw.
   speed(4);
   await page.locator('#back-live').click();
-  await step(T.live, () => page.waitForTimeout(40));
+  // The catch-up is paced by video time, so frames are drawn until the past is gone, however far back it started.
+  const inPast = () => page.evaluate(() => !document.getElementById('past').classList.contains('hidden'));
+  const raceEnd = t + 20_000;
+  while (t <= raceEnd && (await inPast())) {
+    await page.waitForTimeout(40);
+    note(t, await capture(Math.round(t)));
+    t += 1000 / FPS;
+  }
+  if (await inPast()) throw new Error('Back to live did not reach the live city within 20 s of video');
+  log(`back on the live city at video ${(t / 1000).toFixed(1)} s`);
+  // Live frames draw the live tick; the clip's own tick path no longer applies.
+  await page.evaluate((p) => window.__capture.setPath({ ...p, ticks: [] }), path);
+  await step(t / 1000 + LIVE_HOLD);
 } else {
   log('skipping shots 4 and 5: this build of the page has no Play button, so the past cannot be played forward');
   await step(T.scrub + 3 * k);
 }
 
+// The last shot must be the live city: the "ago" label gone and Back to live hidden.
+const endsLive = await page.evaluate(
+  () => document.getElementById('past').classList.contains('hidden') && !document.getElementById('past-ago').offsetParent,
+);
+const endTick = Math.floor(lastInfo.tick);
+appendFileSync(shots, `end,${endTick},${lastInfo.clock},${lastInfo.cars},${lastInfo.walkers},${lastInfo.carsInView},${lastInfo.walkersInView}\n`);
+log(`last frame: tick ${endTick}, ${endsLive ? 'live' : 'NOT live'}`);
+if (canPlay && !endsLive) errors.push('the clip does not end on the live city');
 if (errors.length) log(`page errors:\n${errors.join('\n')}`);
 writeFileSync(
   join(out, 'meta.json'),
-  JSON.stringify({ fps: FPS, frames: n, posterAt, width: W, height: H, played: canPlay, tier: TIER }),
+  JSON.stringify({ fps: FPS, frames: n, posterAt, width: W, height: H, played: canPlay, tier: TIER, endsLive, endTick }),
 );
 log(`${n} frames in ${((Date.now() - started) / 60000).toFixed(1)} minutes`);
 await browser.close();
