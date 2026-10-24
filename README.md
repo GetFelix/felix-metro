@@ -179,6 +179,13 @@ seed against a broker for the sim's integration test.
 - [docs/art.md](docs/art.md): art direction, the asset packs and the style frame
 - [Felix docs](https://docs.getfelix.dev/)
 
+## Felix version
+
+The Felix release this repo builds on is in [`.felix-version`](.felix-version).
+When Felix publishes a release, a bot opens a "chore: use Felix <version>" PR
+that moves every pin listed in [`.github/felix-bump.sh`](.github/felix-bump.sh)
+and the lockfiles, and merges it once CI passes. Prereleases are skipped.
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md).
