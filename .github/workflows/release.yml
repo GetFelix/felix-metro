@@ -363,9 +363,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      # Only the two artifacts used below: a bare download also pulls the buildx build records,
+      # whose download fails.
       - uses: actions/download-artifact@v4
         with:
-          path: parts
+          name: bundle
+          path: parts/bundle
+      - uses: actions/download-artifact@v4
+        with:
+          name: web
+          path: parts/web
       - name: SHA256SUMS
         run: |
           mkdir -p dist
