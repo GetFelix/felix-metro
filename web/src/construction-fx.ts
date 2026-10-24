@@ -7,10 +7,14 @@ import { unitHash } from './daylight';
 import { fallScale, progress, riseScale } from './construction';
 import type { Falling, Rising } from './city';
 
-/** Scaffolds and dust puffs that can be on screen at once; a lot past them is drawn without. */
-const CAGES = 8;
-const PUFFS = 3;
-const SPECKS = 8;
+/**
+ * Scaffolds, dust puffs and stand-in buildings that can be on screen at once. A lot that finds a pool full is drawn
+ * without that effect for its whole window, so nothing pops in late.
+ */
+const CAGES = 24;
+const PUFFS = 8;
+const GHOSTS = 24;
+const SPECKS = 14;
 /** Half the width of the scaffold in tiles: a building fits 0.9 of its lot. */
 const HALF = 0.47;
 const POST = 0.03;
@@ -18,7 +22,7 @@ const MIN_HEIGHT = 0.02;
 
 /** Timber, from the warm end of the palette. */
 const TIMBER = 0xd9a05b;
-const DUST = 'rgba(214,198,172,1)';
+const DUST = 'rgba(184,176,164,1)';
 
 type Mode = 'rise' | 'fall';
 
@@ -26,6 +30,10 @@ interface Slot {
   mode: Mode;
   cage: number;
   puff: number;
+  /** The lot found a pool full and does without it until its window ends. */
+  noCage: boolean;
+  noPuff: boolean;
+  ghost: boolean;
   seen: boolean;
 }
 
@@ -71,6 +79,7 @@ export class ConstructionFx {
   private readonly cageMaterial: THREE.MeshStandardMaterial;
   private readonly dustTexture: THREE.CanvasTexture;
   private tick = 0;
+  private ghosts = 0;
   private readonly gone: number[] = [];
   private readonly rise = (r: Rising, lot: number) => this.show(lot, 'rise', r.tick, 1, r);
   private readonly fall = (f: Falling, lot: number) => this.show(lot, 'fall', f.tick, f.from, f);
@@ -95,14 +104,21 @@ export class ConstructionFx {
     const g = c.getContext('2d')!;
     const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
     grad.addColorStop(0, DUST);
-    grad.addColorStop(1, 'rgba(214,198,172,0)');
+    grad.addColorStop(0.65, DUST);
+    grad.addColorStop(1, 'rgba(184,176,164,0)');
     g.fillStyle = grad;
     g.fillRect(0, 0, 64, 64);
     this.dustTexture = new THREE.CanvasTexture(c);
     this.dustTexture.colorSpace = THREE.SRGBColorSpace;
     for (let i = 0; i < PUFFS * SPECKS; i++) {
       const s = new THREE.Sprite(
-        new THREE.SpriteMaterial({ map: this.dustTexture, transparent: true, depthWrite: false, opacity: 0 }),
+        new THREE.SpriteMaterial({
+          map: this.dustTexture,
+          transparent: true,
+          depthWrite: false,
+          opacity: 0,
+          fog: false,
+        }),
       );
       s.visible = false;
       scene.add(s);
@@ -156,9 +172,13 @@ export class ConstructionFx {
       slot = undefined;
     }
     if (!slot) {
-      slot = { mode, cage: -1, puff: -1, seen: true };
+      slot = { mode, cage: -1, puff: -1, noCage: false, noPuff: false, ghost: false, seen: true };
       this.slots.set(lot, slot);
-      if (mode === 'fall') this.lots.setGhost(lot, building);
+      if (mode === 'fall' && this.ghosts < GHOSTS) {
+        slot.ghost = true;
+        this.ghosts++;
+        this.lots.setGhost(lot, building);
+      }
     }
     slot.seen = true;
     const objects = mode === 'rise' ? this.lots.objects(lot) : this.lots.ghosts(lot);
@@ -172,14 +192,19 @@ export class ConstructionFx {
       o.scale.y = u.baseY * Math.max(scale, MIN_HEIGHT);
       height = Math.max(height, u.fullH!);
     }
-    if (this.effects && mode === 'rise') this.scaffold(lot, slot, height, scale);
-    else if (this.effects) this.dust(lot, slot, p);
+    if (!this.effects) return;
+    this.scaffold(lot, slot, height, scale);
+    if (mode === 'fall') this.dust(lot, slot, p);
   }
 
   private scaffold(lot: number, slot: Slot, fullHeight: number, scale: number): void {
+    if (slot.noCage) return;
     if (slot.cage < 0) {
       slot.cage = this.cageFree.indexOf(true);
-      if (slot.cage < 0) return;
+      if (slot.cage < 0) {
+        slot.noCage = true;
+        return;
+      }
       this.cageFree[slot.cage] = false;
       const [x, z] = this.lots.centre(lot);
       this.cages[slot.cage]!.position.set(x, 0, z);
@@ -191,22 +216,27 @@ export class ConstructionFx {
   }
 
   private dust(lot: number, slot: Slot, p: number): void {
+    if (slot.noPuff) return;
     if (slot.puff < 0) {
       slot.puff = this.puffFree.indexOf(true);
-      if (slot.puff < 0) return;
+      if (slot.puff < 0) {
+        slot.noPuff = true;
+        return;
+      }
       this.puffFree[slot.puff] = false;
     }
     const [cx, cz] = this.lots.centre(lot);
-    const ramp = Math.min(1, p * 8);
+    // The cloud swells to full strength mid-window and thins out again, so it reads against the falling walls.
+    const strength = Math.sin(Math.PI * p);
     for (let i = 0; i < SPECKS; i++) {
       const s = this.specks[slot.puff * SPECKS + i]!;
-      const angle = unitHash(lot, i * 3) * Math.PI * 2;
-      const reach = 0.12 + unitHash(lot, i * 3 + 1) * 0.28 + Math.sqrt(p) * 0.34;
-      const lift = (0.25 + unitHash(lot, i * 3 + 2) * 0.5) * p;
-      s.position.set(cx + Math.cos(angle) * reach, 0.06 + lift, cz + Math.sin(angle) * reach);
-      const size = 0.3 + 0.55 * p;
+      const angle = unitHash(lot, i * 4) * Math.PI * 2;
+      const reach = 0.25 + unitHash(lot, i * 4 + 1) * 0.3 + Math.sqrt(p) * 0.3;
+      const lift = (0.05 + unitHash(lot, i * 4 + 2) * 0.3) * (0.4 + p);
+      s.position.set(cx + Math.cos(angle) * reach, 0.1 + lift, cz + Math.sin(angle) * reach);
+      const size = (0.6 + unitHash(lot, i * 4 + 3) * 0.6) * (0.55 + 0.45 * strength);
       s.scale.set(size, size, 1);
-      s.material.opacity = 0.85 * ramp * (1 - p);
+      s.material.opacity = strength;
       s.visible = true;
     }
   }
@@ -216,8 +246,9 @@ export class ConstructionFx {
     this.slots.delete(lot);
     if (slot.mode === 'rise') {
       for (const o of this.lots.objects(lot)) this.restore(o);
-    } else {
+    } else if (slot.ghost) {
       this.lots.setGhost(lot, null);
+      this.ghosts--;
     }
     if (slot.cage >= 0) {
       this.cages[slot.cage]!.visible = false;

@@ -54,7 +54,9 @@ const expect = (ok, message) => {
 };
 
 for (const mode of ['build', 'demolish']) {
-  const reference = join(REFERENCES, mode === 'build' ? 'construction-rise.png' : 'construction-fall.png');
+  const name = mode === 'build' ? 'construction-rise' : 'construction-fall';
+  const reference = join(REFERENCES, `${name}.png`);
+  const earlyReference = join(REFERENCES, `${name}-early.png`);
   const shot = (tick, via = 'forward', extra = '') =>
     shoot(`${mode}-${tick}-${via}${extra}`, `mode=${mode}&tick=${tick}&via=${via}${extra}`);
   const mid = await shot(104);
@@ -72,6 +74,9 @@ for (const mode of ['build', 'demolish']) {
     expect(p < SAME, `${mode}: ${via} draws tick 104 as a forward run does (${p.toFixed(4)}% differ)`);
     expect(other.state.active === 1, `${mode}: ${via} finds the lot mid-window`);
   }
+  // A quarter of the way in: pins the length of the window more tightly than the middle does.
+  const early = await shot(102);
+  expect(early.state.active === 1, `${mode}: one lot is mid-window at tick 102`);
   // The low tier leaves out the scaffold and the dust but still scales the building.
   const low = await shot(104, 'forward', '&tier=low');
   expect(
@@ -79,14 +84,20 @@ for (const mode of ['build', 'demolish']) {
     `${mode}: the low tier still animates, with no extras`,
   );
 
-  if (process.env.UPDATE_REFERENCES) {
-    writeFileSync(reference, readFileSync(join(out, `${mode}-104-forward.png`)));
-    console.log(`wrote ${reference}`);
-  } else if (!existsSync(reference)) {
-    expect(false, `${mode}: ${reference} is missing`);
-  } else {
-    const p = percent(mid.png, pngjs.PNG.sync.read(readFileSync(reference)));
-    expect(p < REFERENCE, `${mode}: tick 104 matches its reference (${p.toFixed(4)}% differ)`);
+  const refs = [
+    ['104', mid, reference],
+    ['102', early, earlyReference],
+  ];
+  for (const [tick, shot, file] of refs) {
+    if (process.env.UPDATE_REFERENCES) {
+      writeFileSync(file, readFileSync(join(out, `${mode}-${tick}-forward.png`)));
+      console.log(`wrote ${file}`);
+    } else if (!existsSync(file)) {
+      expect(false, `${mode}: ${file} is missing`);
+    } else {
+      const p = percent(shot.png, pngjs.PNG.sync.read(readFileSync(file)));
+      expect(p < REFERENCE, `${mode}: tick ${tick} matches its reference (${p.toFixed(4)}% differ)`);
+    }
   }
 }
 await browser.close();

@@ -92,6 +92,7 @@ export class CityState {
    * per event, so this is the only record of when a building began: a keyframe lists the finished lot alone, and
    * {@link recover} fills in what it can from the records before it. A lot with no entry is drawn finished.
    */
+  private drawn = -1;
   readonly rising = new Map<number, Rising>();
   /** Lots demolished within the last few ticks, with the building that stood there. */
   readonly falling = new Map<number, Falling>();
@@ -153,10 +154,12 @@ export class CityState {
     if (!newEpoch && !allowGap && !record.keyframe && this.ticks[d]! >= 0 && record.tick !== this.ticks[d]! + 1) {
       return 'gap';
     }
+    // A keyframe in a state that already follows this district keeps the animations the log told of, still in their window.
+    const fresh = newEpoch || this.ticks[d]! < 0;
     this.epochs[d] = record.epoch;
     this.ticks[d] = record.tick;
     this.speed = record.speed;
-    if (record.keyframe) this.keyframe(d, record.keyframe.buildings, record.keyframe.roads ?? []);
+    if (record.keyframe) this.keyframe(d, record.keyframe.buildings, record.keyframe.roads ?? [], fresh, record.tick);
     for (const e of record.events) {
       if (e.type === 'trip') {
         const t = e;
@@ -201,9 +204,20 @@ export class CityState {
     }
   }
 
+  /**
+   * Say which tick is on screen. Animations are dropped once the drawn tick is past their window, not the newest
+   * record's: a burst of records (a gap filled, a hidden tab, a link that came back) must not drop a building before
+   * it is drawn rising.
+   */
+  settle(drawn: number): void {
+    this.drawn = Math.floor(drawn);
+    for (let d = 0; d < this.ticks.length; d++) this.prune(d, this.ticks[d]!);
+  }
+
   // Entries stay a little past their window, since the page draws a tick or two behind the newest record.
   private prune(district: number, tick: number): void {
-    const done = (lot: number, at: number) => this.city.lots[lot]?.district === district && at + WINDOW + 2 <= tick;
+    const now = this.drawn >= 0 ? Math.min(this.drawn, tick) : tick;
+    const done = (lot: number, at: number) => this.city.lots[lot]?.district === district && at + WINDOW + 2 <= now;
     for (const [lot, r] of this.rising) if (done(lot, r.tick)) this.rising.delete(lot);
     for (const [lot, f] of this.falling) if (done(lot, f.tick)) this.falling.delete(lot);
   }
@@ -265,12 +279,23 @@ export class CityState {
 
   // A keyframe lists every lot of its district that differs from the generated city, so a lot it leaves out is the
   // generated one again.
-  private keyframe(district: number, diffs: [number, number, number][], roads: [number, number][]): void {
+  private keyframe(
+    district: number,
+    diffs: [number, number, number][],
+    roads: [number, number][],
+    fresh: boolean,
+    tick: number,
+  ): void {
     const listed = new Set(diffs.map((b) => b[0]));
-    // The keyframe says what stands, not when it went up.
-    for (const lot of [...this.rising.keys()]) if (this.city.lots[lot]?.district === district) this.rising.delete(lot);
-    for (const lot of [...this.falling.keys()])
-      if (this.city.lots[lot]?.district === district) this.falling.delete(lot);
+    // The keyframe says what stands, not when it went up, so a fresh fold starts with none. A state that has followed
+    // the log keeps the ones still in their window, which the keyframe agrees with.
+    const over = (at: number) => fresh || at + WINDOW <= tick;
+    for (const [lot, r] of [...this.rising]) {
+      if (this.city.lots[lot]?.district === district && over(r.tick)) this.rising.delete(lot);
+    }
+    for (const [lot, f] of [...this.falling]) {
+      if (this.city.lots[lot]?.district === district && over(f.tick)) this.falling.delete(lot);
+    }
     for (const lot of [...this.built.keys()]) {
       if (this.city.lots[lot]?.district === district && !listed.has(lot)) this.set(lot, null);
     }

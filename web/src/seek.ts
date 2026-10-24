@@ -161,6 +161,9 @@ export class Seeker {
       if (!f || f.record.tick !== first.record.tick || f.offset < this.oldest[d]!) return null;
     }
     const at = first.record.tick;
+    // A building built just before the keyframe is still going up, and its start is only in the records before it,
+    // which this does not read.
+    if (tick - at < WINDOW) return null;
     return {
       tick: at,
       requested: tick,
@@ -734,6 +737,8 @@ export function foldMore(state: CityState, prev: SeekResult, next: SeekResult): 
   next.districts.forEach(({ records }, d) => {
     for (const r of records.slice(prev.districts[d]!.records.length)) state.apply(r, true);
   });
+  // `prev` may be a cached keyframe, which reads nothing before itself; `next` knows when a building near it began.
+  for (const { before } of next.districts) state.recover(before);
   state.ticks.forEach((tick, d) => {
     if (tick !== next.tick) throw new SeekError('broken', `district ${d} folded to tick ${tick}, not ${next.tick}`);
   });
