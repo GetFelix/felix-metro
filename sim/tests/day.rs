@@ -159,6 +159,7 @@ async fn a_city_runs_a_day_with_every_tick_in_every_district() {
     // Replaying the events leaves each vehicle in the district the next
     // keyframe draws it in: none left behind where it crossed or arrived.
     let mut vehicles: HashMap<u32, u16> = HashMap::new();
+    #[allow(clippy::needless_range_loop)] // indexes every district's records by tick
     for tick in 0..TICKS_PER_DAY as usize {
         // Left first, then in, then arrived: districts are visited in order.
         for pass in 0..3 {
