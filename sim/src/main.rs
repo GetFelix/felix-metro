@@ -48,7 +48,7 @@ async fn main() -> Result<()> {
         }));
     for (spec, held) in all {
         let (control, speed) = watch::channel(config.ticks_per_second);
-        controls.insert(spec.name.clone(), control);
+        controls.insert(spec.name.clone(), control.clone());
         let (client, connection, spec) =
             (Arc::clone(&client), config.connection.clone(), spec.clone());
         let ticks_per_second = config.ticks_per_second;
@@ -93,6 +93,7 @@ async fn main() -> Result<()> {
             let settings = Settings {
                 ticks_per_second,
                 speed: Some(speed),
+                speed_out: Some(control),
                 ..Settings::default()
             };
             run_city_with(&spec.name, city, settings, log, commands)

@@ -6,8 +6,8 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use felix_client::ClusterClient;
 use felix_metro_core::record::{
-    Command, CommandRecord, Event, REFUSED_BAD_SPEED, REFUSED_MALFORMED, REFUSED_UNSUPPORTED,
-    RESULT_APPLIED, principal_hash, split_stamp,
+    Command, CommandRecord, Event, REFUSED_BAD_SPEED, REFUSED_BUSY, REFUSED_MALFORMED,
+    REFUSED_UNSUPPORTED, RESULT_APPLIED, principal_hash, split_stamp,
 };
 use tokio::sync::mpsc;
 use tracing::warn;
@@ -41,13 +41,18 @@ impl Incoming {
         })
     }
 
-    /// Whether this is a `speed` command that would start a paused city.
-    pub(crate) fn resumes(&self) -> bool {
-        matches!(
-            &self.command,
-            Some(CommandRecord { command: Command::Speed { ticks_per_second }, .. })
-                if *ticks_per_second != 0 && check_speed(*ticks_per_second).is_ok()
-        )
+    /// The speed this command would start a paused city at, if it is a valid
+    /// nonzero `speed` command.
+    pub(crate) fn resumes_at(&self) -> Option<u8> {
+        match &self.command {
+            Some(CommandRecord {
+                command: Command::Speed { ticks_per_second },
+                ..
+            }) if *ticks_per_second != 0 && check_speed(*ticks_per_second).is_ok() => {
+                Some(*ticks_per_second)
+            }
+            _ => None,
+        }
     }
 }
 
@@ -95,6 +100,28 @@ pub async fn follow(
         }
     });
     Ok(receive)
+}
+
+/// Commands a paused city holds to run once it resumes.
+pub(crate) const MAX_HELD: usize = 1024;
+
+/// Commands past [`MAX_HELD`] that a paused city still remembers, to refuse
+/// them with [`REFUSED_BUSY`] once it resumes. Past this, commands are dropped
+/// with a warning, because holding them all would be unbounded.
+pub(crate) const MAX_REFUSED: usize = 1024;
+
+/// The `command` event refusing `item` as [`REFUSED_BUSY`].
+pub(crate) fn refuse_busy(item: Incoming) -> Event {
+    let (name, id) = match item.command {
+        Some(CommandRecord { id, name, .. }) => (name, id),
+        None => (String::new(), 0),
+    };
+    Event::Command {
+        principal: item.principal,
+        name,
+        id,
+        result: REFUSED_BUSY,
+    }
 }
 
 /// Applies `incoming` in order and returns, for each district, the `command`

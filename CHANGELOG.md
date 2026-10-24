@@ -11,10 +11,14 @@
   changes nothing.
 - The `speed` command sets the city's speed and resumes a paused city. The loopback
   endpoint stays for operators.
+- A commanded speed is the city's speed: the operator endpoint reports it, and it holds
+  until someone sets another. A paused city holds a bounded queue of commands and
+  records the overflow as refused (result 9) once it resumes.
 - `place road`, `zone` and `fork` are refused as unsupported for now.
 - The page's fold follows `road` events and a keyframe's road list.
 - `dev/check-commands.mjs` publishes commands as a mayor from a plain client; the
-  dev-stack CI job runs it.
+  dev-stack CI job runs it. It reads keyframe records too, fails when a result never
+  appears, and checks a later keyframe lists the built lot.
 
 ## [0.1.0] - 2026-10-24
 

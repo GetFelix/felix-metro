@@ -65,6 +65,9 @@ pub const REFUSED_BAD_SPEED: u8 = 6;
 pub const REFUSED_UNSUPPORTED: u8 = 7;
 /// `demolish` on a building residents live or work in.
 pub const REFUSED_IN_USE: u8 = 8;
+/// Sent while the city was paused with more commands waiting than the sim
+/// holds. Not carried out; send it again.
+pub const REFUSED_BUSY: u8 = 9;
 
 /// Why a record could not be read.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

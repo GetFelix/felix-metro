@@ -885,4 +885,149 @@ mod builders {
             .collect();
         assert_eq!(all, vec![0, 0]);
     }
+
+    fn speed_command(id: u32, ticks_per_second: u8) -> Incoming {
+        command("mayor", id, Command::Speed { ticks_per_second })
+    }
+
+    /// Settings wired as the real binary does: the operator's watch both ways.
+    fn wired(ticks: u32, start: u8) -> (Settings, watch::Sender<u8>) {
+        let (tx, rx) = watch::channel(start);
+        let mut s = settings(ticks);
+        s.ticks_per_second = start;
+        s.speed = Some(rx);
+        s.speed_out = Some(tx.clone());
+        (s, tx)
+    }
+
+    fn speed_events(log: &Memory, district: u16) -> usize {
+        log.records(district)
+            .iter()
+            .flat_map(|r| &r.events)
+            .filter(|e| matches!(e, Event::Speed { .. }))
+            .count()
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_commanded_speed_sticks_when_the_operator_watch_is_wired() {
+        let (send, inbox) = mpsc::channel(4);
+        send.try_send(speed_command(1, 8)).unwrap();
+        let (s, tx) = wired(6, 4);
+        let log = Memory::healthy();
+        run_city_with("harbor", harbor(), s, log.clone(), Some(inbox))
+            .await
+            .unwrap();
+        for district in 0..4 {
+            assert!(log.records(district).iter().all(|r| r.header.speed == 8));
+            assert_eq!(speed_events(&log, district), 1, "district {district}");
+        }
+        assert_eq!(*tx.borrow(), 8, "the endpoint reports the commanded speed");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_commanded_pause_holds_until_something_resumes_the_city() {
+        let (send, inbox) = mpsc::channel(4);
+        send.try_send(speed_command(1, 0)).unwrap();
+        let (s, _tx) = wired(3, 4);
+        let log = Memory::healthy();
+        let started = Instant::now();
+        let resume = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(5)).await;
+            send.send(speed_command(2, 4)).await.unwrap();
+            send
+        });
+        run_city_with("harbor", harbor(), s, log.clone(), Some(inbox))
+            .await
+            .unwrap();
+        drop(resume);
+        assert!(
+            started.elapsed() >= Duration::from_secs(5),
+            "{:?}",
+            started.elapsed()
+        );
+        assert_whole(&log, 3);
+        assert_eq!(speeds(&log, 0)[0].1, 0);
+        assert_eq!(speeds(&log, 0)[1].1, 4);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_city_started_paused_stays_resumed_after_a_command() {
+        let (send, inbox) = mpsc::channel(4);
+        send.try_send(speed_command(1, 8)).unwrap();
+        let (s, _tx) = wired(5, 0);
+        let log = Memory::healthy();
+        tokio::time::timeout(
+            Duration::from_secs(60),
+            run_city_with("harbor", harbor(), s, log.clone(), Some(inbox)),
+        )
+        .await
+        .expect("the city fell back to the stale paused watch")
+        .unwrap();
+        drop(send);
+        assert_whole(&log, 5);
+        assert!(log.records(0).iter().all(|r| r.header.speed == 8));
+        assert_eq!(speed_events(&log, 0), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_operator_change_after_a_command_still_wins() {
+        let (send, inbox) = mpsc::channel(4);
+        send.try_send(speed_command(1, 8)).unwrap();
+        let (s, tx) = wired(6, 4);
+        let log = Memory::steered(&[(1, 16)], tx);
+        let mut s = s;
+        s.speed_out = None;
+        run_city_with("harbor", harbor(), s, log.clone(), Some(inbox))
+            .await
+            .unwrap();
+        let seen: Vec<u8> = log.records(0).iter().map(|r| r.header.speed).collect();
+        assert_eq!(seen, vec![8, 8, 16, 16, 16, 16]);
+        drop(send);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_paused_city_holds_a_bounded_queue_and_refuses_the_rest_once_resumed() {
+        use crate::commands::{MAX_HELD, MAX_PER_TICK};
+        use felix_metro_core::record::REFUSED_BUSY;
+        let extra = 10;
+        let (send, inbox) = mpsc::channel(MAX_HELD + extra + 4);
+        let lot = free_lot(&World::new(harbor()));
+        for id in 1..=(MAX_HELD + extra) as u32 {
+            send.try_send(command(
+                "mayor",
+                id,
+                Command::Build {
+                    lot,
+                    kind: 2,
+                    rotation: 0,
+                },
+            ))
+            .unwrap();
+        }
+        let resume_id = (MAX_HELD + extra) as u32 + 1;
+        send.try_send(speed_command(resume_id, 4)).unwrap();
+        let ticks = (MAX_HELD / MAX_PER_TICK) as u32 + 4;
+        let (s, _tx) = wired(ticks, 0);
+        let log = Memory::healthy();
+        run_city_with("harbor", harbor(), s, log.clone(), Some(inbox))
+            .await
+            .unwrap();
+        // The sim never skipped a tick.
+        assert_whole(&log, ticks);
+        let mut results: HashMap<u32, u8> = HashMap::new();
+        for d in 0..4 {
+            for (_, _, id, result) in command_events(&log, d) {
+                assert!(
+                    results.insert(id, result).is_none(),
+                    "id {id} recorded twice"
+                );
+            }
+        }
+        // Every command got exactly one result.
+        assert_eq!(results.len(), MAX_HELD + extra + 1);
+        let busy = results.values().filter(|r| **r == REFUSED_BUSY).count();
+        assert_eq!(busy, extra);
+        assert_eq!(results[&resume_id], RESULT_APPLIED);
+        drop(send);
+    }
 }

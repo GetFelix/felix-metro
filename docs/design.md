@@ -257,6 +257,29 @@ the `command` event, with a result code, and the city steps as if it had not
 been sent. A command with no district, such as a malformed record or a lot past
 the last, is recorded in district 0.
 
+A paused city holds up to 1,024 commands. Further ones are remembered only as
+who sent them and their id, up to another 1,024, and are recorded in district 0
+with result 9 once the held commands have run, after the city resumes. The
+command that resumes the city is always held. Past 2,048 commands the sim drops
+the extra with a warning, because remembering every command would use unbounded
+memory while nothing is ticking. A running city reads at most 256 a tick and
+never skips a tick for commands.
+
+The operator's endpoint and the `speed` command write one value. The last to
+change it wins, a commanded speed stays until someone sets another, and a
+`speed` event is recorded once per actual change.
+
+On a restart the sim begins again at tick 0 with the generated city: what
+builders built (`World.built`) is not persisted, and the log's older epoch
+still shows it. The command follower starts at the stream's tail, so commands
+sent while the sim was down are not run. While running, the Felix client's
+subscription survives a lost connection or a moved shard by resubscribing at the
+offset after the last command it delivered (or at the tail it first joined, if
+none yet), so nothing is skipped or repeated. An error it reports once, such as
+falling behind, is its last: the follower logs it, waits a second and asks
+again, and if the subscription then reports the stream closed the follower
+stops and the city runs without builders until the sim restarts.
+
 | Result | Meaning |
 |---|---|
 | 0 | applied |
@@ -268,6 +291,7 @@ the last, is recorded in district 0.
 | 6 | `speed` other than 0, 4, 8 or 16 |
 | 7 | not carried out yet: `place road`, `zone` and `fork` |
 | 8 | the lot is one residents go to |
+| 9 | sent while the city was paused with more commands waiting than it holds; send it again |
 
 Lots residents go to (homes, workplaces, parks) cannot be built over or demolished,
 because the schedules that send people there do not change.
