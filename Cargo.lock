@@ -290,14 +290,14 @@ dependencies = [
 
 [[package]]
 name = "felix-metro-core"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "wasm-bindgen",
 ]
 
 [[package]]
 name = "felix-metro-sim"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "felix-client",

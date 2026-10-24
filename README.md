@@ -73,6 +73,23 @@ A city the gateway refuses (a misspelled name, or no access) shows a message ins
 retrying. The city name in the top left opens a list of every city. Scrubbing back in time, following a resident and
 building are not built yet.
 
+## Install a release
+
+Each [release](https://github.com/GetFelix/felix-metro/releases) has a compose bundle
+that pulls the published images instead of building them. You need Docker or Podman as
+described below.
+
+```sh
+curl -fsSL https://github.com/GetFelix/felix-metro/releases/download/v0.1.0/felix-metro-compose-0.1.0.tar.gz | tar xz
+cd felix-metro-compose-0.1.0
+./up.sh
+```
+
+It starts the same stack as `dev/up.sh` and returns once the cities are serving. The web
+app is at <http://127.0.0.1:8088>. `./speed.sh` and `./city.sh` work as the `dev/` ones
+do. `SHA256SUMS` on the release lists a checksum for each download, and
+`felix-metro-web-v0.1.0.tar.gz` is the built web app alone.
+
 ## Run it locally
 
 You need Docker or Podman (`podman compose` with Docker Compose v2 or podman-compose
