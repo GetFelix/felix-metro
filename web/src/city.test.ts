@@ -24,6 +24,7 @@ class FakeJourney implements Journey {
     return this.end;
   }
   positionAt() {}
+  lots() {}
   free() {
     this.freed = true;
   }
