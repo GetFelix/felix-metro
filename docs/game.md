@@ -185,12 +185,66 @@ The numbers are placeholders until the economy is in the sim and measured.
 Each step is playable on its own. The first chapter is the test: if it is not fun
 without forks, forks will not save it.
 
-## Open questions
+## Decisions, from comparable games
 
-- Does a player own a city, or join a public one? Persistence and the account suggest
-  owned cities; a shared live city is the better showcase.
-- How fast can a fork run on one broker, and is that fast enough for a what-if to feel
-  like a turn rather than a wait?
-- Does losing exist? A council that loses confidence, a recall, or only a score.
-- Where does the line sit between game and simulation accuracy? design.md keeps
-  traffic plausible, not modelled; an economy should be the same.
+**Players own their cities; one public city is a toy.** SimCity (2013) built play
+around shared regions and always-online, and it cost the game its launch and its city
+sizes ([Quigley](https://simscommunity.info/2016/05/21/ocean-quigley-opens-up-on-why-simcity-2013-failed/));
+its cities shared utilities but not commuters, so the link felt fake
+([forum](https://forums.ea.com/discussions/simcity-franchise-discussion-en/few-questions-in-regards-to-regions/10449462)).
+Shared worlds that work are scarce and bounded: r/place gave one pixel every five
+minutes for 72 hours ([Reddit](https://fastly.com/blog/reddit-on-building-scaling-rplace)),
+and a Foxhole war ends ([Foxhole](https://www.foxholegame.com/about-foxhole)). So
+chapters run in a city the player owns, and the public showcase city is a creative mode
+with no goals, where every command shows who sent it. Like Townscaper, it is a toy
+([Bloomberg](https://www.bloomberg.com/news/articles/2020-07-24/the-video-game-where-you-build-an-empty-town)).
+
+**A what-if answers in under 10 seconds.** Ten seconds is about as long as a wait holds
+attention ([Nielsen](https://nngroup.com/articles/response-times-3-important-limits)), and
+Cities: Skylines players complain about fast-forward that crawls in big cities
+([Steam](https://steamcommunity.com/app/949230/discussions/0/4041481833163552062)). A fork
+runs only the goal's window (one morning rush, not a day), streams in as it runs, and
+the player can keep working meanwhile. Into the Breach shows the outcome of every move
+before you make it, so losses feel like your own
+([interview](https://gamedeveloper.com/game-platforms/road-to-the-igf-subset-games-i-into-the-breach-i-)).
+A what-if should do the same for a policy, with the real effect rather than an estimate.
+
+**A chapter can fail; a city never ends.** The council can recall the mayor, Frostpunk
+style ([Frostpunk](https://en.wikipedia.org/wiki/Frostpunk)), but only after a visible
+warning and a countdown, the way an overcrowded Mini Metro station pulses before the
+game ends ([review](https://www.podfeet.com/blog/2016/11/mini-metro/)). The city keeps
+running, and the loss itself becomes an investigation: scrub back and see where it went
+wrong.
+
+**Investigations are checked in batches, and hints are leads.** Return of the Obra Dinn
+confirms fates only three at a time, so guessing doesn't pay
+([Obra Dinn](https://en.wikipedia.org/wiki/Return_of_the_Obra_Dinn)). Outer Wilds shows
+what you've found as a web of leads, with a mark where there is more to learn
+([Outer Wilds](https://wikipedia.com/wiki/Outer_Wilds)). Paradise Killer lets evidence come
+in any order
+([interview](https://filmstories.co.uk/features/paradise-killer-and-designing-a-gripping-courtroom-drama/)).
+An investigation here asks two or three linked questions (where, when, why) and checks
+them together. A hint names a street or an hour worth looking at, never the answer.
+
+## Changes this makes to the pieces above
+
+- **The council is factions:** commuters, harbor residents and business, each with a
+  satisfaction number drawn from the log and its demands visible up front, as in
+  Tropico ([interview](https://www.gamingnexus.com/Article/3167/Tropico-4-Interview)).
+  A recall comes from them.
+- **Policies show their effect before you adopt them, and have a cooldown.** Frostpunk
+  lists a law's immediate and ongoing effects and what it rules out
+  ([wiki](https://frostpunk.gamepedia.com/Administration)). Here a policy's preview is a
+  short what-if.
+- **Money stays at the three rows above** until playtests ask for more. Islanders works
+  with almost nothing ([interview](https://www.thexboxhub.com/?p=114178)).
+- **Fixes are compared with other players' fixes.** After a chapter, the player's
+  numbers sit on histograms of everyone's committed fixes, as Opus Magnum does
+  ([Engadget](https://www.engadget.com/2018-07-09-opus-magnum-zachtronics-irl.html)).
+  Commands already carry who sent them.
+
+## Still open
+
+- How fast one broker can run a fork's morning rush. The 10-second budget needs a
+  measurement before forks go in the order.
+- Whether factions replace the account as the main pressure or sit beside it.
