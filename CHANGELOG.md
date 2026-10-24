@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Built on Felix 0.6.1: the sim's `felix-client` and `felix-wire` pins, the dev stack and CI images.
+
 ### Building
 
 - The sim reads each city's command stream and applies `build` and `demolish` before
