@@ -109,6 +109,11 @@ export class CityState {
     this.epochs = Array<number>(districts).fill(-1);
   }
 
+  /** The sim epoch of a district's newest record, or -1 before it has one. */
+  epochOf(district: number): number {
+    return this.epochs[district] ?? -1;
+  }
+
   /** The newest tick every district has, or -1 until each has one. */
   get latest(): number {
     return Math.min(...this.ticks);

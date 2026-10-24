@@ -240,6 +240,11 @@ export class Gateway {
     await this.request({ type: 'publish', stream, payload: base64(payload), ack: true });
   }
 
+  /** Whether the session can still be used. */
+  get alive(): boolean {
+    return this.ended === null;
+  }
+
   close(): void {
     this.closing = true;
     this.socket.close();

@@ -50,13 +50,13 @@ flowchart LR
     SIM["Simulation<br/>authority per city"] -->|QUIC| BR
 ```
 
-| Component | Language | Holds state? | Responsibility |
-|---|---|---|---|
-| Client | TypeScript, Three.js, `core` as WebAssembly | A view of the city at one moment | Render, interpolate motion along routes, seek, timeline |
-| Gateway | [felix-gateway](https://github.com/GetFelix/felix-gateway) | No | Browser transport, token narrowing to one city, sender stamp on commands |
-| Simulation | Rust, `core` + `felix-client` | Yes, recoverable from the log | Step every district of a city in lockstep, commit each tick |
-| Brokers | Felix | Yes, authoritative | District logs, keyframe pointers, command stream |
-| Control plane | Felix | Yes, metadata | Token exchange, city registration, RBAC |
+| Component     | Language                                                   | Holds state?                     | Responsibility                                                           |
+| ------------- | ---------------------------------------------------------- | -------------------------------- | ------------------------------------------------------------------------ |
+| Client        | TypeScript, Three.js, `core` as WebAssembly                | A view of the city at one moment | Render, interpolate motion along routes, seek, timeline                  |
+| Gateway       | [felix-gateway](https://github.com/GetFelix/felix-gateway) | No                               | Browser transport, token narrowing to one city, sender stamp on commands |
+| Simulation    | Rust, `core` + `felix-client`                              | Yes, recoverable from the log    | Step every district of a city in lockstep, commit each tick              |
+| Brokers       | Felix                                                      | Yes, authoritative               | District logs, keyframe pointers, command stream                         |
+| Control plane | Felix                                                      | Yes, metadata                    | Token exchange, city registration, RBAC                                  |
 
 ### Shared rules in `core`
 
@@ -86,7 +86,7 @@ Seeds are parts of 1 to 32 characters of `a-z`, `0-9` and `-`, joined by `~` for
 
 A day is a cycle of blocks, each a lot and the tick of the day they leave it. The last block's trip returns to the first, so the day closes. A night worker's day starts at work, because they are still there at midnight. A trip leaves at its scheduled tick, or on arrival if the last one ran late.
 
-A route is an A* search over the road graph. Costs are integer milliseconds of travel, a door sits partway along its segment so the search starts and ends from both ends of it, and the heuristic is the fewest tiles between nodes at the fastest road speed. The sim passes in last tick's vehicle count for each segment. A segment holds three cars a tile before it slows, then runs at that share of its speed down to a fifth, and the trip drives it at that speed, so the route chosen is the route taken. A route of 4 tiles or less is walked at 0.3 tiles a second.
+A route is an A\* search over the road graph. Costs are integer milliseconds of travel, a door sits partway along its segment so the search starts and ends from both ends of it, and the heuristic is the fewest tiles between nodes at the fastest road speed. The sim passes in last tick's vehicle count for each segment. A segment holds three cars a tile before it slows, then runs at that share of its speed down to a fifth, and the trip drives it at that speed, so the route chosen is the route taken. A route of 4 tiles or less is walked at 0.3 tiles a second.
 
 A trip is its legs, each with a speed percentage, and a depart tick; every leg's end tick follows from them. `position_at(tick)` interpolates in integers, so it never moves backwards along the route and gives the same answer natively and in WebAssembly.
 
@@ -127,17 +127,17 @@ not needed at the target scale and is left out.
 A car's position every tick would cost around 4 MB/s for 10,000 cars. The sim
 writes decisions instead, and the client works out positions:
 
-| Event | Fields | Meaning |
-|---|---|---|
-| `trip` | resident, vehicle kind, depart tick, route (segment ids with a speed each) | Leaves now along this route |
-| `replan` | resident, from segment, new route | A jam or a closed road changed the route |
-| `arrived` | resident, lot | Reached a building |
-| `activity` | resident, kind (sleep, work, shop, ...), until tick | What they are doing inside |
-| `left` / `entered` | resident, other district, vehicle state with the route left | Crossed into another district |
-| `built` / `demolished` | lot, building kind, rotation | A building changed |
-| `road` | segment, change (closed, opened, added, removed) | A road changed |
-| `command` | principal hash, builder name, command id, result | A builder's command was applied or refused |
-| `speed` | ticks per second | The city's speed changed; 0 is paused |
+| Event                  | Fields                                                                     | Meaning                                    |
+| ---------------------- | -------------------------------------------------------------------------- | ------------------------------------------ |
+| `trip`                 | resident, vehicle kind, depart tick, route (segment ids with a speed each) | Leaves now along this route                |
+| `replan`               | resident, from segment, new route                                          | A jam or a closed road changed the route   |
+| `arrived`              | resident, lot                                                              | Reached a building                         |
+| `activity`             | resident, kind (sleep, work, shop, ...), until tick                        | What they are doing inside                 |
+| `left` / `entered`     | resident, other district, vehicle state with the route left                | Crossed into another district              |
+| `built` / `demolished` | lot, building kind, rotation                                               | A building changed                         |
+| `road`                 | segment, change (closed, opened, added, removed)                           | A road changed                             |
+| `command`              | principal hash, builder name, command id, result                           | A builder's command was applied or refused |
+| `speed`                | ticks per second                                                           | The city's speed changed; 0 is paused      |
 
 A route is its segment ids from the road graph (`u32`) and one speed byte per
 segment, a percentage of the segment class's speed. A trip of 12 segments is 36
@@ -163,11 +163,11 @@ older reader skips a tag it does not know and keeps the rest of the tick, and
 ignores bytes appended to a body it does know. A field can therefore be added
 to the end of an event without a new kind.
 
-| Kind | Record |
-|---|---|
-| 1 | Tick record, a district's commit for one tick |
-| 2 | Command, on `metro.commands.<city>` |
-| 3 | Registry entry, on `metro.cities` |
+| Kind | Record                                        |
+| ---- | --------------------------------------------- |
+| 1    | Tick record, a district's commit for one tick |
+| 2    | Command, on `metro.commands.<city>`           |
+| 3    | Registry entry, on `metro.cities`             |
 
 ### Tick records
 
@@ -175,35 +175,35 @@ Each district commits one record per tick. A tick with no events is still
 committed, so every tick has a record in every district. Seeking depends on
 that.
 
-| Offset | Size | Field |
-|---|---|---|
-| 0 | 1 | kind, 1 |
-| 1 | 4 | `epoch`, the sim's term; a new sim takes the last plus one |
-| 5 | 2 | `district` |
-| 7 | 4 | `tick` |
-| 11 | 1 | `speed`, ticks per second |
-| 12 | 1 | `flags`; bit 0 is a keyframe, other bits are refused |
-| 13 | 8 | `keyframe_offset`, the district's latest keyframe (a keyframe names itself) |
-| 21 | 8 | `wall_us`, microseconds since the Unix epoch at commit |
-| 29 | 2 | `events`, the number of events |
-| 31 | | the keyframe if bit 0 is set, then the events |
+| Offset | Size | Field                                                                       |
+| ------ | ---- | --------------------------------------------------------------------------- |
+| 0      | 1    | kind, 1                                                                     |
+| 1      | 4    | `epoch`, the sim's term; a new sim takes the last plus one                  |
+| 5      | 2    | `district`                                                                  |
+| 7      | 4    | `tick`                                                                      |
+| 11     | 1    | `speed`, ticks per second                                                   |
+| 12     | 1    | `flags`; bit 0 is a keyframe, other bits are refused                        |
+| 13     | 8    | `keyframe_offset`, the district's latest keyframe (a keyframe names itself) |
+| 21     | 8    | `wall_us`, microseconds since the Unix epoch at commit                      |
+| 29     | 2    | `events`, the number of events                                              |
+| 31     |      | the keyframe if bit 0 is set, then the events                               |
 
 An event is a tag byte, a varint body length and the fields below. `resident`
 is a `u32`. `events` counts every event, including ones a reader skips.
 
-| Tag | Event | Fields |
-|---|---|---|
-| 1 | `trip` | resident, vehicle `u8`, depart `u32`, route |
-| 2 | `replan` | resident, from segment `u32`, route |
-| 3 | `arrived` | resident, lot `u32` |
-| 4 | `activity` | resident, kind `u8`, until `u32` |
-| 5 | `left` | resident, district `u16`, vehicle state |
-| 6 | `entered` | resident, district `u16`, vehicle state |
-| 7 | `built` | lot `u32`, kind `u16`, rotation `u8` |
-| 8 | `demolished` | lot `u32`, kind `u16`, rotation `u8` |
-| 9 | `road` | segment `u32`, change `u8` |
-| 10 | `command` | principal `u64`, name, id `u32`, result `u8` |
-| 11 | `speed` | ticks per second `u8` |
+| Tag | Event        | Fields                                       |
+| --- | ------------ | -------------------------------------------- |
+| 1   | `trip`       | resident, vehicle `u8`, depart `u32`, route  |
+| 2   | `replan`     | resident, from segment `u32`, route          |
+| 3   | `arrived`    | resident, lot `u32`                          |
+| 4   | `activity`   | resident, kind `u8`, until `u32`             |
+| 5   | `left`       | resident, district `u16`, vehicle state      |
+| 6   | `entered`    | resident, district `u16`, vehicle state      |
+| 7   | `built`      | lot `u32`, kind `u16`, rotation `u8`         |
+| 8   | `demolished` | lot `u32`, kind `u16`, rotation `u8`         |
+| 9   | `road`       | segment `u32`, change `u8`                   |
+| 10  | `command`    | principal `u64`, name, id `u32`, result `u8` |
+| 11  | `speed`      | ticks per second `u8`                        |
 
 A route is a varint leg count, the segment ids (first as a delta from 0, then
 each from the one before), then one speed byte per leg. A vehicle state is kind
@@ -225,12 +225,12 @@ header and the events. A keyframe can be drawn with nothing before it. Its
 commit also writes the stream state key `keyframe`, so the newest one is one
 `state_get` away, with its offset as the value's version.
 
-| Part | Contents |
-|---|---|
-| buildings | varint count; per lot that differs from the generated city: lot delta, kind `u16` (65535 for none), rotation `u8` |
-| roads | varint count; per segment closed or added: segment delta, change `u8` |
+| Part      | Contents                                                                                                                                                                                                 |
+| --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| buildings | varint count; per lot that differs from the generated city: lot delta, kind `u16` (65535 for none), rotation `u8`                                                                                        |
+| roads     | varint count; per segment closed or added: segment delta, change `u8`                                                                                                                                    |
 | residents | varint count; per resident in the district: id delta, then a framed state: tag `0`, kind `u8`, lot `u32` and until varint (an activity in that lot), or tag `1` and a vehicle state (a trip in progress) |
-| counts | varints: home, at work, on the road, asleep. Home between 22:00 and 06:00 is asleep; work and school are at work; shopping and leisure are in none of them |
+| counts    | varints: home, at work, on the road, asleep. Home between 22:00 and 06:00 is asleep; work and school are at work; shopping and leisure are in none of them                                               |
 
 Because buildings and roads are diffs against the city the seed generates, the
 keyframe of a city nobody has built in carries none of them, and the cost is
@@ -312,14 +312,14 @@ limits it to 64 bytes. A fork's name is a seed part, 1 to 32 characters of
 not. The lineage name `harbor~bridge-closed` that registry records carry must
 fit 64 bytes too, so a fork too deep to name is refused the same way.
 
-| Tag | Command | Fields |
-|---|---|---|
-| 1 | place road | node a `u32`, node b `u32` |
-| 2 | zone | lot `u32`, zone `u8` |
-| 3 | build | lot `u32`, kind `u16`, rotation `u8` |
-| 4 | demolish | lot `u32` |
-| 5 | speed | ticks per second `u8` |
-| 6 | fork | tick `u32`, name |
+| Tag | Command    | Fields                               |
+| --- | ---------- | ------------------------------------ |
+| 1   | place road | node a `u32`, node b `u32`           |
+| 2   | zone       | lot `u32`, zone `u8`                 |
+| 3   | build      | lot `u32`, kind `u16`, rotation `u8` |
+| 4   | demolish   | lot `u32`                            |
+| 5   | speed      | ticks per second `u8`                |
+| 6   | fork       | tick `u32`, name                     |
 
 A registry record is the kind byte, a tag and fields: `1` created (name, seed,
 districts `u16`, `wall_us` `u64`) or `2` forked (name, parent, tick `u32`,
@@ -398,17 +398,37 @@ result says it is not exact; a tick past the newest is refused as not yet happen
 keyframe moves the start to the next hour boundary still kept, and a seek is `unretained` before it. Records are cached per
 district for about two city hours and keyframes for four city days, so a second seek in the same hour reads only the
 ticks past what is held. After folding, every district must be at `T`, or the seek fails. `?at=<tick>` opens the page at a
-tick with no live connection (the timeline's "Back to live" opens the page again without it), and `window.__metro.seek(tick)` does the same in an open page,
-which is what CI measures against the one-second budget.
+tick with no live connection (Back to live opens the page again without it), and `window.__metro.seek(tick)` does the same in an open page,
+which is what CI measures against the one-second budget. The `window.__metro`, `__live` and `__seek` hooks exist only
+with `?trace` in the URL or in a dev build, and every CI check opens the page with it.
 
 At most 240 tick records per district separate a keyframe from `T`. That is a
 few hundred KB at the target scale, read in parallel across districts.
 
-**Playing forward** from `T` is a subscribe from the next offset on each
-district. Felix joins stored history to live delivery with no gap, so playing
-forward catches up to live without the client doing anything special. Playback
-faster than real time reads ahead with `read` and does not subscribe until it
-is close to the tail.
+**Playing forward** from `T` takes each district's records from the offset after the seek's
+(`SeekResult.districts[d].offset + 1`) and applies them to the state folded to `T`, in order, once each. The
+playhead moves at the city's own speed (the `speed` the records carry), never past the newest tick every
+district has applied, and a record is applied only when the playhead is within two ticks of it. A district far from the
+log's tail reads pages ahead of the playhead, at most 480 records queued; once its next record is within an hour of the live
+tip it subscribes from its next offset, which Felix joins to live delivery with no gap, and the queue takes the frames
+from there. A frame that skips an offset or arrives to a full queue is dropped, and the district reads from where it
+was until it reaches the tail and then subscribes again. A read past the tail is "nothing yet" (felix-gateway#38), not
+an error. The subscriptions are on a session of their own, in slots `p00`, `p01`, ..., that closes when the playback
+ends. That session is opened as soon as the past is on screen and kept while it is, then closed 30 s after the page is
+back on the live city, so Back to live finds it open (the page holds one live, up to two history and one playback session,
+well within the gateway's eight a person).
+
+Space and the pill's Play button play and pause from the past on screen. **Back to live** does not cut: the city's time
+races forward with the cars moving, at the city's own pace plus a steady gain that closes the distance in about three
+seconds (at most 960 ticks a second in all), paced by the wall clock. A timer moves the playhead and applies its records every 40 ms, off the render loop, so a catch-up takes about three seconds even where frames come once a second or slower; frames only draw the state (and also step the playhead by wall-clock time, so nothing is applied twice). When the playhead is within a tick of the live state's newest tick the
+page hands over. Within a second of the tip it hands over at once. If the session is not open at the click, the race
+starts anyway: the tick drawn, the sun and the bar's handle run on at the same pace, and the records follow when the
+session opens; if it has not opened in 1.5 s the page shows the live city, with no note. Space and Play do nothing during the race, when no
+control is shown. If the sim restarts mid-playback (a new epoch numbers its ticks from the start again) the playback
+ends and the page shows the live city. The playback's session is closed when the page is left. The live state has taken every
+record all along, so nothing is folded a second time and nothing reloads; the live clock is set to the playhead
+first, so a car under way carries on from where it was drawn. Scrubbing while playing ends the playback; a page opened with `?at` has
+no live state to join and cannot play.
 
 **Scrubbing** draws the nearest keyframe on hand while the handle moves, with
 the sun and the clock at the handle's hour, and fills in events once it rests.
@@ -462,16 +482,16 @@ How it looks gets its own note, `docs/art.md`, and a style frame, in M0.
 
 ## Build order
 
-| M | Milestone | Proves |
-|---|---|---|
-| 0 | The look, locked: style frame, asset pipeline, tilt-shift, day/night, instancing, quality tiers | It looks good at 60 fps before anything is simulated |
-| 1 | A live city: `core`, the sim committing district ticks, the dev stack, the browser drawing live | Trips flow through Felix and look right |
-| 2 | Time travel: keyframes, seeking, the timeline, rewind then follow | Demonstrations 1 and 2, the headline |
-| 3 | Follow a life: pick a resident or car, see their day; markers for notable events | Per-entity history from the same log |
-| 4 | Build: commands, placement tools, attribution | One authority applies everyone's edits |
-| 5 | Branching timelines: fork, side by side | Demonstration 5 |
-| 6 | Scale and failover: 20,000 residents, 16 districts, sim restart, broker loss | Demonstrations 3 and 4 |
-| 7 | Self-hosting: images, compose, Helm, releases | Anyone can run it |
+| M   | Milestone                                                                                       | Proves                                               |
+| --- | ----------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| 0   | The look, locked: style frame, asset pipeline, tilt-shift, day/night, instancing, quality tiers | It looks good at 60 fps before anything is simulated |
+| 1   | A live city: `core`, the sim committing district ticks, the dev stack, the browser drawing live | Trips flow through Felix and look right              |
+| 2   | Time travel: keyframes, seeking, the timeline, rewind then follow                               | Demonstrations 1 and 2, the headline                 |
+| 3   | Follow a life: pick a resident or car, see their day; markers for notable events                | Per-entity history from the same log                 |
+| 4   | Build: commands, placement tools, attribution                                                   | One authority applies everyone's edits               |
+| 5   | Branching timelines: fork, side by side                                                         | Demonstration 5                                      |
+| 6   | Scale and failover: 20,000 residents, 16 districts, sim restart, broker loss                    | Demonstrations 3 and 4                               |
+| 7   | Self-hosting: images, compose, Helm, releases                                                   | Anyone can run it                                    |
 
 **M0 comes first on purpose**, for the reason felix-arena gives: looking very
 good is the requirement most likely to fail late, so the look is fixed before
