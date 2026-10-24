@@ -108,6 +108,24 @@ describe('Traffic', () => {
     expect(made.cars).toBe(8);
   });
 
+  it('draws no more than its cap, counts the rest, and draws them as room is made', () => {
+    const { f, made } = fleet();
+    const traffic = new Traffic(f, 0);
+    traffic.cap = 3;
+    const trips = Array.from({ length: 5 }, (_, i) => voyage(i, 2, 0, 10 + i));
+    traffic.update(5, 0, trips);
+    expect(traffic.drawn).toBe(3);
+    expect(traffic.capped).toBe(2);
+    // The two over the cap are not model-pool waits, which a seek holds the frame for.
+    expect(traffic.waiting).toBe(0);
+    expect(made.cars).toBe(3);
+    // The first to arrive hands over its model, and the next in line takes it.
+    traffic.update(10.5, 0, trips);
+    expect(traffic.drawn).toBe(3);
+    expect(traffic.capped).toBe(1);
+    expect(made.cars).toBe(3);
+  });
+
   it('keeps drawing a trip while the resident’s next one waits to leave', () => {
     const { f, made } = fleet();
     const traffic = new Traffic(f, 0);

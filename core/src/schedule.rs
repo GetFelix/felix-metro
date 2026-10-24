@@ -103,21 +103,42 @@ impl Schedule {
         };
         match archetype {
             Archetype::Office | Archetype::Shopkeeper | Archetype::Shift => {
-                let (arrive, dwell) = match archetype {
-                    Archetype::Office => {
-                        (between(rng, h * 15 / 2, h * 9), between(rng, h * 8, h * 9))
+                // Offices and shops open and close together, so the roads fill in two bursts
+                // around 08:00 and 17:15 instead of a trickle from dawn to dusk.
+                let (arrive, out) = match archetype {
+                    Archetype::Office => (
+                        between(rng, h * 31 / 4, h * 33 / 4),
+                        between(rng, h * 17, h * 35 / 2),
+                    ),
+                    Archetype::Shift => {
+                        let arrive = between(rng, h * 11 / 2, h * 13 / 2);
+                        (arrive, arrive + h * 8)
                     }
-                    Archetype::Shift => (between(rng, h * 11 / 2, h * 13 / 2), h * 8),
-                    _ => (between(rng, h * 8, h * 9), between(rng, h * 9, h * 21 / 2)),
+                    _ => (
+                        between(rng, h * 31 / 4, h * 17 / 2),
+                        between(rng, h * 17, h * 37 / 2),
+                    ),
                 };
                 push(
                     Activity::Home,
                     a.home,
                     arrive.saturating_sub(travel(a.home, a.work)),
                 );
-                let out = arrive + dwell;
-                push(Activity::Work, a.work, out);
-                if archetype == Archetype::Office && rng.below(10) < 4 {
+                if archetype == Archetype::Office {
+                    // Lunch at the shops and back, a short walk when they are close.
+                    let lunch = between(rng, h * 12, h * 25 / 2);
+                    let stay = between(rng, h / 3, h * 2 / 3);
+                    push(Activity::Work, a.work, lunch);
+                    push(
+                        Activity::Shop,
+                        a.shop,
+                        lunch + travel(a.work, a.shop) + stay,
+                    );
+                    push(Activity::Work, a.work, out);
+                } else {
+                    push(Activity::Work, a.work, out);
+                }
+                if archetype == Archetype::Office && rng.below(10) < 6 {
                     let stay = between(rng, h * 2 / 3, h * 3 / 2);
                     push(Activity::Shop, a.shop, out + travel(a.work, a.shop) + stay);
                 }
@@ -139,7 +160,12 @@ impl Schedule {
                 );
             }
             Archetype::Retiree => {
-                let out = between(rng, h * 9, h * 21 / 2);
+                // Half go out in the morning, half in the afternoon rush, on foot when the shops are near.
+                let out = if rng.below(2) == 0 {
+                    between(rng, h * 9, h * 21 / 2)
+                } else {
+                    between(rng, h * 16, h * 35 / 2)
+                };
                 push(Activity::Home, a.home, out);
                 let shop_out = out + travel(a.home, a.shop) + between(rng, h * 2 / 3, h * 3 / 2);
                 push(Activity::Shop, a.shop, shop_out);

@@ -77,6 +77,12 @@ describe('settingsFor', () => {
     expect(settingsFor('low')).toMatchObject({ ao: false, tiltShift: false, shadows: false, pixelRatioCap: 1 });
   });
 
+  it('caps the cars and walkers drawn by tier', () => {
+    expect(settingsFor('high').movers).toBe(Infinity);
+    expect(settingsFor('medium').movers).toBe(80);
+    expect(settingsFor('low').movers).toBe(40);
+  });
+
   it('allows pedestrian rigs only on high', () => {
     expect(settingsFor('high').rigs).toBe(true);
     expect(settingsFor('medium').rigs).toBe(false);

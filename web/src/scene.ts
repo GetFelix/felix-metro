@@ -580,7 +580,8 @@ export async function createCity(
     const o = cloneModel(gltf);
     meshes(o, (n) => {
       n.material = materials.materialFor('mini-characters', n.material as THREE.MeshStandardMaterial, 0);
-      n.castShadow = true;
+      // A walker is a few pixels; its shadow costs a shadow-pass draw each for no visible gain.
+      n.castShadow = false;
     });
     o.scale.setScalar(0.17);
     const mixer = new THREE.AnimationMixer(o);

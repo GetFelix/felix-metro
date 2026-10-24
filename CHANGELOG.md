@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Built on Felix 0.6.1: the sim's `felix-client` and `felix-wire` pins, the dev stack and CI images.
+
 ### Building
 
 - A building rises over 8 ticks from its `built` tick inside a timber scaffold, and a demolished one
@@ -33,6 +37,26 @@
 - `dev/check-commands.mjs` publishes commands as a mayor from a plain client; the
   dev-stack CI job runs it. It reads keyframe records too, fails when a result never
   appears, and checks a later keyframe lists the built lot.
+
+### The city
+
+- Rush hour is busier. A city has six residents per home instead of two, office
+  workers arrive 07:45 to 08:15 and leave 17:00 to 17:30, shopkeepers arrive 07:45 to
+  08:30 and leave 17:00 to 18:30, office
+  workers go out to the shops at lunch, errands pick the nearest of eight
+  places so more are walked, and half the retirees go out in the afternoon.
+  The harbor city at 2 by 2 districts has 522 residents (was 174) and up to 104
+  cars on the road at once (was 18). A seed generates different residents and
+  schedules than before; there is no compatibility with logs written earlier.
+- The rush writes more than the 10 KB/s goal. A 20,000-resident city averages about 8 KB/s a
+  day but writes about 17 KB/s in the busiest minute of the rush, when every
+  district's hourly keyframe lands with the commute. The README and design say so; #95 tracks bringing it back.
+
+### The look
+
+- The page draws at most 40 cars and walkers on the low tier and 80 on medium
+  (no limit on high); the rest appear as others arrive. Walkers no longer cast
+  shadows. Instancing is tracked in #91.
 
 ## [0.1.0] - 2026-10-24
 

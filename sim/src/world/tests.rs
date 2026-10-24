@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use felix_metro_core::record::{Doing, Event, Header, TickRecord};
-use felix_metro_core::{City, Mode, Places, Resident, TICKS_PER_DAY};
+use felix_metro_core::{City, Mode, Places, Resident, TICKS_PER_DAY, TICKS_PER_HOUR};
 
 use super::*;
 
@@ -311,4 +311,140 @@ fn state_at_is_the_keyframe_the_step_commits() {
         .map(|d| d.keyframe.unwrap())
         .collect();
     assert_eq!(state_at(city(), 480), committed);
+}
+
+/// Prints what a city day writes, per district, and the worst moments of the two rush hours:
+/// `cargo test -p felix-metro-sim --release report_load -- --ignored --nocapture`.
+///
+/// A record's header is fixed, so the rest scales with residents. The 20,000 line extrapolates
+/// from this city's population that way and spreads it over 16 districts.
+#[test]
+#[ignore = "prints a measurement"]
+fn report_load() {
+    let (world, ticks) = day("harbor", 2);
+    let districts = world.districts();
+    let residents = world.residents();
+    let seconds = f64::from(TICKS_PER_DAY) / 4.0;
+    // Bytes of each district's record at each tick, and the keyframe's share of it.
+    let mut bytes = vec![vec![0usize; districts]; ticks.len()];
+    let mut key = bytes.clone();
+    let mut header = 0;
+    for (tick, step) in ticks.iter().enumerate() {
+        for (d, t) in step.iter().enumerate() {
+            let record = TickRecord {
+                header: Header {
+                    epoch: 1,
+                    district: d as u16,
+                    tick: tick as u32,
+                    speed: 4,
+                    keyframe_offset: 0,
+                    wall_us: 0,
+                },
+                keyframe: None,
+                events: t.events.clone(),
+            };
+            let plain = record.encode().unwrap().len();
+            bytes[tick][d] = plain;
+            if t.events.is_empty() {
+                header = plain;
+            }
+            if let Some(k) = &t.keyframe {
+                let with = TickRecord {
+                    keyframe: Some(k.clone()),
+                    ..record
+                };
+                key[tick][d] = with.encode().unwrap().len() - plain;
+            }
+        }
+    }
+    let day_total: usize = bytes.iter().flatten().chain(key.iter().flatten()).sum();
+    println!(
+        "{residents} residents, {districts} districts: day mean {:.1} B/s",
+        day_total as f64 / seconds
+    );
+    let hour = TICKS_PER_HOUR as usize;
+    let windows = [
+        ("07:45-08:15", hour * 31 / 4, hour * 33 / 4),
+        ("17:00-17:30", hour * 17, hour * 35 / 2),
+    ];
+    // A city hour is a minute at 4 ticks a second, so a 1-minute window is `hour` ticks.
+    let minute = hour;
+    for (name, from, to) in windows {
+        let mut worst_tick = (0, 0, 0usize);
+        let mut worst_plain = 0;
+        for t in from..to {
+            for d in 0..districts {
+                if bytes[t][d] + key[t][d] > worst_tick.2 {
+                    worst_tick = (t, d, bytes[t][d] + key[t][d]);
+                }
+                worst_plain = worst_plain.max(bytes[t][d]);
+            }
+        }
+        // City-wide and busiest-district bytes over every 1-minute window that starts in the rush window.
+        let sum = |a: usize, b: usize, d: Option<usize>| -> usize {
+            (a..b)
+                .flat_map(|t| (0..districts).map(move |x| (t, x)))
+                .filter(|&(_, x)| d.is_none_or(|d| d == x))
+                .map(|(t, x)| bytes[t][x] + key[t][x])
+                .sum()
+        };
+        let city = (from..to).map(|a| sum(a, a + minute, None)).max().unwrap();
+        let district = (0..districts)
+            .map(|d| {
+                (from..to)
+                    .map(|a| sum(a, a + minute, Some(d)))
+                    .max()
+                    .unwrap()
+            })
+            .max()
+            .unwrap();
+        // The headers take `districts * hour * header` of any minute; the rest is per resident.
+        let fixed = districts * minute * header;
+        let per_resident = (city - fixed) as f64 / residents as f64;
+        let at_20k = (16 * minute * header) as f64 + per_resident * 20_000.0;
+        println!(
+            "{name}: worst tick {} B (district {} tick {}, {} B without a keyframe); worst minute {:.0} B/s city, {:.0} B/s one district; at 20,000 residents in 16 districts {:.0} B/s",
+            worst_tick.2,
+            worst_tick.1,
+            worst_tick.0,
+            worst_plain,
+            city as f64 / 60.0,
+            district as f64 / 60.0,
+            at_20k / 60.0
+        );
+    }
+}
+
+/// A district of about 1,250 residents, the share of a 20,000-resident city in 16 districts, steps
+/// at the morning rush in well under the 250 ms a tick has at 4 ticks a second (the bound is 50 ms, 40 times the debug time). Prints the time:
+/// `cargo test -p felix-metro-sim --release step_time_at_rush -- --nocapture`.
+#[test]
+fn step_time_at_rush() {
+    let city = City::generate("harbor", 2).unwrap();
+    let places = Places::with_per_home(&city, 58);
+    let mut world = World::with_places(city, &places);
+    let per_district = world.residents() / world.districts();
+    assert!(per_district > 1000, "{per_district} residents a district");
+    let rush = 31 * TICKS_PER_HOUR / 4;
+    let mut worst = std::time::Duration::ZERO;
+    let mut total = std::time::Duration::ZERO;
+    let mut at = 0;
+    for tick in 0..rush + 2 * TICKS_PER_HOUR {
+        let start = std::time::Instant::now();
+        world.step();
+        let took = start.elapsed();
+        if tick >= rush {
+            total += took;
+            if took > worst {
+                (worst, at) = (took, tick);
+            }
+        }
+    }
+    println!(
+        "{} residents a district: worst step {worst:?} at tick {at}, mean over 07:45-09:45 {:?}",
+        per_district,
+        total / (2 * TICKS_PER_HOUR)
+    );
+    // The whole city steps inside one tick's budget; this bound is loose so a loaded debug build passes.
+    assert!(worst.as_millis() < 50, "worst step {worst:?}");
 }

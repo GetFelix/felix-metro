@@ -34,6 +34,11 @@ declare global {
       voyages: number;
       /** Trips from the log that matched no route of their resident; zero when the sim and this page agree. */
       unplaced: number;
+      /** Cars and walkers drawn now, and voyages left undrawn by the tier's cap. */
+      movers: number;
+      capped: number;
+      /** Frames a second, smoothed. */
+      fps: number;
       /** Where each car and walker drawn now stands, in tiles from the middle of the map. */
       where(): { resident: number; car: boolean; x: number; z: number }[];
       /** Put the camera low beside the first car drawn. */
@@ -373,6 +378,7 @@ async function main() {
     renderer.setPixelRatio(Math.min(devicePixelRatio, s.pixelRatioCap));
     setShadows(s.shadows, s.shadowMapSize);
     construction.setEffects(tier !== 'low');
+    if (traffic) traffic.cap = s.movers;
     post = createPost(renderer, scene, camera, passesFor(tier), glows);
     setTime(hour, post.bloom);
   };
@@ -389,6 +395,7 @@ async function main() {
   /** The state the live connection feeds, which keeps taking records while the page is held in the past. */
   const liveState = state;
   const traffic = state && fleet ? new Traffic(fleet, city ? (city.tiles - 1) / 2 : 0) : null;
+  if (traffic) traffic.cap = settingsFor(quality.tier).movers;
   if (state && traffic) {
     // The sun follows the tick the page draws, so the slider is only a readout.
     slider.disabled = true;
@@ -415,6 +422,7 @@ async function main() {
 
   const clock = new THREE.Clock();
   let last = performance.now();
+  let smoothed = 60;
   let shownHour = NaN;
   const day = document.getElementById('day')!;
   let liveInfo: NonNullable<Window['__live']> | null = null;
@@ -424,6 +432,9 @@ async function main() {
       speed: state.speed,
       voyages: 0,
       unplaced: 0,
+      movers: 0,
+      capped: 0,
+      fps: 0,
       where: () => traffic.where(),
       closeUp() {
         const car = traffic.where().find((w) => w.car);
@@ -935,6 +946,7 @@ async function main() {
     const frameMs = now - last;
     last = now;
     quality.tick(frameMs);
+    if (frameMs > 0) smoothed += (1000 / frameMs - smoothed) * 0.05;
     hud?.frame(frameMs);
     if (slow) for (const end = performance.now() + slow; performance.now() < end; );
     const dt = still ? 0 : Math.min(clock.getDelta(), 0.05);
@@ -963,6 +975,9 @@ async function main() {
           speed: state.speed,
           voyages: state.voyages.size,
           unplaced: state.unplaced,
+          movers: traffic.drawn,
+          capped: traffic.capped,
+          fps: smoothed,
         });
       }
     }
