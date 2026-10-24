@@ -5,6 +5,7 @@ import {
   MIN_SPAN,
   barSpan,
   createSpanHold,
+  startsDrag,
   tickAtPointer,
   agoText,
   clampTick,
@@ -110,5 +111,16 @@ describe('a steady bar', () => {
     expect(old.newest).toBe(old.live);
     // A tip at the oldest moment still has a span to draw.
     expect(barSpan(100, 100).live).toBe(101);
+  });
+});
+
+describe('picking up the handle while live', () => {
+  it('starts a drag from a primary press anywhere, and the press at the live head reads as live', () => {
+    expect(startsDrag(0)).toBe(true);
+    expect(startsDrag(2)).toBe(false);
+    const span = barSpan(0, 3 * TICKS_PER_DAY);
+    // A press on the head, at the right end, maps to the live tick, so the first drag move is a no-op until it moves left.
+    expect(tickAtPointer(span, 1)).toBe(span.live);
+    expect(tickAtPointer(span, 0.9)).toBeLessThan(span.live);
   });
 });

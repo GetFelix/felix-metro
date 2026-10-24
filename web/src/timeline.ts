@@ -62,6 +62,12 @@ export function createSpanHold() {
   };
 }
 
+/**
+ * Whether a press starts a drag. Any primary press on the bar does, the live head included: the head sits at the
+ * right end and a press on it is how the handle is picked up while live.
+ */
+export const startsDrag = (button: number): boolean => button === 0;
+
 /** The tick under a position along the bar, never past the live head. */
 export const tickAtPointer = (span: Span, fraction: number): number =>
   Math.min(span.live, tickAtFraction(span, fraction));
@@ -179,7 +185,7 @@ export function createTimeline(root: HTMLElement, handlers: TimelineHandlers) {
   };
 
   const engage = () => {
-    const now = hover || focused || dragging;
+    const now = hover || focused || dragging || pending !== null;
     if (now !== engaged) handlers.onEngage((engaged = now));
   };
   const fraction = (e: PointerEvent) => {
@@ -189,20 +195,37 @@ export function createTimeline(root: HTMLElement, handlers: TimelineHandlers) {
   const move = (e: PointerEvent, phase: 'drag' | 'end') =>
     handlers.onMove(tickAtPointer(hold.current, fraction(e)), phase);
 
-  root.addEventListener('pointerdown', (e) => {
-    if (e.button !== 0 || e.target === tip || !ready) return;
-    root.setPointerCapture(e.pointerId);
+  // A press before the span is read waits for it (the read starts as the press engages the bar) instead of being
+  // dropped or mapped through a one-tick placeholder.
+  let pending: PointerEvent | null = null;
+  const begin = (e: PointerEvent) => {
     dragging = true;
     hold.hold();
     root.focus({ preventScroll: true });
     engage();
     move(e, 'drag');
+  };
+  root.addEventListener('pointerdown', (e) => {
+    if (!startsDrag(e.button)) return;
+    root.setPointerCapture(e.pointerId);
     e.preventDefault();
+    if (!ready) {
+      pending = e;
+      engage();
+      return;
+    }
+    begin(e);
   });
   root.addEventListener('pointermove', (e) => {
-    if (dragging) move(e, 'drag');
+    if (pending) pending = e;
+    else if (dragging) move(e, 'drag');
   });
   const release = (e: PointerEvent) => {
+    if (pending) {
+      pending = null;
+      engage();
+      return;
+    }
     if (!dragging) return;
     dragging = false;
     move(e, 'end');
@@ -250,6 +273,12 @@ export function createTimeline(root: HTMLElement, handlers: TimelineHandlers) {
     /** Draw the bar for `view`. Cheap to call every frame: only what changed is written. */
     update(view: TimelineView) {
       ready = view.ready;
+      if (ready && pending) {
+        const e = pending;
+        pending = null;
+        hold.set(barSpan(view.oldest, view.newest));
+        begin(e);
+      }
       hold.set(barSpan(view.oldest, view.newest));
       const range = hold.current;
       const key = `${Math.floor(range.oldest / TICKS_PER_HOUR)}:${Math.floor(range.newest / TICKS_PER_HOUR)}`;

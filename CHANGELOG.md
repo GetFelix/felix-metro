@@ -8,7 +8,10 @@
   young city each pointer move mapped to a different moment and the drag flashed. A drag now keeps the
   scale it began with, and releasing at the right end goes live. The bar spans at least one city day,
   so the live head moves right across a fixed scale and the part after it is dimmed as not yet
-  happened, and it ignores a press until the span the city holds has been read.
+  happened, and a press before the span the city holds has been read waits for it instead of mapping
+  through a one-tick placeholder.
+- A press on the live head picks the handle up at once; it used to land on the head's own button, so the
+  bar needed a click before it could be dragged.
 
 ## [0.2.0] - 2026-10-24
 
