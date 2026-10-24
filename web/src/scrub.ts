@@ -9,10 +9,15 @@ export class Latest {
   private running = false;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private done: (() => void)[] = [];
+  /** Bumped by every {@link cancel}, so a run that began before it can tell its result is no longer wanted. */
+  private generation = 0;
 
-  /** `run` is called with one target at a time; it should not throw. */
+  /**
+   * `run` is called with one target at a time; it should not throw. Its second argument says whether the run is still
+   * wanted: it turns false once `cancel` is called, and a run that finds it so must not show what it found.
+   */
   constructor(
-    private readonly run: (tick: number) => Promise<void>,
+    private readonly run: (tick: number, current: () => boolean) => Promise<void>,
     private readonly restMs = REST_MS,
   ) {}
 
@@ -39,8 +44,9 @@ export class Latest {
     else this.timer = setTimeout(() => void this.loop(), this.restMs);
   }
 
-  /** Drop what has not started. */
+  /** Drop what has not started, and mark the seek running as no longer wanted. */
   cancel(): void {
+    this.generation++;
     this.wanted = null;
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
@@ -60,8 +66,9 @@ export class Latest {
       while (this.wanted !== null) {
         const tick = this.wanted;
         this.wanted = null;
+        const generation = this.generation;
         try {
-          await this.run(tick);
+          await this.run(tick, () => generation === this.generation);
         } catch {
           // run reports its own failures; the next target still goes ahead.
         }

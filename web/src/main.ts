@@ -13,7 +13,7 @@ import { CityState, type Building } from './city';
 import { TICKS_PER_HOUR, TickClock, cityTime } from './clock';
 import { connectLive } from './live';
 import { Gateway, GatewayError } from './gateway';
-import { SeekError, Seeker, continues, fold, foldMore, type SeekResult } from './seek';
+import { SeekError, Seeker, fold, tryFoldMore, type SeekResult } from './seek';
 import { Latest } from './scrub';
 import { agoText, createTimeline, stepTick, clampTick, type Range } from './timeline';
 import { createLoader, type Loader } from './loader';
@@ -73,6 +73,14 @@ declare global {
       }>;
       /** The state the live connection feeds: its districts' ticks and buildings. */
       live(): { ticks: number[]; buildings: number; sig: string };
+      /** The state on screen: its folded ticks, building count and signature, the tick held in the past or null, and whether it is the live one. */
+      shown(): { ticks: number[]; buildings: number; sig: string; past: number | null; live: boolean };
+      /** Whether the history sessions have been asked for. */
+      historyOpen(): boolean;
+      /** Read the span the timeline covers now. */
+      refresh(): Promise<void>;
+      /** Hold each scrub seek this many ms before it is shown; 0 for none. */
+      holdSeeks(ms: number): void;
     };
     __quality?: {
       history: readonly Tier[];
@@ -401,10 +409,14 @@ async function main() {
     /** The seeker once the first seek has opened it, for what needs it without waiting. */
     let opened: Seeker | null = null;
     const hourOf = (tick: number) => Math.floor(tick / TICKS_PER_HOUR);
+    /** A release or step this close to the live tip, a city minute, goes back to live. */
+    const LIVE_SNAP_TICKS = 4;
     /** What the bar spans; the newest end is the live tip while connected. */
     let range: Range | null = null;
     const tipTick = () => (hasLive ? liveState!.latest : (range?.newest ?? 0));
     const refreshing = { busy: false };
+    /** Test knob: milliseconds each scrub seek waits before it is shown, to hold one in flight. */
+    let holdSeeks = 0;
     const refreshRange = async () => {
       if (refreshing.busy) return;
       refreshing.busy = true;
@@ -415,6 +427,7 @@ async function main() {
         range = await s.retained();
       } catch (err) {
         console.warn('the span of the timeline could not be read', err);
+        if (err instanceof GatewayError && err.code === 'closed') dropHistory();
       } finally {
         refreshing.busy = false;
       }
@@ -429,17 +442,18 @@ async function main() {
         location.assign(url);
         return;
       }
+      // A seek still running was dropped above; with nothing past drawn there is nothing to swap back.
       if (pastTick === null) return;
       swap(liveState!, null);
       shownResult = null;
     };
     /** Show a seek's result unless the handle has already moved to an hour whose keyframe is on screen. */
     const place = (result: SeekResult) => {
-      if (scrubTarget !== null && hourOf(result.tick) !== hourOf(scrubTarget) && opened?.cachedKeyframe(scrubTarget)) {
-        return;
+      if (scrubTarget !== null && hourOf(result.tick) !== hourOf(scrubTarget)) {
+        const kf = opened?.cachedKeyframe(scrubTarget);
+        if (kf && pastTick !== null && hourOf(pastTick) === hourOf(kf.tick)) return;
       }
-      if (shownResult && pastTick !== null && continues(shownResult, result)) {
-        foldMore(state!, shownResult, result);
+      if (shownResult && pastTick !== null && tryFoldMore(state!, shownResult, result)) {
         pastTick = result.tick;
       } else {
         const next = new CityState(city!, metro, districts * districts);
@@ -457,17 +471,28 @@ async function main() {
       swap(next, kf.tick);
       shownResult = kf;
     };
-    const scrubLatest = new Latest(async (tick) => {
+    const scrubLatest = new Latest(async (tick, current) => {
       try {
         const s = await seeker();
         if (!s) throw new Error('nothing here answers like a gateway');
         opened = s;
-        place(await s.seek(tick));
+        const result = await s.seek(tick);
+        if (holdSeeks > 0) await new Promise((done) => setTimeout(done, holdSeeks));
+        // Back to live came while this seek ran: what it found is no longer wanted.
+        if (!current()) return;
+        try {
+          place(result);
+        } catch (err) {
+          // The state on screen may be half drawn; the next seek starts from a fresh one.
+          shownResult = null;
+          throw err;
+        }
       } catch (err) {
+        if (!current()) return;
         note(whyNot(err));
         if (err instanceof SeekError && err.reason === 'unretained') void refreshRange();
         if (err instanceof GatewayError && err.code === 'closed') dropHistory();
-        scrubTarget = null;
+        if (scrubLatest.pending === null && scrubTarget === tick) scrubTarget = null;
         return;
       }
       if (scrubLatest.pending === null && scrubTarget === tick) scrubTarget = null;
@@ -478,8 +503,8 @@ async function main() {
       if (!range) return;
       const tip = tipTick();
       const to = clampTick({ oldest: range.oldest, newest: tip }, tick);
-      // The tip is the live city: reaching it by a step or a release is going back to it.
-      if (hasLive && !moving && to >= tip - 1) return goLive();
+      // The tip is the live city: a step or a release within a city minute of it is going back to it.
+      if (hasLive && !moving && to >= tip - LIVE_SNAP_TICKS) return goLive();
       scrubTarget = to;
       preview(to);
       scrubLatest.want(to, moving);
@@ -491,15 +516,21 @@ async function main() {
         if (range) go(stepTick({ oldest: range.oldest, newest: tipTick() }, handleAt(), direction, big), false);
       },
       onLive: goLive,
+      // Reaching for the bar is what reads the span, once; the history sessions are not opened for a viewer who never does.
       onEngage: (on) => {
-        // The oldest moment moves as retention does, so the span is read again while the bar is in use.
-        if (refresher) clearInterval(refresher);
-        refresher = null;
-        if (!on) return;
-        void refreshRange();
-        refresher = setInterval(() => void refreshRange(), 5000);
+        if (on) void refreshRange();
       },
     });
+    // The oldest moment moves as retention does, so the span is read again while the handle is dragged or the past is
+    // shown. Hovering does not, so the history sessions can close when idle.
+    const syncRefresh = (watching: boolean) => {
+      if (watching === (refresher !== null)) return;
+      if (refresher) clearInterval(refresher);
+      refresher = null;
+      if (!watching) return;
+      void refreshRange();
+      refresher = setInterval(() => void refreshRange(), 5000);
+    };
     const timelineEl = document.getElementById('timeline')!;
     const past = document.getElementById('past')!;
     const pastAgo = document.getElementById('past-ago')!;
@@ -509,15 +540,17 @@ async function main() {
     let agoShown = '';
     timelineFrame = (tick) => {
       const tip = tipTick();
-      const usable = range !== null && tip > range.oldest;
+      // Until the span is read the bar has just the live tip.
+      const usable = range === null ? hasLive : tip > range.oldest;
       if (usable !== barShown) {
         barShown = usable;
         bar.show(usable);
         timelineEl.toggleAttribute('data-scrub', usable);
       }
       const inPast = pastTick !== null || scrubTarget !== null;
+      syncRefresh(bar.dragging || inPast);
       const at = Math.min(scrubTarget ?? pastTick ?? tick, tip);
-      if (usable) bar.update({ oldest: range!.oldest, newest: tip, at, live: !inPast });
+      if (usable) bar.update({ oldest: range?.oldest ?? tip - 1, newest: tip, at, live: !inPast });
       if (inPast !== wasPast) {
         const first = wasPast === null;
         wasPast = inPast;
@@ -531,10 +564,13 @@ async function main() {
         if (text !== agoShown) pastAgo.textContent = agoShown = text;
       }
     };
-    void (async () => {
-      await new Promise<void>((done) => frameWaiters.push(done));
-      void refreshRange();
-    })();
+    // A page opened in the past already has its history open, and no live tip to show the bar with.
+    if (!hasLive) {
+      void (async () => {
+        await new Promise<void>((done) => frameWaiters.push(done));
+        void refreshRange();
+      })();
+    }
     window.__metro = {
       async prepare() {
         await (await seeker())?.warm();
@@ -577,6 +613,12 @@ async function main() {
         }
       },
       live: () => summary(liveState!),
+      shown: () => ({ ...summary(state!), past: pastTick, live: state === liveState }),
+      historyOpen: () => history !== null,
+      refresh: refreshRange,
+      holdSeeks: (ms) => {
+        holdSeeks = ms;
+      },
     };
   }
   let intro: ReturnType<typeof startIntro> | null = null;

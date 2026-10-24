@@ -9,7 +9,7 @@ vi.mock('./core/felix_metro_core.js', () => ({
   districtKey: (district: number, _shards: number, routing: string) => `${routing}.${district}`,
 }));
 vi.mock('./auth', () => ({ signIn: async () => 'token' }));
-const { Seeker, SeekError, fold, foldMore, continues } = await import('./seek');
+const { Seeker, SeekError, fold, foldMore, continues, tryFoldMore } = await import('./seek');
 
 const city = { lots: [] } as unknown as City;
 const trips: Trips = { trip: () => undefined };
@@ -235,6 +235,32 @@ describe('seek', () => {
     const straight = new CityState(city, trips, 2);
     fold(straight, b);
     expect([...state.built]).toEqual([...straight.built]);
+  });
+
+  it('a fold that fails partway is reported, not thrown, so the half advanced state can be dropped', async () => {
+    const s = seeker(new FakeHistory(2, ticks(1000)));
+    const state = new CityState(city, trips, 2);
+    const a = await s.seek(260);
+    fold(state, a);
+    const b = await s.seek(400);
+    // The records take the state to 400 but the result claims 401, so the check at the end throws.
+    const bad = { ...b, tick: 401 };
+    expect(() => foldMore(state, a, bad)).toThrow(SeekError);
+    const again = new CityState(city, trips, 2);
+    fold(again, a);
+    expect(tryFoldMore(again, a, bad)).toBe(false);
+    expect(tryFoldMore(new CityState(city, trips, 2), a, await s.seek(200))).toBe(false);
+    const fine = new CityState(city, trips, 2);
+    fold(fine, a);
+    expect(tryFoldMore(fine, a, b)).toBe(true);
+    expect(fine.ticks).toEqual([400, 400]);
+  });
+
+  it('a cached keyframe is the one of a single epoch across every district', async () => {
+    // District 0 is still in epoch 1; district 1 restarted into epoch 2 from the start.
+    const s = seeker(new FakeHistory(2, (d) => ticks(600).map((t): Entry => [d === 0 ? 1 : 2, t])));
+    await s.seek(300);
+    expect(s.cachedKeyframe(300)).toBeNull();
   });
 
   it('a move back, or into another hour, is not a continuation', async () => {

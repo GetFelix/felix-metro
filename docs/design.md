@@ -362,7 +362,13 @@ any move back refolds from the keyframe. The newest record of each district is
 trusted for a second between seeks. The bar spans the first hour that can be
 started from to the live tip, with days as bands and a tick for every hour.
 Arrow keys step 15 city minutes, `Shift` or the page keys an hour, `Home` goes to
-the oldest moment and `End` back to live. The pill in the clock reads how long
+the oldest moment and `End` back to live; a release or step within a city
+minute of the tip, or Back to live while a seek is still running, ends in the
+live city, and the result of that seek is dropped. A seek's result that would
+bring the page to an hour whose keyframe is already on screen is dropped too.
+The history sessions are opened when the bar is first hovered, focused or
+touched, not at page load; the span is read again every 5 s only while the
+handle is dragged or the past is shown, and the sessions close after 30 s idle. The pill in the clock reads how long
 before the live tip the city on screen is, in city time.
 
 ## Building

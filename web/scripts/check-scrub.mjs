@@ -1,12 +1,14 @@
-// Scrubs the live city on the timeline bar, by pointer and by keyboard. Throughout: every sampled frame has the city
-// drawn, the clock on screen follows the handle, and the city is never held at one moment while the handle crosses
-// hours. At rest the city is at the handle's tick. Then "Back to live" returns to the live city. Screenshots of the bar
-// live, while dragging and in the past are written to the out dir. Usage: node scripts/check-scrub.mjs <page url> <out dir>
+// Scrubs the live city on the timeline bar, by pointer and by keyboard. Opening the page and hovering the bar must not
+// open history sessions until the bar is reached for. Throughout: every sampled frame has the state folded whole (every
+// district at one tick) with buildings in it, the city is never held at one moment while the handle crosses hours, and
+// at rest the folded state is at the handle's tick with the clock saying that tick. A step forward inside an hour
+// equals a fresh fold of that tick. Live records keep arriving while the past is shown. "Back to live" returns to the
+// live city, including when a slow seek is still running. Screenshots of the bar live, while dragging and in the past
+// are written to the out dir. Usage: node scripts/check-scrub.mjs <page url> <out dir>
 // where the page url has no hash. The sim should have run long enough to hold a few city hours.
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { chromium } from 'playwright';
-import { PNG } from 'pngjs';
 
 const [appUrl, out] = process.argv.slice(2);
 if (!out) throw new Error('usage: check-scrub.mjs <page url> <out dir>');
@@ -42,6 +44,8 @@ const read = () =>
       max: Number(scrub.getAttribute('aria-valuemax')),
       clock: document.getElementById('clock').textContent,
       drawn: window.__live.tick,
+      shown: window.__metro.shown(),
+      liveNow: window.__metro.live(),
     };
   });
 
@@ -51,35 +55,50 @@ const minutesOf = (clock) => {
 };
 const tickMinutes = (tick) => Math.floor(((tick % 5760) / 5760) * 24 * 60);
 
-// A frame with nothing drawn is one colour; a city, by day or night, is not.
-const blank = async () => {
-  // The band between the chips, so the bar and the clock are not counted as a city.
-  const png = PNG.sync.read(await page.screenshot({ clip: { x: 0, y: 100, width: 1280, height: 480 } }));
-  const { data, width, height } = png;
-  let differing = 0;
-  for (let i = 0; i < width * height; i++) {
-    const o = i * 4;
-    if (Math.abs(data[o] - data[0]) > 8 || Math.abs(data[o + 1] - data[1]) > 8 || Math.abs(data[o + 2] - data[2]) > 8)
-      differing++;
-  }
-  return differing / (width * height) < 0.003;
+// What the page has drawn: the folded state, not a guess from pixels. A past state has every district at one tick and
+// buildings in it; the live one has buildings in it.
+const wholeProblem = (r) => {
+  const { shown } = r;
+  if (!(shown.buildings > 0)) return 'no buildings are drawn';
+  if (shown.past !== null && shown.ticks.some((t) => t !== shown.past))
+    return `the state is at ticks ${shown.ticks} while holding tick ${shown.past}`;
+  return null;
 };
 
 let samples = 0;
-const sample = async (what) => {
+/** `rest`: the handle has stopped, so the clock must say the folded state's tick. */
+const sample = async (what, rest = false) => {
   const r = await read();
   samples++;
-  if (await blank()) await fail(`${what}: a sampled frame has no city drawn`);
-  const gap = Math.abs(minutesOf(r.clock) - tickMinutes(r.at));
-  if (gap > 1 && gap < 24 * 60 - 1) await fail(`${what}: the clock says ${r.clock} with the handle at tick ${r.at}`);
+  const problem = wholeProblem(r);
+  if (problem) await fail(`${what}: ${problem}`);
+  // While the handle moves the sun follows it and the city lags; at rest both are at the same moment.
+  const clockTick = rest ? (r.shown.past ?? Math.floor(r.drawn)) : r.at;
+  const gap = Math.abs(minutesOf(r.clock) - tickMinutes(clockTick));
+  if (gap > 1 && gap < 24 * 60 - 1) await fail(`${what}: the clock says ${r.clock} with the city at tick ${clockTick}`);
   return r;
 };
 
-// The page, once its timeline has a few hours behind it.
+// Opening the page and moving over the bar must not open history sessions.
 await page.goto(`${appUrl}#harbor`, { waitUntil: 'load', timeout: 5 * MINUTE });
+await page
+  .waitForFunction(() => window.__ready === true && window.__metro, null, { polling: 250, timeout: 5 * MINUTE })
+  .catch(() => fail('the page never became ready'));
+await page.waitForTimeout(4000);
+if (await page.evaluate(() => window.__metro.historyOpen()))
+  await fail('history was opened by a viewer who never reached for the bar');
+const bar0 = await page.locator('#scrub').boundingBox();
+if (!bar0) await fail('the bar is not showing with only the live tip');
+await page.mouse.move(bar0.x + bar0.width / 2, bar0.y + bar0.height / 2);
+await page
+  .waitForFunction(() => window.__metro.historyOpen(), null, { polling: 100, timeout: MINUTE })
+  .catch(() => fail('hovering the bar did not read the span'));
+
+// The page, once its timeline has a few hours behind it.
 await page
   .waitForFunction(
     (need) => {
+      void window.__metro.refresh();
       const s = document.getElementById('scrub');
       return (
         !s.classList.contains('hidden') &&
@@ -100,6 +119,26 @@ await page.screenshot({ path: join(out, 'live.png') });
 const strip = await page.locator('#scrub .strip').boundingBox();
 const y = strip.y + strip.height / 2;
 const xAt = (f) => strip.x + strip.width * f;
+
+// Back to live while a slow seek is still running: once the seek lands, the page must still be live.
+await page.evaluate(() => window.__metro.holdSeeks(4000));
+await page.mouse.move(xAt(0.3), y);
+await page.mouse.down();
+await page.mouse.move(xAt(0.28), y);
+await page.mouse.up();
+await page
+  .waitForSelector('#back-live', { state: 'visible', timeout: 10_000 })
+  .catch(() => fail('no Back to live while seeking'));
+await page.click('#back-live');
+await page.waitForTimeout(6000);
+const held = await read();
+if (held.mode !== 'live' || !held.shown.live || held.shown.past !== null)
+  await fail(
+    `a seek that landed after Back to live took the page into the past: ${JSON.stringify({ mode: held.mode, past: held.shown.past, live: held.shown.live })}`,
+  );
+if (await page.locator('#past').isVisible()) await fail('the past pill came back after a slow seek landed');
+await page.evaluate(() => window.__metro.holdSeeks(0));
+console.log('Back to live held against a seek still running');
 
 // Drag from near the live end back across most of the span, faster than a seek completes.
 await page.mouse.move(xAt(0.9), y);
@@ -136,7 +175,7 @@ const settled = (expected) =>
 await settled(last).catch(async () =>
   fail(`after the drag the city did not rest at tick ${last}: ${JSON.stringify(await read())}`),
 );
-const rest = await sample('after the drag');
+const rest = await sample('after the drag', true);
 if (rest.mode !== 'past') await fail(`after the drag the bar says "${rest.mode}"`);
 console.log(`drag ended at tick ${last}; ${drawnTicks.size} moments drawn on the way`);
 
@@ -165,8 +204,35 @@ for (const [key, delta] of steps) {
 await settled(expected).catch(async () =>
   fail(`after the arrow keys the city did not rest at tick ${expected}: ${JSON.stringify(await read())}`),
 );
-await sample('after the arrow keys');
+await sample('after the arrow keys', true);
 console.log(`arrow keys ended at tick ${expected}`);
+
+// One step forward inside the hour folds only the records after the shown ones; it must equal a fresh fold.
+if (expected % HOUR_TICKS > HOUR_TICKS - 70) {
+  await page.keyboard.press('ArrowLeft');
+  expected -= 60;
+  await settled(expected).catch(() => fail(`the city did not rest at tick ${expected} before the forward step`));
+}
+await page.keyboard.press('ArrowRight');
+expected += 60;
+await settled(expected).catch(async () =>
+  fail(`after the forward step the city did not rest at ${expected}: ${JSON.stringify(await read())}`),
+);
+const forward = await sample('after the forward step', true);
+if (forward.shown.past !== expected || forward.shown.ticks.some((t) => t !== expected))
+  await fail(`the forward step left the state at ${forward.shown.ticks}, not ${expected}`);
+const fresh = await page.evaluate((t) => window.__metro.seek(t), expected);
+if (fresh.sig !== forward.shown.sig || fresh.buildings !== forward.shown.buildings)
+  await fail(`folding forward to ${expected} differs from folding it afresh`);
+console.log(`folding forward to tick ${expected} matches a fresh fold`);
+
+// The live city keeps taking records while the past is shown.
+const before = Math.max(...(await read()).liveNow.ticks);
+await page
+  .waitForFunction((b) => Math.max(...window.__metro.live().ticks) > b, before, { polling: 250, timeout: MINUTE })
+  .catch(() => fail('the live state stopped advancing while the past was shown'));
+if ((await read()).shown.past !== expected) await fail('the past moved while live records arrived');
+console.log('live records kept arriving in the past');
 
 // Back to live.
 await page.click('#back-live');
@@ -178,11 +244,14 @@ await page
   .catch(() => fail('Back to live did not return to the live city'));
 await page.waitForTimeout(1000);
 const back = await sample('back live');
+if (!back.shown.live || back.shown.past !== null)
+  await fail('after Back to live the page is not showing the live state');
+if (back.shown.sig !== back.liveNow.sig) await fail('after Back to live the city is not the live one');
 if (back.max - Math.floor(back.drawn) > 40)
   await fail(`after Back to live the city is at ${back.drawn}, the tip at ${back.max}`);
 if (await page.locator('#past').isVisible()) await fail('the past pill is still showing after Back to live');
 await page.locator('#timeline').screenshot({ path: join(out, 'bar-back-live.png') });
 
-console.log(`${samples} frames sampled, none blank`);
+console.log(`${samples} frames sampled, each whole`);
 if (errors.length) await fail(`page errors:\n${errors.join('\n')}`);
 await browser.close();

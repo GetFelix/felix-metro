@@ -51,6 +51,24 @@ describe('Latest', () => {
     expect(s.started).toEqual([160]);
   });
 
+  it('cancel marks the seek running as no longer wanted, and a later one is wanted again', async () => {
+    const current: (() => boolean)[] = [];
+    const finish: (() => void)[] = [];
+    const l = new Latest((_tick, ok) => {
+      current.push(ok);
+      return new Promise<void>((resolve) => finish.push(resolve));
+    });
+    l.want(10, true);
+    expect(current[0]!()).toBe(true);
+    l.cancel();
+    expect(current[0]!()).toBe(false);
+    l.want(20, true);
+    finish.shift()!();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(current[1]!()).toBe(true);
+    expect(current[0]!()).toBe(false);
+  });
+
   it('a seek that fails does not stop the next target', async () => {
     const seen: number[] = [];
     const l = new Latest(async (t) => {
