@@ -7,7 +7,7 @@ const GATEWAY = process.env.GATEWAY_URL ?? "ws://127.0.0.1:8787/ws";
 const IDP = process.env.IDP_URL ?? "http://127.0.0.1:9400";
 const DISTRICTS = Number(process.env.DISTRICTS ?? 4);
 const TICKS = Number(process.env.TICKS ?? 8);
-const TIMEOUT_MS = Number(process.env.TIMEOUT_S ?? 60) * 1000;
+const TIMEOUT_MS = Number(process.env.TIMEOUT_S ?? 20) * 1000;
 
 const cities = process.argv.slice(2);
 if (cities.length === 0) cities.push("harbor", "pinecrest");
@@ -59,13 +59,23 @@ function check(city) {
   });
 }
 
+// The stack is up before every shard serves and before the sim's first commit,
+// so a refused join or subscribe is tried again until the deadline.
+const deadline = Date.now() + Number(process.env.READY_S ?? 90) * 1000;
 let failed = false;
 for (const city of cities) {
-  try {
-    await check(city);
-  } catch (err) {
-    console.error(err.message);
-    failed = true;
+  for (;;) {
+    try {
+      await check(city);
+      break;
+    } catch (err) {
+      console.error(err.message);
+      if (Date.now() > deadline) {
+        failed = true;
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+    }
   }
 }
 process.exit(failed ? 1 : 0);
