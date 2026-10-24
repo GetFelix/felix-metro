@@ -72,12 +72,12 @@ describe('many builds at once', () => {
     for (let l = 0; l < 30; l++) falling.set(l, { kind: 1, rotation: 0, tick: 100, from: 1 });
     expect(() => f.update(103, new Map(), falling)).not.toThrow();
     expect(ghostSet.size).toBe(24);
-    expect(shown(scene, 'Sprite')).toBe(8 * 14);
+    expect(shown(scene, 'Sprite')).toBe(8 * 12);
     falling.delete(0);
     f.update(104, new Map(), falling);
     expect(ghostSet.size).toBe(23);
     expect(ghostSet.has(29)).toBe(false);
-    expect(shown(scene, 'Sprite')).toBe(7 * 14);
+    expect(shown(scene, 'Sprite')).toBe(7 * 12);
   });
 
   it('shows a scaffold and fully opaque dust at the middle of a demolition', () => {
@@ -90,7 +90,7 @@ describe('many builds at once', () => {
     const opacity = scene.children
       .filter((c) => c.visible && c.type === 'Sprite')
       .map((c) => (c as THREE.Sprite).material.opacity);
-    expect(opacity.length).toBe(14);
+    expect(opacity.length).toBe(12);
     expect(Math.min(...opacity)).toBeCloseTo(1, 5);
   });
 });

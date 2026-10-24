@@ -14,7 +14,7 @@ import type { Falling, Rising } from './city';
 const CAGES = 24;
 const PUFFS = 8;
 const GHOSTS = 24;
-const SPECKS = 14;
+const SPECKS = 12;
 /** Half the width of the scaffold in tiles: a building fits 0.9 of its lot. */
 const HALF = 0.47;
 const POST = 0.03;
@@ -104,7 +104,7 @@ export class ConstructionFx {
     const g = c.getContext('2d')!;
     const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
     grad.addColorStop(0, DUST);
-    grad.addColorStop(0.65, DUST);
+    grad.addColorStop(0.75, DUST);
     grad.addColorStop(1, 'rgba(184,176,164,0)');
     g.fillStyle = grad;
     g.fillRect(0, 0, 64, 64);
@@ -231,10 +231,11 @@ export class ConstructionFx {
     for (let i = 0; i < SPECKS; i++) {
       const s = this.specks[slot.puff * SPECKS + i]!;
       const angle = unitHash(lot, i * 4) * Math.PI * 2;
-      const reach = 0.25 + unitHash(lot, i * 4 + 1) * 0.3 + Math.sqrt(p) * 0.3;
-      const lift = (0.05 + unitHash(lot, i * 4 + 2) * 0.3) * (0.4 + p);
+      // A ring round the walls, so the shrinking building stays in view inside it.
+      const reach = 0.6 + unitHash(lot, i * 4 + 1) * 0.25 + Math.sqrt(p) * 0.15;
+      const lift = 0.04 + unitHash(lot, i * 4 + 2) * 0.16 * (0.4 + p);
       s.position.set(cx + Math.cos(angle) * reach, 0.1 + lift, cz + Math.sin(angle) * reach);
-      const size = (0.6 + unitHash(lot, i * 4 + 3) * 0.6) * (0.55 + 0.45 * strength);
+      const size = (0.6 + unitHash(lot, i * 4 + 3) * 0.4) * (0.55 + 0.45 * strength);
       s.scale.set(size, size, 1);
       s.material.opacity = strength;
       s.visible = true;

@@ -63,7 +63,9 @@ const run = (from: number, to: number, events: Record<number, TickEvent[]> = {})
 describe('the start tick in the fold', () => {
   it('is the tick of the built event while the window is open and gone after it', () => {
     expect(run(98, 104, { 100: [built(1)] }).rising.get(1)).toEqual({ kind: 3, rotation: 1, tick: 100 });
-    expect(run(98, 120, { 100: [built(1)] }).rising.size).toBe(0);
+    const late = run(98, 120, { 100: [built(1)] });
+    late.settle(120);
+    expect(late.rising.size).toBe(0);
   });
 
   it('is the same wherever the fold began, so scrubbing back into the window shows the same partial state', () => {
@@ -157,16 +159,16 @@ describe('recovering a start from before the keyframe', () => {
 });
 
 describe('animations while the drawn tick lags the newest record', () => {
-  it('keeps a rise a burst of records has gone past until the drawn tick is out of its window', () => {
+  it('keeps a rise records have run 30 ticks past until the drawn tick is out of its window', () => {
     const state = new CityState(city, trips, 1);
     state.apply(record(99));
     state.settle(99);
     state.apply(record(100, [built(1)]));
-    for (let t = 101; t <= 120; t++) state.apply(record(t));
-    // The page is still drawing tick 102 of a log that is at 120.
+    for (let t = 101; t <= 130; t++) state.apply(record(t));
+    // The page is still drawing tick 102 of a log that is at 130.
     state.settle(102);
     expect(state.rising.get(1)).toEqual({ kind: 3, rotation: 1, tick: 100 });
-    expect(progress(100, 102)).toBe(0.25);
+    expect(riseScale(100, 102)).toBe(0.25);
     state.settle(110);
     expect(state.rising.size).toBe(0);
   });
@@ -176,26 +178,38 @@ describe('animations while the drawn tick lags the newest record', () => {
     state.apply(record(99));
     state.settle(99);
     state.apply(record(100, [demolished(2, 5)]));
-    for (let t = 101; t <= 120; t++) state.apply(record(t));
+    for (let t = 101; t <= 130; t++) state.apply(record(t));
     state.settle(103);
     expect(state.falling.get(2)?.tick).toBe(100);
     state.settle(120);
     expect(state.falling.size).toBe(0);
+  });
+
+  it('drops nothing before a tick has been drawn', () => {
+    const state = run(98, 130, { 100: [built(1)] });
+    expect(state.rising.size).toBe(1);
+  });
+
+  it('recovers against the drawn tick, not the newest record', () => {
+    const state = new CityState(city, trips, 1);
+    state.apply(record(240, [], { buildings: [[1, 3, 1]] }));
+    state.settle(241);
+    for (let t = 241; t <= 270; t++) state.apply(record(t));
+    state.recover([record(238, [built(1)])]);
+    expect(state.rising.get(1)?.tick).toBe(238);
   });
 });
 
 describe('a live keyframe', () => {
   const keyframe = (tick: number) => record(tick, [], { buildings: [[1, 3, 1]] });
 
-  it('leaves the animations still inside their window', () => {
+  it('leaves the animations the state has followed, until the drawn tick ends them', () => {
     const state = run(236, 241, { 238: [built(1)] });
     state.apply(keyframe(242));
     expect(state.rising.get(1)?.tick).toBe(238);
-  });
-
-  it('drops the ones whose window is over', () => {
-    const state = run(230, 241, { 230: [built(1)] });
-    state.apply(keyframe(242));
+    state.settle(242);
+    expect(state.rising.get(1)?.tick).toBe(238);
+    state.settle(250);
     expect(state.rising.size).toBe(0);
   });
 

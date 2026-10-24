@@ -10,7 +10,12 @@
   A seek within 8 ticks of its keyframe also reads the records before it, since a keyframe lists the
   finished lot without when it began. The low tier skips the scaffold and the dust. CI renders a lot
   mid-rise and mid-fall at a fixed tick, by a forward run, a seek and a rewind, and compares them
-  with `web/references/`.
+  with `web/references/`, a quarter of the way in as well as the middle.
+- Construction is dropped by the tick on screen, not the newest record, so records applied ahead
+  of the picture do not cut a rise short. A live keyframe keeps the animations in progress. A
+  scrub that shows a cached keyframe first still finds when a nearby building began. A demolition
+  now shows the scaffold and a darker, denser dust, and a crowd of builds goes without scaffold,
+  dust or stand-in building for the whole window instead of popping in late.
 - The sim reads each city's command stream and applies `build` and `demolish` before
   the next tick. Every command is recorded as a `command` event with a hash of who
   sent it and a result, in the district it touched, beside the `built` or

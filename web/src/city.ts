@@ -130,6 +130,11 @@ export class CityState {
     this.epochs = Array<number>(districts).fill(-1);
   }
 
+  /** The sim epoch of a district's newest record, or -1 before it has one. */
+  epochOf(district: number): number {
+    return this.epochs[district] ?? -1;
+  }
+
   /** The newest tick every district has, or -1 until each has one. */
   get latest(): number {
     return Math.min(...this.ticks);
@@ -159,7 +164,7 @@ export class CityState {
     this.epochs[d] = record.epoch;
     this.ticks[d] = record.tick;
     this.speed = record.speed;
-    if (record.keyframe) this.keyframe(d, record.keyframe.buildings, record.keyframe.roads ?? [], fresh, record.tick);
+    if (record.keyframe) this.keyframe(d, record.keyframe.buildings, record.keyframe.roads ?? [], fresh);
     for (const e of record.events) {
       if (e.type === 'trip') {
         const t = e;
@@ -183,7 +188,7 @@ export class CityState {
         this.speed = e.ticksPerSecond;
       }
     }
-    this.prune(d, record.tick);
+    this.prune(d);
     return 'applied';
   }
 
@@ -211,13 +216,14 @@ export class CityState {
    */
   settle(drawn: number): void {
     this.drawn = Math.floor(drawn);
-    for (let d = 0; d < this.ticks.length; d++) this.prune(d, this.ticks[d]!);
+    for (let d = 0; d < this.ticks.length; d++) this.prune(d);
   }
 
-  // Entries stay a little past their window, since the page draws a tick or two behind the newest record.
-  private prune(district: number, tick: number): void {
-    const now = this.drawn >= 0 ? Math.min(this.drawn, tick) : tick;
-    const done = (lot: number, at: number) => this.city.lots[lot]?.district === district && at + WINDOW + 2 <= now;
+  // Entries stay a little past their window. Nothing is dropped before the drawn tick is known: the newest record can
+  // be tens of ticks ahead of it, since the playback timer applies records between frames.
+  private prune(district: number): void {
+    const done = (lot: number, at: number) =>
+      this.city.lots[lot]?.district === district && this.drawn >= 0 && at + WINDOW + 2 <= this.drawn;
     for (const [lot, r] of this.rising) if (done(lot, r.tick)) this.rising.delete(lot);
     for (const [lot, f] of this.falling) if (done(lot, f.tick)) this.falling.delete(lot);
   }
@@ -246,7 +252,7 @@ export class CityState {
         this.falling.set(lot, f);
       }
     }
-    for (let d = 0; d < this.ticks.length; d++) if (this.ticks[d]! >= 0) this.prune(d, this.ticks[d]!);
+    for (let d = 0; d < this.ticks.length; d++) if (this.ticks[d]! >= 0) this.prune(d);
   }
 
   /** Every voyage to draw: those under way and those a later trip replaced that have yet to arrive. */
@@ -284,17 +290,15 @@ export class CityState {
     diffs: [number, number, number][],
     roads: [number, number][],
     fresh: boolean,
-    tick: number,
   ): void {
     const listed = new Set(diffs.map((b) => b[0]));
     // The keyframe says what stands, not when it went up, so a fresh fold starts with none. A state that has followed
-    // the log keeps the ones still in their window, which the keyframe agrees with.
-    const over = (at: number) => fresh || at + WINDOW <= tick;
-    for (const [lot, r] of [...this.rising]) {
-      if (this.city.lots[lot]?.district === district && over(r.tick)) this.rising.delete(lot);
-    }
-    for (const [lot, f] of [...this.falling]) {
-      if (this.city.lots[lot]?.district === district && over(f.tick)) this.falling.delete(lot);
+    // the log keeps what it knows; the drawn tick ends those.
+    if (fresh) {
+      for (const lot of [...this.rising.keys()])
+        if (this.city.lots[lot]?.district === district) this.rising.delete(lot);
+      for (const lot of [...this.falling.keys()])
+        if (this.city.lots[lot]?.district === district) this.falling.delete(lot);
     }
     for (const lot of [...this.built.keys()]) {
       if (this.city.lots[lot]?.district === district && !listed.has(lot)) this.set(lot, null);
