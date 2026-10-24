@@ -75,7 +75,7 @@ const steps = (frames, from, to) => {
 };
 
 let compared = 0;
-for (let attempt = 1; attempt <= ATTEMPTS && compared === 0; attempt++) {
+for (let attempt = 1; attempt <= ATTEMPTS && compared < MIN_COMPARED; attempt++) {
   const live = Math.floor(await page.evaluate(() => window.__live.tick));
   const from = live - 2 * HOUR_TICKS - 7 * attempt;
   if (from < 0) await fail(`the sim has run ${live} ticks, too few to play from two city hours back`);
@@ -154,7 +154,8 @@ for (let attempt = 1; attempt <= ATTEMPTS && compared === 0; attempt++) {
   // Nothing under way jumped at the join: the tick never went back, and no resident moved much further between the
   // frames either side of it than it had between the ones before.
   const frames = done.frames;
-  const j = frames.findIndex((f) => f.joined);
+  // The first frame that joined after one that had not: the record may start with an earlier attempt's join.
+  const j = frames.findIndex((f, i) => f.joined && i > 0 && !frames[i - 1].joined);
   if (j < 3) await fail(`the join was found at frame ${j} of the record`);
   for (let i = Math.max(1, j - 12); i < Math.min(frames.length, j + 4); i++) {
     if (frames[i].tick < frames[i - 1].tick - 1e-6)
@@ -172,10 +173,10 @@ for (let attempt = 1; attempt <= ATTEMPTS && compared === 0; attempt++) {
         );
     }
   }
-  compared = comparedHere >= MIN_COMPARED ? comparedHere : 0;
+  compared += comparedHere;
   console.log(`joined at tick ${joined}; ${comparedHere} resident steps compared around the join`);
 }
-if (compared === 0)
+if (compared < MIN_COMPARED)
   await fail(`fewer than ${MIN_COMPARED} resident steps were compared around the join in any attempt`);
 
 /** Seek to `from`, then click Back to live and say how many seconds the page took to show the live city. */
