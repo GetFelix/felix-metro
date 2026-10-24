@@ -47,3 +47,14 @@ pub fn resident_day_hash(
 pub fn decode_record(bytes: &[u8]) -> Result<String, JsError> {
     crate::record::decode_json(bytes).map_err(|e| JsError::new(&e.to_string()))
 }
+
+/// [`crate::district_key`]: the entity key that puts a district on its own
+/// shard. `routing` is Felix's name for the stream's mapping, `modulo` or
+/// `jump_hash`. Throws when the stream has no shard for the district.
+#[wasm_bindgen(js_name = districtKey)]
+pub fn district_key(district: u32, shards: u32, routing: &str) -> Result<String, JsError> {
+    let routing =
+        crate::Routing::from_name(routing).ok_or_else(|| JsError::new("unknown routing"))?;
+    crate::district_key(district, shards, routing)
+        .ok_or_else(|| JsError::new("no key puts this district on a shard"))
+}

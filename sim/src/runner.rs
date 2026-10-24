@@ -38,6 +38,13 @@ pub trait Log: Clone + Send + Sync + 'static {
         record: Vec<u8>,
         keyframe: bool,
     ) -> impl Future<Output = Result<Write>> + Send;
+
+    /// The record at `offset` in `district`'s shard, if there is one.
+    fn read(
+        &self,
+        district: u16,
+        offset: u64,
+    ) -> impl Future<Output = Result<Option<Vec<u8>>>> + Send;
 }
 
 #[derive(Clone, Debug)]
@@ -54,6 +61,8 @@ pub struct Settings {
     /// The wait before the first resend, doubled up to `max_backoff`.
     pub backoff: Duration,
     pub max_backoff: Duration,
+    /// Sends in a row that may fail before the run gives up.
+    pub max_failures: u32,
 }
 
 impl Default for Settings {
@@ -66,6 +75,7 @@ impl Default for Settings {
             commit_timeout: Duration::from_secs(5),
             backoff: Duration::from_millis(100),
             max_backoff: Duration::from_secs(2),
+            max_failures: 60,
         }
     }
 }
@@ -93,6 +103,10 @@ struct Shard {
 /// the log has a record this run did not write, which means another sim is
 /// live (or this one is restarting over its own history).
 pub async fn run_city<L: Log>(name: &str, city: City, settings: Settings, log: L) -> Result<Done> {
+    // Speed 0 would pace at 1 Hz and write 0 in the headers; pausing is a command.
+    if settings.ticks_per_second == 0 {
+        bail!("ticks_per_second must be 1 to 255");
+    }
     let mut world = World::new(city);
     info!(
         city = name,
@@ -101,7 +115,7 @@ pub async fn run_city<L: Log>(name: &str, city: City, settings: Settings, log: L
         ticks_per_second = settings.ticks_per_second,
         "city starts"
     );
-    let period = Duration::from_secs(1) / u32::from(settings.ticks_per_second.max(1));
+    let period = Duration::from_secs(1) / u32::from(settings.ticks_per_second);
     let mut timer = tokio::time::interval(period);
     // A late tick is not made up with a burst: the next one is a period after it.
     timer.set_missed_tick_behavior(MissedTickBehavior::Delay);
@@ -143,21 +157,16 @@ pub async fn run_city<L: Log>(name: &str, city: City, settings: Settings, log: L
                 .encode()
                 .with_context(|| format!("encode district {district} tick {tick}"))?;
             let log = log.clone();
-            let (backoff, max_backoff, timeout) = (
-                settings.backoff,
-                settings.max_backoff,
-                settings.commit_timeout,
-            );
+            let retry = Retry {
+                timeout: settings.commit_timeout,
+                backoff: settings.backoff,
+                max_backoff: settings.max_backoff,
+                max_failures: settings.max_failures,
+            };
             commits.spawn(async move {
-                let attempts = commit_until_written(
-                    &log,
-                    district as u16,
-                    shard.next,
-                    bytes,
-                    keyframe,
-                    (timeout, backoff, max_backoff),
-                )
-                .await?;
+                let attempts =
+                    commit_until_written(&log, district as u16, shard.next, bytes, keyframe, retry)
+                        .await?;
                 Ok::<_, anyhow::Error>((district, keyframe, attempts))
             });
         }
@@ -187,6 +196,27 @@ pub async fn run_city<L: Log>(name: &str, city: City, settings: Settings, log: L
     }
 }
 
+/// How a commit is sent again.
+#[derive(Clone, Copy)]
+struct Retry {
+    timeout: Duration,
+    backoff: Duration,
+    max_backoff: Duration,
+    max_failures: u32,
+}
+
+/// True for an error that sending again cannot fix, such as a revoked token,
+/// a deleted stream or a record the broker will not take. Anything else, a
+/// dropped connection or a leader change, may pass.
+fn is_permanent(err: &anyhow::Error) -> bool {
+    use felix_client::{BrokerError, CommitError, PublishRefused, RetryClass};
+    err.downcast_ref::<CommitError>().is_some()
+        || err.downcast_ref::<PublishRefused>().is_some()
+        || err
+            .downcast_ref::<BrokerError>()
+            .is_some_and(|e| e.retry == RetryClass::Fatal)
+}
+
 /// Sends `bytes` until the log has it, and returns how many sends that took.
 async fn commit_until_written<L: Log>(
     log: &L,
@@ -194,38 +224,59 @@ async fn commit_until_written<L: Log>(
     expected: u64,
     bytes: Vec<u8>,
     keyframe: bool,
-    (timeout, backoff, max_backoff): (Duration, Duration, Duration),
+    retry: Retry,
 ) -> Result<u32> {
-    let mut wait = backoff;
+    let mut wait = retry.backoff;
+    let mut failures = 0u32;
     for attempt in 1.. {
         let answer = tokio::time::timeout(
-            timeout,
+            retry.timeout,
             log.commit(district, expected, bytes.clone(), keyframe),
         )
         .await;
         match answer {
             Ok(Ok(Write::Written)) => return Ok(attempt),
-            // An earlier send landed after we gave up on it, and nothing else
-            // has been appended since. On a first send the same tail means
-            // someone else wrote there.
+            // An earlier send may have landed after we gave up on it. Only the
+            // record itself says so: a second writer could be at `expected`.
             Ok(Ok(Write::Refused { tail })) if attempt > 1 && tail == expected + 1 => {
-                return Ok(attempt);
+                match log.read(district, expected).await {
+                    Ok(Some(stored)) if stored == bytes => return Ok(attempt),
+                    Ok(_) => bail!(
+                        "district {district}: offset {expected} holds a record this sim did not write; another sim is writing it"
+                    ),
+                    Err(err) => {
+                        failures += 1;
+                        warn!(district, expected, attempt, error = %format!("{err:#}"), "could not read back the record, sending again");
+                    }
+                }
             }
             Ok(Ok(Write::Refused { tail })) => bail!(
                 "district {district}: the log is at {tail}, not {expected}; another sim is writing it, or this city already has history"
             ),
+            Ok(Err(err)) if is_permanent(&err) => {
+                return Err(err.context(format!(
+                    "district {district}: the log will not take offset {expected}, and sending again will not change that"
+                )));
+            }
             Ok(Err(err)) => {
+                failures += 1;
                 warn!(district, expected, attempt, error = %format!("{err:#}"), "commit failed, sending again");
             }
             Err(_) => {
+                failures += 1;
                 warn!(
                     district,
-                    expected, attempt, "no answer within {timeout:?}, sending again"
+                    expected, attempt, "no answer within {:?}, sending again", retry.timeout
                 );
             }
         }
+        if failures >= retry.max_failures {
+            bail!(
+                "district {district}: offset {expected} failed {failures} sends in a row; giving up so the city does not freeze"
+            );
+        }
         tokio::time::sleep(wait).await;
-        wait = (wait * 2).min(max_backoff);
+        wait = (wait * 2).min(retry.max_backoff);
     }
     unreachable!("the loop only ends by returning")
 }

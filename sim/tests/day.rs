@@ -13,7 +13,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use felix_metro_core::record::{Event, TickRecord};
+use felix_metro_core::record::{Doing, Event, TickRecord};
 use felix_metro_core::{City, TICKS_PER_DAY};
 use felix_metro_sim::{
     Connection, FelixLog, Settings, connect, district_keys, events_stream, run_city,
@@ -78,8 +78,10 @@ async fn a_city_runs_a_day_with_every_tick_in_every_district() {
     assert_eq!(done.ticks, TICKS_PER_DAY);
 
     // Read every shard back. District `i` is on shard `i`, and only it.
-    let shards = client
-        .stream_shards(&connection.tenant, &connection.namespace, &stream)
+    let (shards, routing) = client
+        .client()
+        .await
+        .stream_routing(&connection.tenant, &connection.namespace, &stream)
         .await
         .unwrap();
     let mut records: HashMap<u16, Vec<(u64, TickRecord)>> = HashMap::new();
@@ -154,13 +156,53 @@ async fn a_city_runs_a_day_with_every_tick_in_every_district() {
             }
         }
     }
+    // Replaying the events leaves each vehicle in the district the next
+    // keyframe draws it in: none left behind where it crossed or arrived.
+    let mut vehicles: HashMap<u32, u16> = HashMap::new();
+    for tick in 0..TICKS_PER_DAY as usize {
+        // Left first, then in, then arrived: districts are visited in order.
+        for pass in 0..3 {
+            for district in 0..DISTRICTS as u16 {
+                for event in &records[&district][tick].1.events {
+                    match (pass, event) {
+                        (0, Event::Left { resident, .. }) => {
+                            assert_eq!(vehicles.remove(resident), Some(district), "tick {tick}");
+                        }
+                        (1, Event::Trip { resident, .. } | Event::Entered { resident, .. }) => {
+                            assert!(vehicles.insert(*resident, district).is_none());
+                        }
+                        (2, Event::Arrived { resident, .. }) => {
+                            assert_eq!(vehicles.remove(resident), Some(district), "tick {tick}");
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+        if tick % 240 == 0 {
+            let mut drawn = HashMap::new();
+            for district in 0..DISTRICTS as u16 {
+                let frame = records[&district][tick].1.keyframe.as_ref().unwrap();
+                for r in &frame.residents {
+                    if matches!(r.doing, Doing::Trip(_)) {
+                        drawn.insert(r.id, district);
+                    }
+                }
+            }
+            assert_eq!(vehicles, drawn, "tick {tick}");
+        }
+    }
     // Every crossing is a `left` in one district and an `entered` in another, in one tick.
     assert!(crossings.values().any(|c| c.0 > 0));
     assert!(crossings.values().all(|c| c.0 == c.1), "{crossings:?}");
 
     // The `keyframe` state key of each district points at its newest keyframe.
     let newest = u64::from((TICKS_PER_DAY - 1) / 240 * 240);
-    for (district, key) in district_keys(shards, DISTRICTS).unwrap().iter().enumerate() {
+    for (district, key) in district_keys(shards, routing, DISTRICTS)
+        .unwrap()
+        .iter()
+        .enumerate()
+    {
         let state = client
             .state_get(
                 &connection.tenant,

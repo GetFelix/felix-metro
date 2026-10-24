@@ -24,6 +24,22 @@ cargo run -p felix-metro-sim
 | `SIM_TENANT`, `SIM_NAMESPACE` | `metro`, `default` | |
 | `SIM_TICKS_PER_SECOND` | `4` | the city's speed; a tick is 15 seconds of city time at any speed |
 
+## Entity keys
+
+District `i` lives on shard `i` of `metro.events.<city>`. Felix picks a shard from
+the entity key's hash, so plain `d00` to `d03` can put two districts on one shard and
+leave another empty. The sim salts them: a district's key is `d<NN>`, or `d<NN>.<n>`
+for the first `n` where the key routes to shard `NN`. The hash depends on the stream's
+routing mode (`modulo` or `jump_hash`), which the sim asks Felix for at start.
+
+Anything that publishes to or reads a district by key, such as the web client or a
+gateway subscriber, must use the same keys. `felix_metro_core::district_key(district,
+shards, routing)` computes them, and the WebAssembly build exports it as `districtKey`.
+Reading a shard by number needs no key.
+
+Changing a stream's shard count changes the keys and moves districts between shards,
+so it is unsupported: create a new city instead.
+
 Each city needs its stream `metro.events.<city>` with a shard for every district,
 empty. A city whose stream already has records is not resumed: the sim stops.
 

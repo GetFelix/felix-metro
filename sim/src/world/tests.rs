@@ -159,3 +159,50 @@ fn the_second_day_carries_on_from_the_first() {
         "{first} then {second}"
     );
 }
+
+/// Which district each resident's vehicle is in, from the events alone.
+/// Panics on an event that does not fit: a vehicle leaving or arriving in a
+/// district it is not in.
+fn follow_vehicles(step: &[DistrictTick], vehicles: &mut HashMap<u32, u16>) {
+    // Districts are listed in order, so a vehicle's `entered` can come before
+    // its `left`, and its `arrived` follows both: left, then in, then arrived.
+    for pass in 0..3 {
+        for (district, d) in step.iter().enumerate() {
+            let district = district as u16;
+            for event in &d.events {
+                match (pass, event) {
+                    (0, Event::Left { resident, .. }) => {
+                        assert_eq!(vehicles.remove(resident), Some(district), "left");
+                    }
+                    (1, Event::Trip { resident, .. } | Event::Entered { resident, .. }) => {
+                        assert!(vehicles.insert(*resident, district).is_none(), "in");
+                    }
+                    (2, Event::Arrived { resident, .. }) => {
+                        assert_eq!(vehicles.remove(resident), Some(district), "arrived");
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn a_vehicle_is_in_the_district_the_events_say_even_on_its_last_step() {
+    let (_, ticks) = day("harbor", 2);
+    let mut vehicles = HashMap::new();
+    for (tick, step) in ticks.iter().enumerate() {
+        follow_vehicles(step, &mut vehicles);
+        if let Some(Some(_)) = step.first().map(|d| &d.keyframe) {
+            let mut drawn = HashMap::new();
+            for (district, d) in step.iter().enumerate() {
+                for r in &d.keyframe.as_ref().unwrap().residents {
+                    if matches!(r.doing, Doing::Trip(_)) {
+                        drawn.insert(r.id, district as u16);
+                    }
+                }
+            }
+            assert_eq!(vehicles, drawn, "tick {tick}");
+        }
+    }
+}

@@ -18,6 +18,10 @@ enum Fault {
     Hang,
     /// Append after waiting this long.
     Slow(Duration),
+    /// Another writer appends a different record, and this commit never answers.
+    Foreign,
+    /// Answer with an error that sending again cannot fix.
+    Permanent,
 }
 
 type Script = Arc<dyn Fn(u16, u64, u32) -> Option<Fault> + Send + Sync>;
@@ -28,6 +32,8 @@ struct Memory {
     shards: Arc<Mutex<HashMap<u16, Vec<Vec<u8>>>>>,
     keyframes: Arc<Mutex<HashMap<u16, u64>>>,
     sends: Arc<Mutex<HashMap<(u16, u64), u32>>>,
+    /// `(district, offset)` of every append, in the order they happened.
+    order: Arc<Mutex<Vec<(u16, u64)>>>,
     script: Script,
 }
 
@@ -37,6 +43,7 @@ impl Memory {
             shards: Arc::default(),
             keyframes: Arc::default(),
             sends: Arc::default(),
+            order: Arc::default(),
             script: Arc::new(script),
         }
     }
@@ -62,6 +69,7 @@ impl Memory {
             };
         }
         shard.push(record);
+        self.order.lock().unwrap().push((district, expected));
         if keyframe {
             self.keyframes.lock().unwrap().insert(district, expected);
         }
@@ -91,11 +99,23 @@ impl Log for Memory {
                 std::future::pending().await
             }
             Some(Fault::Hang) => std::future::pending().await,
+            Some(Fault::Foreign) => {
+                self.append(district, expected, vec![9, 9, 9], false);
+                std::future::pending().await
+            }
+            Some(Fault::Permanent) => Err(felix_client::CommitError::Unsupported.into()),
             Some(Fault::Slow(wait)) => {
                 tokio::time::sleep(wait).await;
                 Ok(self.append(district, expected, record, keyframe))
             }
         }
+    }
+
+    async fn read(&self, district: u16, offset: u64) -> Result<Option<Vec<u8>>> {
+        let shards = self.shards.lock().unwrap();
+        Ok(shards
+            .get(&district)
+            .and_then(|shard| shard.get(offset as usize).cloned()))
     }
 }
 
@@ -238,9 +258,64 @@ async fn the_next_tick_waits_for_every_district() {
     run_city("harbor", city(), settings(5), log.clone())
         .await
         .unwrap();
-    // Had the fast districts run ahead, they would have been appended by now
-    // and the slow one would still be at its first record when time stopped.
     assert_whole(&log, 5);
+    // A district that ran ahead would append tick t + 1 before the slow one
+    // had tick t, so the offsets in append order would go back down.
+    let order = log.order.lock().unwrap();
+    assert_eq!(order.len(), 20);
+    assert!(
+        order.windows(2).all(|w| w[0].1 <= w[1].1),
+        "appends out of tick order: {order:?}"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_retry_that_finds_another_writers_record_stops_the_city() {
+    // The first send is lost, but not before another sim appended at its offset.
+    let log = Memory::new(|district, expected, attempt| {
+        (district == 1 && expected == 3 && attempt == 1).then_some(Fault::Foreign)
+    });
+    let err = run_city("harbor", city(), settings(10), log)
+        .await
+        .unwrap_err();
+    assert!(format!("{err:#}").contains("did not write"), "{err:#}");
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_error_that_cannot_pass_ends_the_run_at_once() {
+    let log = Memory::new(|district, expected, _| {
+        (district == 2 && expected == 4).then_some(Fault::Permanent)
+    });
+    let err = run_city("harbor", city(), settings(10), log.clone())
+        .await
+        .unwrap_err();
+    assert!(format!("{err:#}").contains("district 2"), "{err:#}");
+    assert_eq!(log.sends.lock().unwrap()[&(2, 4)], 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_district_that_keeps_failing_ends_the_run_instead_of_freezing_the_city() {
+    let log = Memory::new(|district, expected, _| {
+        (district == 0 && expected == 2).then_some(Fault::Fail)
+    });
+    let mut s = settings(10);
+    s.max_failures = 5;
+    let err = run_city("harbor", city(), s, log.clone())
+        .await
+        .unwrap_err();
+    assert!(format!("{err:#}").contains("5 sends in a row"), "{err:#}");
+    assert_eq!(log.sends.lock().unwrap()[&(0, 2)], 5);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_speed_of_zero_is_refused() {
+    let mut s = settings(5);
+    s.ticks_per_second = 0;
+    assert!(
+        run_city("harbor", city(), s, Memory::healthy())
+            .await
+            .is_err()
+    );
 }
 
 #[tokio::test(start_paused = true)]

@@ -110,9 +110,34 @@ impl World {
                     vehicle,
                     district,
                 } => {
-                    if trip.arrive() <= tick {
-                        let blocks = &person.resident.schedule.blocks;
-                        person.block = (person.block + 1) % blocks.len();
+                    // The last step can end in another district, so cross before
+                    // arriving. The vehicle ends in the district of the lot it
+                    // reaches, which a road beside a boundary may not be in.
+                    let (leg, progress) = trip.leg_progress(tick);
+                    let arriving = trip.arrive() <= tick;
+                    let blocks = &person.resident.schedule.blocks;
+                    let next = (person.block + 1) % blocks.len();
+                    let now = if arriving {
+                        city.lots[blocks[next].lot as usize].district
+                    } else {
+                        district_of(city, trip, tick)
+                    };
+                    if now != *district {
+                        let state = vehicle_state(trip, *vehicle, leg, progress);
+                        out[usize::from(*district)].events.push(Event::Left {
+                            resident: id,
+                            district: now,
+                            vehicle: state.clone(),
+                        });
+                        out[usize::from(now)].events.push(Event::Entered {
+                            resident: id,
+                            district: *district,
+                            vehicle: state,
+                        });
+                        *district = now;
+                    }
+                    if arriving {
+                        person.block = next;
                         if person.block == 0 {
                             person.day += 1;
                         }
@@ -133,22 +158,6 @@ impl World {
                         });
                         person.state = State::At { since: tick };
                         continue;
-                    }
-                    let (leg, progress) = trip.leg_progress(tick);
-                    let now = district_of(city, trip, tick);
-                    if now != *district {
-                        let state = vehicle_state(trip, *vehicle, leg, progress);
-                        out[usize::from(*district)].events.push(Event::Left {
-                            resident: id,
-                            district: now,
-                            vehicle: state.clone(),
-                        });
-                        out[usize::from(now)].events.push(Event::Entered {
-                            resident: id,
-                            district: *district,
-                            vehicle: state,
-                        });
-                        *district = now;
                     }
                     count_car(city, &mut cars, trip, tick);
                 }

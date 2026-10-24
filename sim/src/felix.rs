@@ -7,7 +7,8 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use felix_client::{ClientConfig, ClusterClient, CommitOp, ConditionalWrite};
-use felix_wire::routing::shard_for;
+use felix_metro_core::{Routing, district_key};
+use felix_wire::routing::ShardRouting;
 use tracing::warn;
 
 use crate::runner::{Log, Write};
@@ -79,21 +80,19 @@ pub fn events_stream(city: &str) -> String {
 }
 
 /// Entity keys that put district `i` on shard `i` of a stream with `shards`
-/// shards. A key is `d<NN>` where that routes to the district's shard, and
-/// `d<NN>.<n>` for the first `n` that does, because hashing `d<NN>` alone
-/// leaves some shards with several districts and others with none.
-pub fn district_keys(shards: u32, districts: usize) -> Result<Vec<String>> {
+/// shards mapped by `routing`. See [`felix_metro_core::keys`].
+pub fn district_keys(shards: u32, routing: ShardRouting, districts: usize) -> Result<Vec<String>> {
     anyhow::ensure!(
         shards as usize >= districts,
         "the stream has {shards} shards for {districts} districts; a district needs a shard of its own"
     );
+    let routing = match routing {
+        ShardRouting::Modulo => Routing::Modulo,
+        ShardRouting::JumpHash => Routing::JumpHash,
+    };
     (0..districts)
         .map(|district| {
-            let plain = format!("d{district:02}");
-            std::iter::once(plain.clone())
-                .chain((0..).map(|n| format!("{plain}.{n}")))
-                .take(100_000)
-                .find(|key| shard_for(shards, Some(key.as_bytes())) as usize == district)
+            district_key(district as u32, shards, routing)
                 .with_context(|| format!("no entity key routes district {district} to its shard"))
         })
         .collect()
@@ -119,11 +118,13 @@ impl FelixLog {
         districts: usize,
     ) -> Result<Self> {
         let stream = events_stream(city);
-        let shards = client
-            .stream_shards(&connection.tenant, &connection.namespace, &stream)
+        let (shards, routing) = client
+            .client()
             .await
-            .with_context(|| format!("ask how many shards {stream} has"))?;
-        let keys = district_keys(shards, districts)?;
+            .stream_routing(&connection.tenant, &connection.namespace, &stream)
+            .await
+            .with_context(|| format!("ask how {stream} is sharded"))?;
+        let keys = district_keys(shards, routing, districts)?;
         Ok(FelixLog {
             client,
             tenant: connection.tenant.as_str().into(),
@@ -160,19 +161,65 @@ impl Log for FelixLog {
             ConditionalWrite::Refused { tail } => Write::Refused { tail },
         })
     }
+
+    async fn read(&self, district: u16, offset: u64) -> Result<Option<Vec<u8>>> {
+        // The district's keys put it on the shard of its own number.
+        let page = self
+            .client
+            .read(
+                &self.tenant,
+                &self.namespace,
+                &self.stream,
+                u32::from(district),
+                offset,
+                None,
+                1,
+            )
+            .await?;
+        Ok(page
+            .records
+            .into_iter()
+            .find(|record| record.offset == offset)
+            .map(|record| record.payload.to_vec()))
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use felix_wire::routing::shard_for_routing;
+
     use super::*;
 
+    const MODES: [ShardRouting; 2] = [ShardRouting::Modulo, ShardRouting::JumpHash];
+
     #[test]
-    fn each_district_gets_the_shard_of_its_number() {
-        for (shards, districts) in [(4, 4), (16, 16), (64, 16), (5, 3)] {
-            let keys = district_keys(shards, districts).unwrap();
-            for (district, key) in keys.iter().enumerate() {
-                assert!(key.starts_with(&format!("d{district:02}")));
-                assert_eq!(shard_for(shards, Some(key.as_bytes())) as usize, district);
+    fn each_district_gets_the_shard_of_its_number_under_felixs_own_hash() {
+        for routing in MODES {
+            for (shards, districts) in [(4, 4), (16, 16), (64, 16), (5, 3)] {
+                let keys = district_keys(shards, routing, districts).unwrap();
+                for (district, key) in keys.iter().enumerate() {
+                    assert!(key.starts_with(&format!("d{district:02}")));
+                    let shard = shard_for_routing(routing, shards, Some(key.as_bytes()));
+                    assert_eq!(shard as usize, district, "{routing:?} {key}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn core_hashes_like_felix() {
+        for (mode, routing) in [
+            (ShardRouting::Modulo, Routing::Modulo),
+            (ShardRouting::JumpHash, Routing::JumpHash),
+        ] {
+            for shards in [1, 2, 3, 7, 16, 64] {
+                for n in 0..500 {
+                    let key = format!("d{n:02}.{n}");
+                    assert_eq!(
+                        felix_metro_core::keys::shard_for(routing, shards, key.as_bytes()),
+                        shard_for_routing(mode, shards, Some(key.as_bytes())),
+                    );
+                }
             }
         }
     }
@@ -180,12 +227,14 @@ mod tests {
     #[test]
     fn plain_keys_collide_and_are_salted() {
         // Hashing d00 to d03 over four shards puts two districts on one.
-        let keys = district_keys(4, 4).unwrap();
-        assert!(keys.iter().any(|k| k.contains('.')));
+        for routing in MODES {
+            let keys = district_keys(4, routing, 4).unwrap();
+            assert!(keys.iter().any(|k| k.contains('.')), "{routing:?}");
+        }
     }
 
     #[test]
     fn refuses_fewer_shards_than_districts() {
-        assert!(district_keys(3, 4).is_err());
+        assert!(district_keys(3, ShardRouting::Modulo, 4).is_err());
     }
 }
