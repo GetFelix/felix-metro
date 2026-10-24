@@ -51,6 +51,11 @@ export interface SeekStats {
   reads: number;
   /** Records answered from the cache. */
   hits: number;
+  /** Time spent waiting on gateway reads, summed and the slowest one, in ms. */
+  readMs: number;
+  slowestMs: number;
+  /** Records in the first page of the last range read. */
+  pageSize: number;
 }
 
 export interface DistrictSeek {
@@ -89,12 +94,13 @@ interface Flight {
 
 /** One long-lived seeker per page: its session and caches carry from one seek to the next. */
 export class Seeker {
-  readonly stats: SeekStats = { reads: 0, hits: 0 };
+  readonly stats: SeekStats = { reads: 0, hits: 0, readMs: 0, slowestMs: 0, pageSize: 0 };
   private readonly records: Map<number, Known>[];
   private readonly keyframes: Map<number, Known>[];
   /** The oldest offset retention has left, by district; 0 until a read says otherwise. */
   private readonly oldest: number[];
   private readonly sessions: readonly History[];
+  private turn = 0;
   private readonly flights = new Map<string, Flight>();
   private current: AbortController | null = null;
 
@@ -253,9 +259,9 @@ export class Seeker {
     return found;
   }
 
-  /** A district's reads go over one of the sessions, which each allow four in flight. */
-  private session(d: number): History {
-    return this.sessions[d % this.sessions.length]!;
+  /** Reads take the sessions in turn: each allows four in flight, so a district's pages use all of them. */
+  private session(): History {
+    return this.sessions[this.turn++ % this.sessions.length]!;
   }
 
   /** The session as the pointer lookup reads it: its reads share and stop with the seek, and a trimmed start says so. */
@@ -265,7 +271,7 @@ export class Seeker {
         new Promise((resolve, reject) => {
           signal.throwIfAborted();
           signal.addEventListener('abort', () => reject(signal.reason), { once: true });
-          this.session(d).stateGet(stream, key, entity).then(resolve, reject);
+          this.session().stateGet(stream, key, entity).then(resolve, reject);
         }),
       read: async (_stream, shard, from, end) => this.read(shard, from, end ?? from + 1, false, signal),
     };
@@ -340,12 +346,16 @@ export class Seeker {
     let flight = this.flights.get(key);
     if (!flight) {
       const cancel = new AbortController();
-      const promise = this.session(d).read(STREAM, d, from, end, cancel.signal);
+      const sent = performance.now();
+      const promise = this.session().read(STREAM, d, from, end, cancel.signal);
       flight = { promise, users: 0, cancel };
       this.stats.reads++;
       this.flights.set(key, flight);
       const made = flight;
       const done = () => {
+        const took = performance.now() - sent;
+        this.stats.readMs += took;
+        this.stats.slowestMs = Math.max(this.stats.slowestMs, took);
         if (this.flights.get(key) === made) this.flights.delete(key);
       };
       promise.then(done, done);
@@ -463,7 +473,7 @@ export class Seeker {
         if (page.nextOffset <= start || page.records.length === 0) {
           throw new SeekError('broken', `district ${d}: the log stopped at ${start}, before ${end}`);
         }
-        if (size === 0) size = page.nextOffset - start;
+        if (size === 0) size = this.stats.pageSize = page.nextOffset - start;
         for (const r of page.records) {
           const record = this.decode(d, r);
           this.keep(d, r.offset, record);

@@ -27,6 +27,8 @@ const fail = async (message) => {
   await browser.close();
   process.exit(1);
 };
+// Budget misses are collected, so every seek is logged before the check fails.
+const misses = [];
 
 // The live page tells how far the city has got.
 await page.goto(`${appUrl}#harbor`, { waitUntil: 'load', timeout: 5 * MINUTE });
@@ -71,7 +73,7 @@ for (const t of targets) {
   const pill = await page.locator('#pill').textContent();
   const shown = await page.evaluate(() => window.__live.tick);
   console.log(
-    `seek to tick ${t}: ${r.ms.toFixed(0)} ms from the call to the first frame (${r.reads} reads in all), districts at [${r.ticks}], offsets [${r.offsets}], ${r.buildings} buildings, "${pill}"`,
+    `seek to tick ${t}: ${r.ms.toFixed(0)} ms from the call to the first frame, ${r.seekMs.toFixed(0)} ms of it finding and folding (${r.reads} reads in all, reads took ${r.stats.readMs.toFixed(0)} ms summed and ${r.stats.slowestMs.toFixed(0)} ms at the slowest, ${r.stats.pageSize} records a page), districts at [${r.ticks}], offsets [${r.offsets}], ${r.buildings} buildings, "${pill}"`,
   );
   folded[t] = r;
   if (!r.exact || r.tick !== t) await fail(`asked for tick ${t}, got ${r.tick}`);
@@ -79,7 +81,7 @@ for (const t of targets) {
   if (r.offsets.some((o) => !Number.isInteger(o) || o < 0)) await fail(`offsets [${r.offsets}] are not offsets`);
   if (shown !== t) await fail(`the page shows tick ${shown}, not ${t}`);
   if (!/^Earlier/.test(pill ?? '')) await fail(`the page does not say it is showing the past: "${pill}"`);
-  if (r.ms > BUDGET_MS) await fail(`seeking to ${t} took ${r.ms.toFixed(0)} ms, over ${BUDGET_MS} ms`);
+  if (r.ms > BUDGET_MS) misses.push(`seeking to ${t} took ${r.ms.toFixed(0)} ms, over ${BUDGET_MS} ms`);
   await page.screenshot({ path: join(out, `at-${t}.png`) });
 }
 
@@ -104,5 +106,6 @@ for (const t of targets) {
   // A page with nothing cached folds to the same city as the one that had seeked around.
   if (cold.sig !== folded[t].sig) await fail(`a cold page at tick ${t} differs from the one already open`);
 }
+if (misses.length) await fail(misses.join('\n'));
 if (errors.length) await fail(`page errors:\n${errors.join('\n')}`);
 await browser.close();

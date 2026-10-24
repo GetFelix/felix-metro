@@ -62,7 +62,10 @@ declare global {
         buildings: number;
         sig: string;
         ms: number;
+        /** The part of `ms` spent finding and folding, before the city was drawn. */
+        seekMs: number;
         reads: number;
+        stats: { readMs: number; slowestMs: number; pageSize: number };
       }>;
       /** The state the live connection feeds: its districts' ticks and buildings. */
       live(): { ticks: number[]; buildings: number; sig: string };
@@ -139,11 +142,9 @@ async function openHistory(name: string, districts: number, gateway: string | nu
   const url = gateway ?? `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`;
   const oidc = await fetchOidc(gateway ? url.replace(/^ws/, 'http').replace(/\/ws$/, '/') : location.origin + '/');
   if (!oidc) return null;
-  // A session lets four reads wait at once, so the districts spread over a few of them.
+  // A session lets four reads wait at once, so a seek's reads spread over several.
   const token = await signIn(oidc);
-  const sessions = await Promise.all(
-    Array.from({ length: Math.min(districts * districts, HISTORY_SESSIONS) }, () => Gateway.connect(url, name, token)),
-  );
+  const sessions = await Promise.all(Array.from({ length: HISTORY_SESSIONS }, () => Gateway.connect(url, name, token)));
   return new Seeker(sessions, districts * districts);
 }
 
@@ -179,7 +180,7 @@ function ago(wallUs: number): string {
 }
 
 /** Connections history is read over. */
-const HISTORY_SESSIONS = 4;
+const HISTORY_SESSIONS = 8;
 
 /** Districts on a side when `?districts` does not say. */
 const DEFAULT_DISTRICTS = 2;
@@ -388,6 +389,7 @@ async function main() {
           const result = await opened.seek(tick);
           const next = new CityState(city!, metro, districts * districts);
           fold(next, result);
+          const seekMs = performance.now() - started;
           swap(next, result.tick);
           showPast(result);
           await new Promise<void>((done) => frameWaiters.push(done));
@@ -400,7 +402,9 @@ async function main() {
             buildings: next.built.size,
             sig: signature(next.built),
             ms: performance.now() - started,
+            seekMs,
             reads: opened.stats.reads,
+            stats: { ...opened.stats },
           };
         } catch (err) {
           if (!(err instanceof DOMException && err.name === 'AbortError')) note(whyNot(err));
