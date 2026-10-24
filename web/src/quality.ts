@@ -10,6 +10,8 @@ export interface TierSettings {
   pixelRatioCap: number;
   /** Skinned pedestrian rigs. Nothing reads this yet; the pedestrian work in #6 will. */
   rigs: boolean;
+  /** Most cars and walkers drawn at once; the rest of the voyages wait for one to arrive. */
+  movers: number;
 }
 
 // The look degrades before the frame rate does: ambient occlusion goes first, then tilt-shift, shadows and resolution.
@@ -21,6 +23,7 @@ export function settingsFor(tier: Tier): TierSettings {
     shadowMapSize: tier === 'high' ? 4096 : 2048,
     pixelRatioCap: tier === 'low' ? 1 : 2,
     rigs: tier === 'high',
+    movers: tier === 'high' ? Infinity : tier === 'medium' ? 80 : 40,
   };
 }
 
