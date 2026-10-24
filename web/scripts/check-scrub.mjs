@@ -180,20 +180,30 @@ const settled = (expected) =>
     expected,
     { polling: 100, timeout: MINUTE },
   );
-// The release lands on the tick under the pointer, which moves a little as the live tip does, so the tick it rests at
-// is read from the page: the city must be folded to the very tick the bar holds.
-await page
-  .waitForFunction(
-    () => {
+// The release keeps the tick the last drag move showed, even as the live tip grows. Rest means the handle, the
+// folded state and the clock agree and have not changed for several polls, so a release target that is still on its
+// way cannot be mistaken for the rest.
+const STABLE_POLLS = 8;
+const atRest = () =>
+  page.waitForFunction(
+    (need) => {
       const s = document.getElementById('scrub');
       const { past } = window.__metro.shown();
-      return past !== null && Number(s.dataset.at) === past && Math.floor(window.__live.tick) === past;
+      const now = `${s.dataset.at}:${past}`;
+      const ok = past !== null && Number(s.dataset.at) === past && Math.floor(window.__live.tick) === past;
+      const w = window.__restPoll ?? (window.__restPoll = { now: '', count: 0 });
+      w.count = ok && w.now === now ? w.count + 1 : 0;
+      w.now = now;
+      return w.count >= need;
     },
-    null,
+    STABLE_POLLS,
     { polling: 100, timeout: MINUTE },
-  )
-  .catch(async () => fail(`after the drag the city did not rest at the handle: ${JSON.stringify(await read())}`));
+  );
+await atRest().catch(async () =>
+  fail(`after the drag the city did not rest at the handle: ${JSON.stringify(await read())}`),
+);
 const rest = await sample('after the drag', true);
+if (rest.shown.past !== last) await fail(`the release moved the handle from tick ${last} to ${rest.shown.past}`);
 const dragEnd = rest.shown.past;
 if (rest.mode !== 'past') await fail(`after the drag the bar says "${rest.mode}"`);
 console.log(`drag ended at tick ${dragEnd}; ${drawnTicks.size} moments drawn on the way`);
@@ -209,17 +219,9 @@ await page.screenshot({ path: join(out, 'past.png') });
 // quarter-hours back, and the bar stops at the oldest moment held, which moves up as retention does. The drag ended
 // a fraction of the span from the oldest end, so start from the middle, where the whole sum fits with room to spare.
 await page.mouse.click(xAt(0.6), y);
-await page
-  .waitForFunction(
-    () => {
-      const s = document.getElementById('scrub');
-      const { past } = window.__metro.shown();
-      return past !== null && Number(s.dataset.at) === past && Math.floor(window.__live.tick) === past;
-    },
-    null,
-    { polling: 100, timeout: MINUTE },
-  )
-  .catch(async () => fail(`after the click the city did not rest at the handle: ${JSON.stringify(await read())}`));
+await atRest().catch(async () =>
+  fail(`after the click the city did not rest at the handle: ${JSON.stringify(await read())}`),
+);
 const start = await sample('after the click', true);
 const keysStart = start.shown.past;
 if (keysStart - start.min < 2 * HOUR_TICKS)
