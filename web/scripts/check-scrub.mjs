@@ -305,5 +305,9 @@ if (await page.locator('#past').isVisible()) await fail('the past pill is still 
 await page.locator('#timeline').screenshot({ path: join(out, 'bar-back-live.png') });
 
 console.log(`${samples} frames sampled, each whole`);
+{
+  const l = await page.evaluate(() => window.__live);
+  console.log(`${l.movers} movers drawn, ${l.capped} capped, ${l.fps.toFixed(1)} fps`);
+}
 if (errors.length) await fail(`page errors:\n${errors.join('\n')}`);
 await browser.close();

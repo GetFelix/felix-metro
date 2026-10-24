@@ -35,7 +35,7 @@ enough to keep days of it.
 
 1. **Rewind to any moment, quickly.** From any position on the timeline, the city is drawn at that moment in under a second.
 2. **Rewind, then follow live with no gap.** Playing forward from the past joins live delivery without a missing or repeated event.
-3. **A small log.** A city of 20,000 residents writes on the order of 10 KB/s, so a week of history is a few gigabytes on one broker.
+3. **A small log.** A city of 20,000 residents writes on the order of 10 KB/s, so a week of history is a few gigabytes on one broker. Today's rush peaks near 17 KB/s, see #95.
 4. **One authority that survives a restart.** The simulation is fenced at the broker, and a replacement picks up from the log where the last one stopped.
 5. **Forks are cheap.** A branch starts from a keyframe of the parent and owes it nothing after that.
 
@@ -82,7 +82,7 @@ Seeds are parts of 1 to 32 characters of `a-z`, `0-9` and `-`, joined by `~` for
 
 ### Residents, schedules and routes
 
-`core` also draws the people. A city has two residents for each suburban lot with a door, and resident `i` is fixed by the seed and `i`: an archetype (office worker, shift worker, shopkeeper, student, retiree or night worker), a home, and a workplace that is the nearest of three random picks from the places that suit the archetype. Times are jittered per resident, and people leave early enough by a rough travel estimate to arrive at their usual time.
+`core` also draws the people. A city has six residents for each suburban lot with a door, and resident `i` is fixed by the seed and `i`: an archetype (office worker, shift worker, shopkeeper, student, retiree or night worker), a home, and a workplace that is the nearest of three random picks from the places that suit the archetype. Times are jittered per resident, and people leave early enough by a rough travel estimate to arrive at their usual time. Office workers arrive between 07:45 and 08:15 and leave between 17:00 and 17:30; shopkeepers arrive between 07:45 and 08:30 and leave between 17:00 and 18:30, and office workers walk or drive to the shops at lunch, so the roads fill in two bursts a day rather than a trickle. Shops and parks are the nearest of eight random picks, so errands are mostly short enough to walk, and half the retirees go out in the afternoon rush instead of the morning. In the harbor city at 2 by 2 districts that is 522 residents; the road holds up to 104 cars and 16 walkers at once, the busiest district up to 42 cars and 10 walkers, 9 cars on the busiest segment, and the 08:00 and 17:15 frames show about 30 cars in the busiest district. `cargo run --release -p felix-metro-core --example density -- harbor 2` prints these.
 
 A day is a cycle of blocks, each a lot and the tick of the day they leave it. The last block's trip returns to the first, so the day closes. A night worker's day starts at work, because they are still there at midnight. A trip leaves at its scheduled tick, or on arrival if the last one ran late.
 
@@ -142,7 +142,7 @@ writes decisions instead, and the client works out positions:
 A route is its segment ids from the road graph (`u32`) and one speed byte per
 segment, a percentage of the segment class's speed. A trip of 12 segments is 36
 bytes, so a resident making five or six trips a city day, in a city of 20,000
-residents, writes under 5 KB/s of events at normal speed.
+residents, writes under 5 KB/s of events at normal speed. Measured on the harbor city, a resident costs 0.15 B/s of events at 4 ticks a second, which is 3 KB/s at 20,000, plus the 31-byte header of each district's record every tick (2 KB/s for 16 districts).
 
 ### Byte layouts
 
@@ -236,8 +236,10 @@ Because buildings and roads are diffs against the city the seed generates, the
 keyframe of a city nobody has built in carries none of them, and the cost is
 the residents.
 
-20,000 residents at about 16 bytes each is about 320 KB per city hour, about
-5 KB/s. Events and keyframes together come to about 10 KB/s, or under 1 GB a day.
+20,000 residents at about 10 bytes each (measured: a district of 200 residents writes a 1.8 KB keyframe) is about 200 KB per city hour, about
+3.4 KB/s. Events, keyframes and record headers together come to about 8.4 KB/s averaged over a day, or under 1 GB a day.
+
+The mean hides the rush. Trips cluster around 08:00 and 17:15, and the hourly keyframe of every district lands on the same tick (08:00 and 17:00 are both on the hour). Measured on a harbor city with 1,260 residents in each of four districts, the same load as 20,000 residents in 16, the busiest minute of the morning rush writes 3.7 KB/s and of the evening rush 4.2 KB/s, which is 14.6 and 16.5 KB/s at 20,000 residents, and one district's busiest minute is 1.5 KB/s. The worst single tick is a district's keyframe, about 20 KB, against under 600 B for a tick without one. `report_load` in `sim/src/world/tests.rs` prints these. Bringing the peak back to the 10 KB/s goal is tracked in #95.
 The counts are what the stats sparkline plots.
 
 ### Commands and the registry
@@ -436,7 +438,7 @@ One seek runs at a time, always for the newest target, and each result is drawn
 as it completes, so scrubbing faster than a seek takes still shows the city
 moving; a seek is never cancelled by the next move. A target ahead of the city
 on screen in the same hour folds only the records after the last one it holds;
-any move back refolds from the keyframe. The newest record of each district is
+any move back refolds from the keyframe (and so replays a construction backwards). The newest record of each district is
 trusted for a second between seeks. The bar spans the first hour that can be
 started from to the live tip, with days as bands and a tick for every hour.
 Arrow keys step 15 city minutes, `Shift` or the page keys an hour, `Home` goes to
@@ -456,6 +458,16 @@ city's command stream, a gateway `stamp_sender` stream. The sim applies
 commands at the next tick and records the result as a `command` event in the
 district it touched, with a hash of the principal. Every change to the city
 carries who made it, and that is visible on the timeline.
+
+A `built` or `demolished` event is instantaneous in the log. The page spreads it over the next 8 ticks of city time
+(`web/src/construction.ts`): a building rises from nothing inside a scaffold from the event's tick, and a demolished one
+scales down under a puff of dust. What is drawn is a function of the event's tick and the tick on screen, with no
+clock of its own, so a rewind plays it backwards and a seek into the middle of a window shows the right partial state.
+`CityState` keeps the event's tick for every lot inside its window (`rising`, `falling`) and drops it after. A keyframe
+lists only the finished lot, so a seek whose tick is within 8 ticks after its keyframe also reads the 7 records before
+the keyframe, the cheapest way to find a start that came just before it; further on the cost is nothing. The live
+join does not, since it has no earlier tick to compare with: a building that went up just before the keyframe a joining
+page starts from is drawn finished.
 
 Building is only allowed at the live tip. A builder who scrubs back sees the
 past read-only, and building there means forking.

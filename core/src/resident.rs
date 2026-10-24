@@ -15,11 +15,13 @@ use crate::{
 mod tests;
 
 /// People who share each home.
-const PER_HOME: u32 = 2;
+const PER_HOME: u32 = 6;
 /// Vehicle kinds a resident may drive, numbered from 1; 0 is on foot.
 pub const CAR_KINDS: u8 = 6;
 /// How many candidates a workplace is the nearest of.
 const CHOICES: usize = 3;
+/// How many candidates a shop or park is the nearest of: errands stay close enough to walk.
+const ERRAND_CHOICES: usize = 8;
 /// Ticks a tile of distance is guessed to take, with slack, for planning.
 const TICKS_PER_TILE: u32 = 5;
 /// Ticks of margin a resident leaves for parking and the walk to the door.
@@ -35,10 +37,17 @@ pub struct Places {
     any: Vec<u32>,
     /// The connected piece of road each lot's door is on, by lot id.
     piece: Vec<u32>,
+    per_home: u32,
 }
 
 impl Places {
     pub fn new(city: &City) -> Places {
+        Places::with_per_home(city, PER_HOME)
+    }
+
+    /// Like [`Places::new`] with `per_home` residents in each home, to load a city the way a
+    /// bigger one would.
+    pub fn with_per_home(city: &City, per_home: u32) -> Places {
         let mut p = Places {
             homes: Vec::new(),
             offices: Vec::new(),
@@ -47,6 +56,7 @@ impl Places {
             parks: Vec::new(),
             any: Vec::new(),
             piece: pieces(city),
+            per_home,
         };
         for lot in city.lots.iter().filter(|l| l.door().is_some()) {
             p.any.push(lot.id);
@@ -66,7 +76,7 @@ impl Places {
 
     /// How many residents the city has.
     pub fn population(&self) -> u32 {
-        self.homes.len() as u32 * PER_HOME
+        self.homes.len() as u32 * self.per_home
     }
 }
 
@@ -115,10 +125,10 @@ fn tiles(city: &City, a: u32, b: u32) -> u32 {
     u32::from(a.x.abs_diff(b.x)) + u32::from(a.z.abs_diff(b.z))
 }
 
-/// The closest of a few random picks from `from`, other than `not` and on
+/// The closest of `CHOICES_OF` random picks from `from`, other than `not` and on
 /// the road `near` is on; any such door if `from` has nothing else. `None` if
 /// no door qualifies.
-fn pick(
+fn pick<const CHOICES_OF: usize>(
     city: &City,
     places: &Places,
     rng: &mut Rng,
@@ -141,7 +151,7 @@ fn pick(
     if choices.is_empty() {
         return None;
     }
-    (0..CHOICES)
+    (0..CHOICES_OF)
         .map(|_| choices[rng.below(choices.len())])
         .min_by_key(|&l| (tiles(city, near, l), l))
 }
@@ -152,13 +162,13 @@ impl Resident {
     pub fn new(city: &City, places: &Places, index: u32) -> Option<Resident> {
         let mut rng = Rng::for_index(&format!("{}/resident", city.seed), index);
         let archetype = Archetype::from_roll(rng.below(100));
-        let home = places.homes[(index / PER_HOME) as usize % places.homes.len()];
+        let home = places.homes[(index / places.per_home) as usize % places.homes.len()];
         let work_list = match archetype {
             Archetype::Shift | Archetype::Night => &places.factories,
             Archetype::Shopkeeper => &places.shops,
             _ => &places.offices,
         };
-        let work = pick(
+        let work = pick::<CHOICES>(
             city,
             places,
             &mut rng,
@@ -167,7 +177,7 @@ impl Resident {
             home,
             &[home],
         )?;
-        let shop = pick(
+        let shop = pick::<ERRAND_CHOICES>(
             city,
             places,
             &mut rng,
@@ -176,7 +186,7 @@ impl Resident {
             home,
             &[home, work],
         )?;
-        let park = pick(
+        let park = pick::<ERRAND_CHOICES>(
             city,
             places,
             &mut rng,

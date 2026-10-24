@@ -133,6 +133,54 @@ const folded = async (s: InstanceType<typeof Seeker>, tick: number, districts = 
   return state;
 };
 
+describe('seek into a construction window', () => {
+  /** Lot 9 went up at tick 238, two ticks before hour one's keyframe, which lists it finished. */
+  const history = () => {
+    const h = new FakeHistory(1, ticks(1000));
+    h.logs[0]![238]!.events = [{ type: 'built', lot: 9, kind: 4, rotation: 0 }];
+    h.logs[0]![240]!.keyframe!.buildings.push([9, 4, 0]);
+    return h;
+  };
+  const lots = { lots: Array.from({ length: 10 }, (_, id) => ({ id, district: 0 })) } as unknown as City;
+  const at = async (h: FakeHistory, tick: number) => {
+    const state = new CityState(lots, trips, 1);
+    fold(state, await seeker(h, 1).seek(tick));
+    return state;
+  };
+
+  it('finds when the building began from the records before the keyframe', async () => {
+    const state = await at(history(), 242);
+    expect(state.rising.get(9)).toEqual({ kind: 4, rotation: 0, tick: 238 });
+  });
+
+  it('does not offer a cached keyframe for a tick whose window may reach before it', async () => {
+    const s = seeker(history(), 1);
+    await s.seek(250);
+    expect(s.cachedKeyframe(240)).toBeNull();
+    expect(s.cachedKeyframe(247)).toBeNull();
+    expect(s.cachedKeyframe(248)?.tick).toBe(240);
+  });
+
+  it('finds the start when a result folded from a bare keyframe is continued by one that read before it', async () => {
+    const s = seeker(history(), 1);
+    const full = await s.seek(242);
+    const bare = { ...full, districts: full.districts.map((d) => ({ ...d, before: [] })) };
+    const next = await s.seek(243);
+    const state = new CityState(lots, trips, 1);
+    fold(state, bare);
+    expect(state.rising.size).toBe(0);
+    expect(tryFoldMore(state, bare, next)).toBe(true);
+    expect(state.rising.get(9)).toEqual({ kind: 4, rotation: 0, tick: 238 });
+  });
+
+  it('reads nothing before the keyframe for a tick past the window', async () => {
+    const h = history();
+    const state = await at(h, 248);
+    expect(state.rising.size).toBe(0);
+    expect(h.reads.some(([, from, end]) => end > from + 1 && from < 240)).toBe(false);
+  });
+});
+
 describe('seek', () => {
   it('reads each district from its keyframe to the tick, and nothing else after it', async () => {
     const h = new FakeHistory(2, ticks(1000));

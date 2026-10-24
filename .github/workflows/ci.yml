@@ -80,6 +80,15 @@ jobs:
           exit $failed
         env:
           FRAME_MAX_DIFFERING_PERCENT: "0.01"
+      # A lot going up and one coming down at a fixed tick, reached by a forward run, a seek and a rewind, against the
+      # renders kept in web/references.
+      - name: Construction frames
+        run: |
+          npx vite preview --host 127.0.0.1 --port 4178 --strictPort &
+          up=0
+          for _ in $(seq 1 30); do curl -sf "http://127.0.0.1:4178/" >/dev/null && up=1 && break; sleep 1; done
+          [[ $up -eq 1 ]] || { echo "nothing is serving on port 4178" >&2; exit 1; }
+          node scripts/check-construction.mjs http://127.0.0.1:4178/construction.html frames/construction
       # The same moment on each quality tier, and with the frame-time HUD, for review.
       - name: Quality tier screenshots
         run: |

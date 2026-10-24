@@ -76,6 +76,8 @@ for (let i = 0; i < 40 && moved === 0; i++) {
 }
 if (moved === 0) await fail(`${first.size} cars drawn, none moved`);
 console.log(`${first.size} cars seen, ${moved} moved`);
+const load = () =>
+  page.evaluate(() => ({ movers: window.__live.movers, capped: window.__live.capped, fps: window.__live.fps }));
 
 // 3. Day follows the tick: a bright hour, then dusk, each looked at from the page.
 const shoot = async (name, from, to, minutes) => {
@@ -91,7 +93,10 @@ const shoot = async (name, from, to, minutes) => {
     .catch(async () => fail(`the city never reached ${from}:00 (at ${await clock()})`));
   await page.waitForTimeout(1000);
   await page.screenshot({ path: join(out, `${name}.png`) });
-  console.log(`${name}: ${await dayLabel()} ${await clock()}`);
+  const l = await load();
+  console.log(
+    `${name}: ${await dayLabel()} ${await clock()}, ${l.movers} movers drawn, ${l.capped} capped, ${l.fps.toFixed(1)} fps`,
+  );
 };
 await shoot('day', 11, 15, 12);
 await shoot('dusk', 18.2, 19.5, 12);

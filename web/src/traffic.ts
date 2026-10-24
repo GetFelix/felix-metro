@@ -68,6 +68,10 @@ export class Traffic {
 
   /** Voyages left without a model by the last update, because it had made its share of new ones. */
   waiting = 0;
+  /** Voyages left undrawn by the last update because `cap` models were already in use. */
+  capped = 0;
+  /** Most models in use at once. Models already drawn stay until their voyage ends, so lowering it drains. */
+  cap = Infinity;
   private made = 0;
 
   /**
@@ -114,6 +118,7 @@ export class Traffic {
     const whole = Math.floor(tick);
     const f = tick - whole;
     this.waiting = 0;
+    this.capped = 0;
     this.made = 0;
     for (const v of voyages) {
       if (tick < v.depart || tick >= v.journey.arrive()) {
@@ -125,6 +130,11 @@ export class Traffic {
       let slot = this.slots.get(v.resident);
       if (slot && slot.voyage !== v) continue;
       if (!slot) {
+        // First come, first drawn: nearest-to-camera would need a sort a frame.
+        if (this.slots.size >= this.cap) {
+          this.capped++;
+          continue;
+        }
         const taken = this.take(v);
         if (!taken) {
           this.waiting++;

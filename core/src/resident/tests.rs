@@ -168,11 +168,11 @@ fn nothing_to_pick_is_none() {
     let mut rng = Rng::new("x");
     let home = places.homes[0];
     assert_eq!(
-        pick(&city, &places, &mut rng, &[], &[], home, &[home]),
+        pick::<3>(&city, &places, &mut rng, &[], &[], home, &[home]),
         None
     );
     assert_eq!(
-        pick(&city, &places, &mut rng, &[home], &[home], home, &[home]),
+        pick::<3>(&city, &places, &mut rng, &[home], &[home], home, &[home]),
         None
     );
 }
@@ -218,26 +218,56 @@ fn a_trip_event_gives_back_the_trip_it_came_from() {
 fn legs_that_join_no_doors_are_no_trip() {
     let city = City::generate("harbor", 2).unwrap();
     let places = Places::new(&city);
-    let r = Resident::new(&city, &places, 0).unwrap();
-    let trip = r
-        .day_trips(&city, 0, &Congestion::FREE, 0)
-        .unwrap()
-        .remove(0);
+    // A trip of one leg cannot be cut short, so look for one of several.
+    let (r, trip) = all(&places)
+        .filter_map(|index| Resident::new(&city, &places, index))
+        .find_map(|r| {
+            let trips = r.day_trips(&city, 0, &Congestion::FREE, 0)?;
+            let trip = trips.into_iter().find(|t| t.legs().len() > 1)?;
+            Some((r, trip))
+        })
+        .expect("some resident makes a trip of more than one leg");
     let mut legs = trip.legs();
     assert!(
         r.trip_from_route(&city, trip.depart, &[], trip.mode)
             .is_none()
     );
-    legs.reverse();
-    if legs.len() > 1 {
-        assert!(
-            r.trip_from_route(&city, trip.depart, &legs, trip.mode)
-                .is_none()
-        );
-    }
+    // Cut short, the legs stop before the door the trip is going to.
+    assert!(
+        r.trip_from_route(&city, trip.depart, &legs[..legs.len() - 1], trip.mode)
+            .is_none()
+    );
     legs[0].segment = u32::MAX;
     assert!(
         r.trip_from_route(&city, trip.depart, &legs, trip.mode)
             .is_none()
     );
+}
+
+/// Cars and walkers on the road of harbor at tick `tick` of its first day, on empty roads.
+fn on_the_road(tick: u32) -> (u32, u32) {
+    let city = City::generate("harbor", 2).unwrap();
+    let places = Places::new(&city);
+    let (mut cars, mut walkers) = (0, 0);
+    for index in 0..places.population() {
+        let r = Resident::new(&city, &places, index).unwrap();
+        for trip in r.day_trips(&city, 0, &Congestion::FREE, 0).unwrap() {
+            if (trip.depart..=trip.arrive()).contains(&tick) {
+                match trip.mode {
+                    Mode::Drive => cars += 1,
+                    Mode::Walk => walkers += 1,
+                }
+            }
+        }
+    }
+    (cars, walkers)
+}
+
+#[test]
+fn rush_hour_fills_the_streets() {
+    for (name, tick) in [("08:00", 8 * 240), ("17:15", 17 * 240 + 60)] {
+        let (cars, walkers) = on_the_road(tick);
+        assert!(cars >= 40, "{name}: {cars} cars");
+        assert!(walkers >= 2, "{name}: {walkers} walkers");
+    }
 }

@@ -17,7 +17,7 @@ and play forward from there.
 
 ## What you will be able to do
 
-- Watch a generated city go about its day in 3D: residents commute, shop and go home, and the sun rises and sets
+- Watch a generated city go about its day in 3D: residents commute, shop and go home, and the sun rises and sets. Rush hour at 08:00 and 17:15 puts up to about 40 cars and 10 walkers on the streets of the busiest district, and about 100 cars across the harbor city at 2 by 2 (522 residents; `cargo run --release -p felix-metro-core --example density -- harbor 2` prints the counts). The log averages about 8 KB/s over a day at 20,000 residents and peaks near 17 KB/s in the busiest minute of the rush, from the hourly snapshots of each district landing together, which #95 tracks (`cargo test -p felix-metro-sim --release report_load -- --ignored --nocapture` measures it).
 - Drag the timeline back to any moment the log holds and see the city exactly as it was
 - Let go and watch it play forward and catch up to live
 - Follow one resident or car through their day
@@ -52,16 +52,16 @@ there. [docs/design.md](docs/design.md) has the details.
 
 ## Status
 
-| M   | Milestone           | State                                                                                                                                                     |
-| --- | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 0   | The look, locked    | In progress: style frame, assets, daylight, post-processing and quality tiers done; instanced traffic, the UI shell and camera controls open              |
-| 1   | A live city         | Done                                                                                                                                                      |
-| 2   | Time travel         | In progress: keyframes, seeking, the timeline scrubber and rewind then follow done                                                                        |
-| 3   | Follow a life       | Planned                                                                                                                                                   |
-| 4   | Build               | In progress: the sim applies build, demolish and speed commands and records who sent them; placement tools in the page, roads and zones are not built yet |
-| 5   | Branching timelines | Planned                                                                                                                                                   |
-| 6   | Scale and failover  | Planned                                                                                                                                                   |
-| 7   | Self-hosting        | Planned                                                                                                                                                   |
+| M   | Milestone           | State                                                                                                                                                                                                                                                                         |
+| --- | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0   | The look, locked    | In progress: style frame, assets, daylight, post-processing and quality tiers done; instanced traffic, the UI shell and camera controls open                                                                                                                                  |
+| 1   | A live city         | Done                                                                                                                                                                                                                                                                          |
+| 2   | Time travel         | In progress: keyframes, seeking, the timeline scrubber and rewind then follow done                                                                                                                                                                                            |
+| 3   | Follow a life       | Planned                                                                                                                                                                                                                                                                       |
+| 4   | Build               | In progress: the sim applies build, demolish and speed commands and records who sent them, and the page animates a building going up (scaffold) or coming down (dust) over 8 ticks, backwards when you rewind; placement tools in the page, roads and zones are not built yet |
+| 5   | Branching timelines | Planned                                                                                                                                                                                                                                                                       |
+| 6   | Scale and failover  | Planned                                                                                                                                                                                                                                                                       |
+| 7   | Self-hosting        | Planned                                                                                                                                                                                                                                                                       |
 
 What runs today: the sim, the dev stack and a browser page that shows a city live, with
 cars and walkers moving in time with the sim and the sun following the tick. The page
@@ -72,7 +72,7 @@ already dropped what it missed, it restarts that district from the newest keyfra
 A city the gateway refuses (a misspelled name, or no access) shows a message instead of
 retrying. The city name in the top left opens a list of every city. Following a resident and the page's own
 building tools are not built yet; a command published to the city's command stream by any client with a
-builder's token is applied by the sim and shows up in the page.
+builder's token is applied by the sim and shows up in the page, rising over 8 ticks of city time inside a scaffold (a demolished building scales down in a puff of dust). Rewind through it and it comes down again; the low quality tier skips the scaffold and the dust.
 
 ## Recording the clip
 
@@ -107,7 +107,7 @@ density -- harbor 2` in `core/` prints the cars and walkers on the road from the
 
 Each [release](https://github.com/GetFelix/felix-metro/releases) has a compose bundle
 that pulls the published images instead of building them. You need Docker or Podman as
-described below.
+described below. The compose bundle runs Felix 0.6.1.
 
 ```sh
 curl -fsSL https://github.com/GetFelix/felix-metro/releases/download/v0.1.0/felix-metro-compose-0.1.0.tar.gz | tar xz
@@ -207,6 +207,13 @@ seed against a broker for the sim's integration test.
 - [docs/design.md](docs/design.md): the design, data model and build order
 - [docs/art.md](docs/art.md): art direction, the asset packs and the style frame
 - [Felix docs](https://docs.getfelix.dev/)
+
+## Felix version
+
+The Felix release this repo builds on is in [`.felix-version`](.felix-version).
+When Felix publishes a release, a bot opens a "chore: use Felix <version>" PR
+that moves every pin listed in [`.github/felix-bump.sh`](.github/felix-bump.sh)
+and the lockfiles, and merges it once CI passes. Prereleases are skipped.
 
 ## Contributing
 
