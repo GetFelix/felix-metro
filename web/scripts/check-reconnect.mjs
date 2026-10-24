@@ -73,9 +73,10 @@ await page
     timeout: MINUTE,
   })
   .catch(() => fail(page, 'the pill never showed Reconnecting…'));
-await page.screenshot({ path: join(out, 'reconnecting.png') });
+// Sampled before the screenshot, which is slow on software rendering.
 const shown = await tick();
 console.log(`pill shows ${((Date.now() - stoppedAt) / 1000).toFixed(1)} s after the stop, at tick ${shown}`);
+await page.screenshot({ path: join(out, 'reconnecting.png') });
 const wait = OUTAGE_MS - (Date.now() - stoppedAt);
 if (wait > 0) await page.waitForTimeout(wait);
 const during = await tick();

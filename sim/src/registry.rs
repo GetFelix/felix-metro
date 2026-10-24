@@ -3,7 +3,7 @@
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
-use felix_client::{ClusterClient, CommitOp};
+use felix_client::{AckMode, ClusterClient};
 use felix_metro_core::record::RegistryRecord;
 use tracing::{info, warn};
 
@@ -13,7 +13,7 @@ use crate::felix::Connection;
 pub const REGISTRY_STREAM: &str = "metro.cities";
 
 /// Sends of a record to try before giving up.
-const ATTEMPTS: u32 = 5;
+const ATTEMPTS: u32 = 30;
 
 /// The `created` record of a city: its name is its seed, and `districts_per_side` is the size
 /// `City::generate` takes.
@@ -41,9 +41,15 @@ pub async fn announce(
         .map_or(0, |d| d.as_micros() as u64);
     let record = created(name, districts_per_side, wall_us)?;
     for attempt in 1..=ATTEMPTS {
-        let ops = vec![CommitOp::publish(REGISTRY_STREAM, record.clone())];
+        // A plain publish: the registry needs no atomic commit, which the fleet may not have enabled yet.
         match client
-            .commit(&connection.tenant, &connection.namespace, b"registry", ops)
+            .publish(
+                &connection.tenant,
+                &connection.namespace,
+                REGISTRY_STREAM,
+                record.clone(),
+                AckMode::PerMessage,
+            )
             .await
         {
             Ok(_) => {
