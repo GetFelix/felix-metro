@@ -203,7 +203,7 @@ const backToLive = async (from, bound) => {
 // Near the tip, which moves away while the page closes on it.
 for (const back of [8, 40]) {
   const live = Math.floor(await page.evaluate(() => window.__live.tick));
-  const seconds = await backToLive(live - back, 5);
+  const seconds = await backToLive(live - back, 12);
   console.log(`back to live from ${back} ticks back took ${seconds.toFixed(1)} s`);
 }
 
