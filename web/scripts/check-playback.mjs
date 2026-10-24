@@ -51,6 +51,11 @@ await page.evaluate(() => {
   window.__frames = [];
   const record = () => {
     window.__fc = (window.__fc ?? 0) + 1;
+    const nowMs = performance.now();
+    window.__fps = window.__lastFrame
+      ? (1000 / Math.max(1, nowMs - window.__lastFrame)) * 0.3 + (window.__fps ?? 1) * 0.7
+      : 1;
+    window.__lastFrame = nowMs;
     window.__frames.push({
       t: performance.now(),
       joined: window.__metro.playback().joined !== null,
@@ -198,16 +203,22 @@ const tipOf = () => Math.min(...window.__metro.live().ticks);
  * the playhead are read just before the click, since the tip moves while the seek and the playback open. During the
  * catch-up the gap, head, tail, queues and frame rate are logged once a second.
  */
-const backToLive = async (from, bound, { play = true, within = Infinity, draw = true } = {}) => {
+const backToLive = async (from, bound, { play = true, within = Infinity, draw = true, cold = false } = {}) => {
   const seeked = await page.evaluate(([t, d]) => window.__metro.seek(t, d), [from, draw]);
   if (play) {
     if (!(await page.evaluate(() => window.__metro.play()))) await fail('there was nothing to play from the past');
     await page.waitForTimeout(300);
     await page.evaluate(() => window.__metro.play());
   }
+  if (cold) {
+    // The session the past opened ahead is closed, as idleness or a refusal would leave it.
+    await page.waitForFunction(() => window.__metro.warm(), null, { polling: 100, timeout: 30_000 });
+    await page.evaluate(() => window.__metro.closeWarm());
+  }
   const before = await page.evaluate(() => ({
     tip: Math.min(...window.__metro.live().ticks),
     head: window.__metro.playback().head ?? window.__metro.shown().past,
+    drawn: window.__metro.playback().shown ?? window.__metro.shown().past,
     speed: window.__metro.shown().speed,
     frames: window.__fc,
   }));
@@ -215,6 +226,7 @@ const backToLive = async (from, bound, { play = true, within = Infinity, draw = 
   if (gap > within) return { skipped: true, gap };
   const began = Date.now();
   await page.click('#back-live');
+  let movedMs = null;
   let lastLog = began;
   let lastFrames = before.frames;
   for (;;) {
@@ -223,8 +235,9 @@ const backToLive = async (from, bound, { play = true, within = Infinity, draw = 
       playback: window.__metro.playback(),
       frames: window.__fc,
     }));
-    if (now.live) break;
     const elapsed = Date.now() - began;
+    if (movedMs === null && ((now.playback.shown ?? before.drawn) > before.drawn || now.live)) movedMs = elapsed;
+    if (now.live) break;
     if (Date.now() - lastLog >= 1000) {
       const p = now.playback;
       const fps = ((now.frames - lastFrames) * 1000) / (Date.now() - lastLog);
@@ -246,7 +259,7 @@ const backToLive = async (from, bound, { play = true, within = Infinity, draw = 
     }
     await page.waitForTimeout(50);
   }
-  return { seconds: (Date.now() - began) / 1000, gap, speed: before.speed };
+  return { seconds: (Date.now() - began) / 1000, gap, speed: before.speed, movedMs };
 };
 
 // Near the tip, which moves away while the page closes on it: the design is about 3 s, 5 with the session and frame slack.
@@ -254,6 +267,20 @@ for (const back of [8, 40]) {
   const live = Math.floor(await page.evaluate(tipOf));
   const { seconds, gap } = await backToLive(live - back, 5);
   console.log(`back to live from ${back} ticks back (${gap} behind at the click) took ${seconds.toFixed(1)} s`);
+}
+
+// The session the past opened ahead is gone by the click: the race starts at once anyway, with the tick drawn moving
+// and the head following when the session is open. A frame is drawn about once a second here, so the first movement is
+// allowed a few frames.
+{
+  const live = Math.floor(await page.evaluate(tipOf));
+  const { seconds, gap, movedMs } = await backToLive(live - 40, 5, { cold: true });
+  const frameMs = await page.evaluate(() => 1000 / Math.max(0.5, window.__fps ?? 1));
+  console.log(
+    `cold back to live (${gap} behind at the click): the tick drawn moved after ${movedMs} ms, arrived in ${seconds.toFixed(1)} s (frames ${frameMs.toFixed(0)} ms apart)`,
+  );
+  if (movedMs === null || movedMs > 300 + 2 * frameMs)
+    await fail(`with no session open the tick drawn moved after ${movedMs} ms, frames ${frameMs.toFixed(0)} ms apart`);
 }
 
 // A click within a second of the tip shows the live city at once. The seek takes a while, so the tip is read after it

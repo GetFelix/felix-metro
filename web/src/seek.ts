@@ -27,7 +27,7 @@ const MAX_PROBES = 48;
 /** Reads of one range sent at once, once the size of a page is known. */
 const PARALLEL_PAGES = 16;
 /** Sessions are closed after this long without a seek, so an idle page holds none of the gateway's per-person slots. */
-const IDLE_MS = 30_000;
+export const IDLE_MS = 30_000;
 /** A read that finds its session closed is tried again on another this many times. */
 const CLOSED_RETRIES = 2;
 /** How long a district's newest record is trusted, so a scrub of many seeks asks for it about once a second. */

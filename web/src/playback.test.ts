@@ -265,6 +265,27 @@ describe('Playback', () => {
     expect(slow).toBeGreaterThan(1.9 * one);
   });
 
+  it('races on before it has a session, then takes the records without the tick going back', async () => {
+    const log = new FakeLog(1500);
+    const { state, result } = seeked(log, 200);
+    const p = new Playback(null, state, result, { tail: () => log.length - 1 });
+    p.catchUp();
+    p.advance(0.5);
+    expect(p.attached).toBe(false);
+    expect(p.head).toBe(200);
+    expect(p.shown).toBeGreaterThan(250);
+    let last = p.shown;
+    p.attach(log as unknown as Pick<Gateway, 'read' | 'subscribe'>);
+    for (let i = 0; i < 100 && !p.atTip; i++) {
+      p.advance(0.1);
+      await settle();
+      expect(p.shown).toBeGreaterThanOrEqual(last);
+      last = p.shown;
+    }
+    expect(p.atTip).toBe(true);
+    expect(p.failure).toBeNull();
+  });
+
   it('caps what one frame moves an ordinary playback', async () => {
     const { p } = start(new FakeLog(700), 200);
     await settle();

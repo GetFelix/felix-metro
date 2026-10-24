@@ -176,21 +176,36 @@ export class Playback {
   restarted = false;
   /** Ticks a second a catch-up gains on the live tip, fixed when it starts so it ends in about the time promised. */
   private closing = 0;
-  private readonly pumps: Pump[];
+  /** The tick drawn: `head` once records flow, ahead of it while a catch-up waits for its session, and never back. */
+  shown: number;
+  /** A catch-up's playhead, which runs ahead of `head` while records are still arriving. */
+  private pace: number;
+  private pumps: Pump[] = [];
 
+  /** With no `source` the playback has no records yet: a catch-up still advances the tick drawn until {@link attach}. */
   constructor(
-    source: Source,
+    source: Source | null,
     readonly state: CityState,
-    from: SeekResult,
+    private readonly from: SeekResult,
     private readonly options: PlaybackOptions,
   ) {
-    this.head = from.tick;
+    this.head = this.shown = this.pace = from.tick;
+    if (source) this.attach(source);
+  }
+
+  get attached(): boolean {
+    return this.pumps.length > 0;
+  }
+
+  /** Start taking records from `source`, from the seek's offsets. */
+  attach(source: Source): void {
+    if (this.attached) return;
     const fail = (err: Error) => {
       this.failure ??= err;
-      options.onFail?.(err);
+      this.options.onFail?.(err);
     };
-    this.pumps = from.districts.map(
-      (d, i) => new Pump(source, i, { offset: d.offset, tick: from.tick }, options.tail, fail),
+    this.pumps = this.from.districts.map(
+      (d, i) => new Pump(source, i, { offset: d.offset, tick: this.from.tick }, this.options.tail, fail),
     );
     for (const p of this.pumps) p.refill();
   }
@@ -228,10 +243,17 @@ export class Playback {
     if (this.failure) return;
     // A catch-up keeps to wall-clock time: a slow frame covers the ticks it owes, or the race takes longer on a slow device.
     const step = this.catchingUp ? dt : Math.min(dt, MAX_PLAY_DT);
-    const target = this.paused ? this.head : this.head + step * this.speed();
-    this.apply(Math.floor(target) + APPLY_AHEAD);
-    // Not past what every district has, so a district still reading holds the others back.
-    this.head = Math.max(this.head, Math.min(target, this.state.latest));
+    const base = this.catchingUp ? Math.max(this.head, this.pace) : this.head;
+    const target = this.paused ? this.head : base + step * this.speed();
+    if (this.catchingUp) this.pace = target;
+    if (this.attached) {
+      this.apply(Math.floor(target) + APPLY_AHEAD);
+      // Not past what every district has, so a district still reading holds the others back.
+      this.head = Math.max(this.head, Math.min(target, this.state.latest));
+    }
+    // Before the session is open the tick drawn runs on without the records, but never past the live render delay.
+    const racing = this.attached ? this.head : Math.min(target, this.options.tail() - JOIN_LAG);
+    this.shown = Math.max(this.shown, this.head, racing);
   }
 
   private apply(limit: number): void {
@@ -271,6 +293,6 @@ export class Playback {
  * cars under way. Returns the tick.
  */
 export function handOver(playback: Playback, clock: TickClock): number {
-  clock.now = playback.head;
-  return playback.head;
+  clock.now = Math.max(playback.head, playback.shown);
+  return clock.now;
 }

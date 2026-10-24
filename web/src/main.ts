@@ -14,7 +14,7 @@ import { TICKS_PER_HOUR, TickClock, cityTime } from './clock';
 import { connectLive } from './live';
 import { Gateway, GatewayError } from './gateway';
 import { Playback, handOver } from './playback';
-import { SeekError, Seeker, fold, tryFoldMore, type SeekResult } from './seek';
+import { IDLE_MS, SeekError, Seeker, fold, tryFoldMore, type SeekResult } from './seek';
 import { Latest } from './scrub';
 import { agoText, createTimeline, stepTick, clampTick, type Range } from './timeline';
 import { createLoader, type Loader } from './loader';
@@ -79,6 +79,9 @@ declare global {
       live(): { ticks: number[]; buildings: number; sig: string };
       /** The state on screen: its folded ticks, building count and signature, the tick held in the past or null, and whether it is the live one. */
       shown(): { ticks: number[]; buildings: number; sig: string; past: number | null; live: boolean };
+      /** Whether the playback session is open ahead of a Play, and a way to close it as idleness would. */
+      warm(): boolean;
+      closeWarm(): void;
       /** Whether the history sessions have been asked for. */
       historyOpen(): boolean;
       /** Read the span the timeline covers now. */
@@ -94,6 +97,9 @@ declare global {
         head: number | null;
         started: number | null;
         joined: number | null;
+        /** Whether the playback has its session; the tick drawn, which can run ahead of the head before it. */
+        attached: boolean;
+        shown: number | null;
         /** The live tip when it joined. */
         tipAtJoin: number | null;
         /** The live tip now, and the records queued ahead of the playhead per district. */
@@ -479,6 +485,85 @@ async function main() {
       if (shownResult === null && !playback && pastTick !== null) shownResult = resumeFrom;
       resumeFrom = null;
     };
+    /** A session opened ahead for playback, so Back to live does not wait to connect. */
+    let warm: Gateway | null = null;
+    let warming: Promise<Gateway | null> | null = null;
+    let warmIdle: ReturnType<typeof setTimeout> | null = null;
+    const connectPlayback = async (): Promise<Gateway | null> => {
+      const reached = await reach(gateway);
+      if (!reached) return null;
+      return Gateway.connect(reached.url, seed, await signIn(reached.oidc));
+    };
+    const dropWarm = () => {
+      if (warmIdle) clearTimeout(warmIdle);
+      warmIdle = null;
+      warm?.close();
+      warm = null;
+    };
+    /** Open the playback session while the past is on screen. It stays for as long as the past does. */
+    const prewarm = () => {
+      if (warmIdle) clearTimeout(warmIdle);
+      warmIdle = null;
+      if (!hasLive || warming || playback || warm?.alive) return;
+      warm = null;
+      warming = connectPlayback()
+        .catch(() => null)
+        .then((s) => {
+          warming = null;
+          if (!s) return null;
+          if (pastTick === null) {
+            s.close();
+            return null;
+          }
+          warm = s;
+          return s;
+        });
+    };
+    /** Back on the live city, the session is let go after the history sessions' idle time. */
+    const releaseWarm = () => {
+      if (warmIdle || !warm) return;
+      warmIdle = setTimeout(dropWarm, IDLE_MS);
+    };
+    addEventListener('pagehide', dropWarm);
+    /** The warm session if there is one, else a new one; null when nothing answers. */
+    const takeSession = async (): Promise<Gateway | null> => {
+      if (warm?.alive) {
+        const s = warm;
+        warm = null;
+        return s;
+      }
+      warm = null;
+      if (warming) {
+        const s = await warming;
+        if (s && warm === s) {
+          warm = null;
+          return s;
+        }
+      }
+      return connectPlayback();
+    };
+    /** Begin a playback of `target` from `from`; with no `session` yet it races on until {@link attachSession}. */
+    let held: Gateway | null = null;
+    const startPlayback = (target: CityState, from: SeekResult, session: Gateway | null): Playback => {
+      if (hooks) {
+        replay.started = from.tick;
+        replay.joined = null;
+        replay.tip = null;
+        replay.applied = [];
+        target.onRecord = (d, t, r) => replay.applied.push([d, t, r]);
+      }
+      held = session;
+      const p = new Playback(session, target, from, {
+        tail: () => liveState!.latest,
+        onFail: (err) => console.warn('playback could not go on', err),
+        release: () => {
+          held?.close();
+          held = null;
+        },
+      });
+      playback = p;
+      return p;
+    };
     /** Play from the past on screen; null when it cannot be, or when the page moved on while the session opened. */
     const openPlayback = async (): Promise<Playback | null> => {
       if (playback) return playback;
@@ -489,24 +574,11 @@ async function main() {
       opening = true;
       let session: Gateway | null = null;
       try {
-        const reached = await reach(gateway);
-        if (!reached) return null;
-        session = await Gateway.connect(reached.url, seed, await signIn(reached.oidc));
-        if (mark !== playMark || state !== target) return null;
-        if (hooks) {
-          replay.started = from.tick;
-          replay.joined = null;
-          replay.applied = [];
-          target.onRecord = (d, t, r) => replay.applied.push([d, t, r]);
-        }
+        session = await takeSession();
+        if (!session || mark !== playMark || state !== target) return null;
         const opened = session;
         session = null;
-        playback = new Playback(opened, target, from, {
-          tail: () => liveState!.latest,
-          onFail: (err) => console.warn('playback could not go on', err),
-          release: () => opened.close(),
-        });
-        return playback;
+        return startPlayback(target, from, opened);
       } catch (err) {
         console.warn('the city could not be played from there', err);
         return null;
@@ -515,12 +587,34 @@ async function main() {
         opening = false;
       }
     };
+    /** How long a race to live waits for its session before the live city is shown instead. */
+    const RACE_OPEN_MS = 1500;
+    /** Race to live with no session open yet: the tick drawn runs on, and the records follow once one is. */
+    const raceUnattached = (from: SeekResult) => {
+      const p = startPlayback(state!, from, null);
+      p.catchUp();
+      const timer = setTimeout(() => {
+        if (playback === p && !p.attached) snapLive();
+      }, RACE_OPEN_MS);
+      const attach = (s: Gateway | null) => {
+        clearTimeout(timer);
+        if (playback !== p || !s) {
+          s?.close();
+          if (playback === p) snapLive();
+          return;
+        }
+        held = s;
+        p.attach(s);
+      };
+      takeSession().then(attach, () => attach(null));
+    };
     /** Show the live city at once, in place of the past. */
     const snapLive = () => {
       stopPlayback();
       resumeFrom = null;
       swap(liveState!, null);
       shownResult = null;
+      releaseWarm();
     };
     /** Whether Space or Play has anything to do: not while racing to live, when no control is shown. */
     const canToggle = () => hasLive && pastTick !== null && scrubTarget === null && !playback?.catchingUp;
@@ -579,6 +673,8 @@ async function main() {
       const from = playback?.head ?? pastTick;
       if (liveState!.latest - from <= Math.max(LIVE_SNAP_TICKS, liveState!.speed)) return snapLive();
       // The city races forward from where it is, then joins the live one; with no way to play it, it shows at once.
+      if (playback) return playback.catchUp();
+      if (!opening && shownResult) return raceUnattached(shownResult);
       const mark = playMark;
       void openPlayback().then((p) => {
         if (mark !== playMark) return;
@@ -600,6 +696,7 @@ async function main() {
         swap(next, result.tick);
       }
       shownResult = result;
+      prewarm();
     };
     /** The nearest keyframe on hand, drawn at once while the handle moves. */
     const preview = (tick: number) => {
@@ -737,8 +834,8 @@ async function main() {
         snapLive();
         return null;
       }
-      pastTick = Math.floor(p.head);
-      return p.head;
+      pastTick = Math.floor(p.shown);
+      return p.shown;
     };
     // A page opened in the past already has its history open, and no live tip to show the bar with.
     if (!hasLive) {
@@ -763,6 +860,7 @@ async function main() {
           const seekMs = performance.now() - started;
           swap(next, result.tick);
           shownResult = result;
+          prewarm();
           if (!result.exact) note('That exact moment is missing; showing the closest one before it.');
           const report = (drawnMs: number) => ({
             tick: result.tick,
@@ -799,6 +897,8 @@ async function main() {
         holdSeeks = ms;
       },
       play: () => togglePlay(),
+      warm: () => warm?.alive === true,
+      closeWarm: dropWarm,
       playback: () => ({
         playing: playback !== null && !playback.paused,
         catchingUp: playback?.catchingUp ?? false,
@@ -806,6 +906,8 @@ async function main() {
         started: replay.started,
         joined: replay.joined,
         tipAtJoin: replay.tip,
+        attached: playback?.attached ?? false,
+        shown: playback?.shown ?? null,
         tail: liveState?.latest ?? null,
         queued: playback?.queued ?? [],
         applied: replay.applied,

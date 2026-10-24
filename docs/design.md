@@ -356,12 +356,16 @@ tip it subscribes from its next offset, which Felix joins to live delivery with 
 from there. A frame that skips an offset or arrives to a full queue is dropped, and the district reads from where it
 was until it reaches the tail and then subscribes again. A read past the tail is "nothing yet" (felix-gateway#38), not
 an error. The subscriptions are on a session of their own, in slots `p00`, `p01`, ..., that closes when the playback
-ends.
+ends. That session is opened as soon as the past is on screen and kept while it is, then closed 30 s after the page is
+back on the live city, so Back to live finds it open (the page holds one live, up to two history and one playback session,
+well within the gateway's eight a person).
 
 Space and the pill's Play button play and pause from the past on screen. **Back to live** does not cut: the city's time
 races forward with the cars moving, at the city's own pace plus a steady gain that closes the distance in about three
 seconds (at most 960 ticks a second in all), paced by the wall clock so a slow frame covers the ticks it owes, and when the playhead is within a tick of the live state's newest tick the
-page hands over. Within a second of the tip it hands over at once. Space and Play do nothing during the race, when no
+page hands over. Within a second of the tip it hands over at once. If the session is not open at the click, the race
+starts anyway: the tick drawn, the sun and the bar's handle run on at the same pace, and the records follow when the
+session opens; if it has not opened in 1.5 s the page shows the live city, with no note. Space and Play do nothing during the race, when no
 control is shown. If the sim restarts mid-playback (a new epoch numbers its ticks from the start again) the playback
 ends and the page shows the live city. The playback's session is closed when the page is left. The live state has taken every
 record all along, so nothing is folded a second time and nothing reloads; the live clock is set to the playhead
