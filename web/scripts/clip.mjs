@@ -21,6 +21,8 @@ const TIER = process.env.CLIP_TIER ?? 'medium';
 /** The hour the clip starts at: just before the evening rush. */
 const START_HOUR = Number(process.env.CLIP_START_HOUR ?? 16.95);
 const TICKS_PER_DAY = 5760;
+/** How far back the handle is taken, in city hours: short enough that the race back is a few seconds of video. */
+const REWIND_HOURS = Number(process.env.CLIP_REWIND_HOURS ?? 4);
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const frames = join(out, 'frames');
 mkdirSync(frames, { recursive: true });
@@ -231,7 +233,11 @@ const step = async (until, extra) => {
 await step(T.dusk);
 const posterAt = T.dusk;
 
-// Shot 3: the handle taken back across the day to the morning rush.
+// Shot 3: the handle taken back a few city hours. The sim is paused from here to the race back: frames are drawn
+// seconds apart on a CI runner, and a live tip running on in wall time would outrun the catch-up, which steps by video
+// time. It runs again once the clip is back on the live city.
+speed(0);
+await page.waitForTimeout(1500);
 const bar = page.locator('#scrub');
 await page.mouse.move(W / 2, H - 60);
 await step(T.dusk + 0.5 * k);
@@ -250,9 +256,13 @@ for (let i = 0; i < 400; i++) {
   await capture(Math.round(t), null);
   t += 1000 / FPS;
 }
-const morning = Math.floor(f0.tick / TICKS_PER_DAY) * TICKS_PER_DAY + 7.9 * 240;
-const goal = Math.min(0.98, Math.max(0, (morning - range.min) / (range.max - range.min)));
-log(`timeline spans ${range.min}..${range.max}; dragging to tick ${morning} at ${goal.toFixed(3)} of the bar`);
+const liveTick = await page.evaluate(() => window.__live.tick);
+const rewound = Math.max(range.min, Math.min(range.max, liveTick) - REWIND_HOURS * 240);
+// The bar holds the span it had when the press began (at least a city day), so the fraction is read from that span.
+const goal = Math.min(0.98, Math.max(0, (rewound - range.min) / (range.max - range.min)));
+log(
+  `timeline spans ${range.min}..${range.max}, live at ${Math.floor(liveTick)}; dragging to tick ${Math.floor(rewound)} at ${goal.toFixed(3)} of the bar`,
+);
 await page.mouse.move(box.x + box.width * 0.985, y);
 await page.mouse.down();
 const dragFrames = Math.round((T.scrub - T.dusk - 0.5 * k) * FPS);
@@ -274,9 +284,7 @@ const canPlay = (await page.locator('#play').count()) > 0;
 if (canPlay) {
   await page.locator('#play').click();
   await step(T.play, () => page.waitForTimeout(40));
-  // The page steps the playback one video frame at a time, so the live tip must not run away from the catch-up
-  // while frames are slow to draw.
-  speed(4);
+  // The sim is still paused, so the live tip stays where it was while the catch-up is drawn frame by frame.
   await page.locator('#back-live').click();
   // The catch-up is paced by video time, so frames are drawn until the past is gone, however far back it started.
   const inPast = () => page.evaluate(() => !document.getElementById('past').classList.contains('hidden'));
@@ -288,6 +296,8 @@ if (canPlay) {
   }
   if (await inPast()) throw new Error('Back to live did not reach the live city within 20 s of video');
   log(`back on the live city at video ${(t / 1000).toFixed(1)} s`);
+  // Live again: let the city move for the closing seconds.
+  speed(4);
   // Live frames draw the live tick; the clip's own tick path no longer applies.
   await page.evaluate((p) => window.__capture.setPath({ ...p, ticks: [] }), path);
   await step(t / 1000 + LIVE_HOLD);
