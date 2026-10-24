@@ -81,15 +81,21 @@ async fn main() -> Result<()> {
             };
             let commands =
                 follow_commands(Arc::clone(&client), connection.clone(), spec.name.clone());
-            announce_later(
-                Arc::clone(&client),
-                connection,
-                spec.name.clone(),
-                spec.districts_per_side,
-            );
             if warmup_ticks > 0 {
                 warming.send_replace(true);
             }
+            // Listed once the districts are level in the log, not while warm-up has them apart.
+            let mut warmed = warming.subscribe();
+            let (listed, name, side) = (
+                Arc::clone(&client),
+                spec.name.clone(),
+                spec.districts_per_side,
+            );
+            tokio::spawn(async move {
+                if warmed.wait_for(|warming| !*warming).await.is_ok() {
+                    announce_later(listed, connection, name, side);
+                }
+            });
             let settings = Settings {
                 warmup_ticks,
                 warming: Some(warming),

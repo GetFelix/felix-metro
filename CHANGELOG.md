@@ -13,6 +13,22 @@
   misparsed once residents were mid-trip; the command check now reads them.
 - `GET /cities/<name>/warmup` on the sim's endpoint says whether a city is still warming up, and `dev/up.sh`
   (and the compose bundle's `up.sh`) waits for every city to go live.
+- A city is listed in the registry only once its warm-up is done, so the picker never offers a city whose districts
+  are still far apart in the log.
+- A sim killed during warm-up leaves partial history and is refused on restart, so the streams need a reset
+  (`dev/up.sh` starts fresh); restarting over history is tracked in
+  [#105](https://github.com/GetFelix/felix-metro/issues/105).
+
+### Fixed
+
+- The timeline bar holds still while it is dragged. Its scale used to follow the growing city, so in a
+  young city each pointer move mapped to a different moment and the drag flashed. A drag now keeps the
+  scale it began with, and releasing at the right end goes live. The bar spans at least one city day,
+  so the live head moves right across a fixed scale and the part after it is dimmed as not yet
+  happened, and a press before the span the city holds has been read waits for it instead of mapping
+  through a one-tick placeholder.
+- A press on the live head picks the handle up at once; it used to land on the head's own button, so the
+  bar needed a click before it could be dragged.
 
 ## [0.2.0] - 2026-10-24
 

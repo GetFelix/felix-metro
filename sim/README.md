@@ -47,6 +47,8 @@ for operators. A builder's `speed` command does the same through the command str
 `GET /cities/<name>/warmup` answers `warming` while a new city is committing its warm-up and
 `live` after; `dev/up.sh` waits for `live` on every city.
 
+A city is listed in the registry once it is live. A sim killed during warm-up leaves partial history and is refused on restart ("this city already has history"), so the streams need a reset; `dev/up.sh` starts fresh. Restarting over history is tracked in [#105](https://github.com/GetFelix/felix-metro/issues/105).
+
 The endpoint binds loopback only, so in a container it is reached with `exec` or a port-forward from inside the container's network namespace, not through published ports.
 
 ## Commands
