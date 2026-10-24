@@ -12,6 +12,9 @@ import { beforeSignIn, fetchOidc } from './auth';
 import { CityState, type Building } from './city';
 import { TickClock, cityTime } from './clock';
 import { connectLive } from './live';
+import { Gateway } from './gateway';
+import { SeekError, Seeker, fold } from './seek';
+import { signIn } from './auth';
 import { createLoader, type Loader } from './loader';
 import { createPicker } from './picker';
 import { displayName } from './registry';
@@ -36,6 +39,8 @@ declare global {
     };
     /** What became of each record the page took, as `[district, tick, result]`; only under ?trace. */
     __trace?: [number, number, string][];
+    /** The seek behind a page opened with ?at: the tick shown, and the ms to find and fold the city, and the ms after that to its first frame. */
+    __seek?: { tick: number; seekMs: number; drawMs: number | null; reads: number };
     __quality?: {
       history: readonly Tier[];
       memory: { tier: Tier; textures: number; geometries: number }[];
@@ -100,6 +105,47 @@ async function follow(
   return live.refused ? null : { state, link };
 }
 
+/**
+ * Sign in on a connection of its own, find the city at `tick` and fold it into a fresh state. `null` when nothing here
+ * answers like a gateway; a moment the log does not hold is a {@link SeekError}.
+ */
+async function travel(
+  city: City,
+  metro: Metro,
+  name: string,
+  districts: number,
+  gateway: string | null,
+  tick: number,
+  loader: Loader,
+): Promise<{ state: CityState; wallUs: number; seekMs: number; reads: number } | null> {
+  const url = gateway ?? `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`;
+  const oidc = await fetchOidc(gateway ? url.replace(/^ws/, 'http').replace(/\/ws$/, '/') : location.origin + '/');
+  if (!oidc) return null;
+  const started = performance.now();
+  const session = await Gateway.connect(url, name, await signIn(oidc));
+  try {
+    const seeker = new Seeker(session, districts * districts);
+    const records = await seeker.seek(tick);
+    const state = new CityState(city, metro, districts * districts);
+    fold(state, records);
+    for (let d = 0; d < districts * districts; d++) loader.ready(d);
+    return {
+      state,
+      wallUs: records[0]!.at(-1)!.wallUs,
+      seekMs: performance.now() - started,
+      reads: seeker.stats.reads,
+    };
+  } finally {
+    session.close();
+  }
+}
+
+/** How long ago a wall time was, in the words the page uses for it. */
+function ago(wallUs: number): string {
+  const minutes = Math.max(0, Math.round((Date.now() - wallUs / 1000) / 60_000));
+  return minutes < 60 ? `${minutes} min ago` : `${Math.floor(minutes / 60)} h ${minutes % 60} m ago`;
+}
+
 /** Districts on a side when `?districts` does not say. */
 const DEFAULT_DISTRICTS = 2;
 
@@ -117,6 +163,7 @@ async function main() {
     districts,
     live: wantLive,
     gateway,
+    at,
     trace,
   } = parseParams(returned?.search ?? location.search, returned?.hash ?? location.hash);
   if (!ui) document.querySelectorAll('.chip').forEach((e) => e.classList.add('hidden'));
@@ -140,13 +187,33 @@ async function main() {
   let city: City | null = null;
   let state: CityState | null = null;
   let link: Link = { down: false };
+  /** The tick the city is held at when it was opened in the past, with no live connection. */
+  let pastTick: number | null = null;
+  let seekDone = 0;
   const pill = document.getElementById('pill')!;
   if (layout === 'city') {
     await init();
     city = parseCity(generate(seed, districts));
     document.title = `Felix Metro: ${seed}`;
     document.getElementById('subtitle')!.textContent = displayName(seed);
-    if (wantLive) {
+    let past: Awaited<ReturnType<typeof travel>> = null;
+    if (wantLive && at !== null) {
+      try {
+        past = await travel(city, new Metro(seed, districts), seed, districts, gateway, at, loader);
+      } catch (err) {
+        // A moment the city does not hold, or no way to ask: show it live instead.
+        console.warn(err instanceof SeekError ? err.message : 'the city could not be opened at that moment', err);
+      }
+    }
+    if (past) {
+      state = past.state;
+      pastTick = at;
+      seekDone = performance.now();
+      window.__seek = { tick: at!, seekMs: past.seekMs, drawMs: null, reads: past.reads };
+      pill.textContent = `Earlier · ${ago(past.wallUs)}`;
+      pill.classList.add('late');
+      pill.classList.remove('hidden');
+    } else if (wantLive) {
       const joined = await follow(city, new Metro(seed, districts), seed, districts, gateway, pill, loader, trace);
       state = joined?.state ?? null;
       link = joined?.link ?? link;
@@ -239,7 +306,7 @@ async function main() {
     for (const p of people) p.mixer.update(dt);
     if (state && traffic && window.__live) {
       // The clock runs on real time even when frames are slow, so it stays with the sim.
-      const tick = clockTicks.advance(Math.min(1, frameMs / 1000), state.latest, state.speed, link.down);
+      const tick = pastTick ?? clockTicks.advance(Math.min(1, frameMs / 1000), state.latest, state.speed, link.down);
       if (!Number.isNaN(tick)) {
         state.retire(Math.floor(tick));
         traffic.update(tick, still ? 0 : dt, state.active());
@@ -270,6 +337,7 @@ async function main() {
   const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
   if (city && !still && frozenHour === null && !reduced) intro = startIntro(camera, controls, performance.now());
   frame();
+  if (window.__seek) window.__seek.drawMs = performance.now() - seekDone;
   document.body.dataset.ready = '1';
   window.__ready = true;
   loader.done(state !== null && showLoader);

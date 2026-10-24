@@ -35,7 +35,7 @@ export interface LiveOptions {
 
 const slot = (district: number) => `d${String(district).padStart(2, '0')}`;
 
-function parse(bytes: Uint8Array): TickRecord | null {
+export function parse(bytes: Uint8Array): TickRecord | null {
   try {
     const record = JSON.parse(decodeRecord(bytes));
     return record.kind === 'tick' ? (record as TickRecord) : null;
@@ -50,7 +50,11 @@ function parse(bytes: Uint8Array): TickRecord | null {
  * entity key, which depends on how the stream hashes keys; Felix does not say, so each is tried and a pointer is
  * trusted only if the record it names is that district's keyframe. Zero, the start of the log, when there is none.
  */
-async function keyframeOffset(gateway: Gateway, district: number, districts: number): Promise<number> {
+export async function keyframeOffset(
+  gateway: Pick<Gateway, 'stateGet' | 'read'>,
+  district: number,
+  districts: number,
+): Promise<number> {
   const keys = new Set<string>();
   for (const routing of ROUTINGS) {
     try {

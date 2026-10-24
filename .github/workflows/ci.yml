@@ -191,6 +191,12 @@ jobs:
           npx playwright install --with-deps chromium
           ../dev/speed.sh harbor 16
           node scripts/check-live.mjs 'http://127.0.0.1:8088/?tier=medium#harbor' live-frames
+      # The same city opened at earlier ticks, one a hundred back and one a few city hours back: the tick on screen is the
+      # tick asked for, and the time to find it is in the log and held under a second.
+      - name: The page opens the city at an earlier tick
+        working-directory: web
+        timeout-minutes: 10
+        run: node scripts/check-seek.mjs 'http://127.0.0.1:8088/?tier=low' live-frames/seek
       # The page at /#pinecrest lists the cities the sim registered. Lakeside is seeded but held back by the sim; dev/city.sh
       # starts it and registers it while the page is open, and the page lists it without a reload and opens it on a choice.
       - name: The city list picks up a city created after the page loaded

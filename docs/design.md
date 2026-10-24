@@ -326,6 +326,13 @@ To draw tick `T`:
 3. Read from the keyframe to `T` with a bounded `read` and apply the events.
 4. Draw. Cars in the middle of a trip are placed by interpolating their route at `T`.
 
+In the browser, `web/src/seek.ts` does this on a connection of its own, so a seek never waits behind the live
+subscriptions. The estimate starts from the cached keyframe of `T`'s hour, or else the newest keyframe the state key points at, and
+a log that is not one record a tick (a gap, a restarted sim) falls back to bisection between the offsets known to
+be below and above `T`. Retention that has taken the named keyframe moves the start to the next hour boundary still
+kept. Keyframes (by district and hour) and records (by offset) are cached, so a second seek in the same hour reads
+only the ticks past what is held. `?at=<tick>` opens the page at a tick with no live connection until the timeline exists.
+
 At most 240 tick records per district separate a keyframe from `T`. That is a
 few hundred KB at the target scale, read in parallel across districts.
 
