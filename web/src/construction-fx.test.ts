@@ -93,4 +93,23 @@ describe('many builds at once', () => {
     expect(opacity.length).toBe(12);
     expect(Math.min(...opacity)).toBeCloseTo(1, 5);
   });
+
+  it('leaves nothing on screen after a burst of superseded seeks', () => {
+    const { fx: f, objects, ghostSet, box, scene } = fx();
+    for (let l = 0; l < 40; l++) objects.set(l, [box()]);
+    for (let n = 0; n < 150; n++) {
+      const rising = new Map<number, Rising>();
+      const falling = new Map<number, Falling>();
+      for (let l = 0; l < 40; l++) {
+        if ((l + n) % 3 === 0) rising.set(l, { kind: 1, rotation: 0, tick: 100 + n });
+        else if ((l + n) % 3 === 1) falling.set(l, { kind: 1, rotation: 0, tick: 100 + n, from: 1 });
+      }
+      f.update(102 + n + (n % 5), rising, falling);
+    }
+    f.update(5000, new Map(), new Map());
+    expect(f.active).toBe(0);
+    expect(ghostSet.size).toBe(0);
+    expect(shown(scene, 'Mesh')).toBe(0);
+    expect(shown(scene, 'Sprite')).toBe(0);
+  });
 });
