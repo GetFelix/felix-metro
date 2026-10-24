@@ -15,6 +15,8 @@ if (!out) throw new Error('usage: check-scrub.mjs <page url> <out dir>');
 mkdirSync(out, { recursive: true });
 const MINUTE = 60_000;
 const HOUR_TICKS = 240;
+/** A moment by which the city has buildings. */
+const BUILT_BY = 2000;
 const SPAN_NEEDED = 4 * HOUR_TICKS;
 
 const browser = await chromium.launch({
@@ -56,10 +58,11 @@ const minutesOf = (clock) => {
 const tickMinutes = (tick) => Math.floor(((tick % 5760) / 5760) * 24 * 60);
 
 // What the page has drawn: the folded state, not a guess from pixels. A past state has every district at one tick and
-// buildings in it; the live one has buildings in it.
+// buildings in it once the city has grown; the live one has buildings in it.
 const wholeProblem = (r) => {
   const { shown } = r;
-  if (!(shown.buildings > 0)) return 'no buildings are drawn';
+  // The first hours of a city are empty, so only the live city and later moments must have buildings.
+  if ((shown.past === null || shown.past >= BUILT_BY) && !(shown.buildings > 0)) return 'no buildings are drawn';
   if (shown.past !== null && shown.ticks.some((t) => t !== shown.past))
     return `the state is at ticks ${shown.ticks} while holding tick ${shown.past}`;
   return null;
