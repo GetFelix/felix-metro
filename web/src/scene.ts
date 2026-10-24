@@ -598,7 +598,8 @@ export async function createCity(
       // A walker is a few pixels; its shadow costs a shadow-pass draw each for no visible gain.
       n.castShadow = false;
     });
-    o.scale.setScalar(0.22);
+    // The style-frame layout keeps the prototype's size; a live city draws people larger so they read at the default camera.
+    o.scale.setScalar(city ? 0.22 : 0.17);
     const mixer = new THREE.AnimationMixer(o);
     mixer.clipAction(gltf.animations.find((a) => a.name === 'walk')!).play();
     scene.add(o);
