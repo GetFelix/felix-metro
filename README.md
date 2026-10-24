@@ -7,17 +7,17 @@ A 3D city simulator that runs in the browser, built on
 is stored in durable Felix streams, so you can scrub back to any earlier moment
 and play forward from there.
 
-> **Status:** a live city runs end to end. The sim steps it, the browser draws it live, and a city picker switches between cities. Opening the city at an earlier moment works (`/?at=<tick>#harbor` draws it there, paused); the timeline bar scrubs the city back through the hours it still holds (drag the handle, or step with `←` and `→`, `Shift` for an hour); playing forward from there, following a resident and building are not built yet. The [style frame](prototype/style-frame.html) shows the look. The plan is in
+> **Status:** a live city runs end to end. The sim steps it, the browser draws it live, and a city picker switches between cities. Opening the city at an earlier moment works (`/?at=<tick>#harbor` draws it there, paused); the timeline bar scrubs the city back through the hours it still holds (drag the handle, or step with `←` and `→`, `Shift` for an hour); Space plays forward from there at the city's speed and Back to live races to the live city and joins it with no gap and no reload; following a resident and building are not built yet. The [style frame](prototype/style-frame.html) shows the look. The plan is in
 > [docs/design.md](docs/design.md) and the work is tracked in
 > [milestones](https://github.com/GetFelix/felix-metro/milestones).
 
-| Day | Night |
-|---|---|
+| Day                                                                          | Night                                                                           |
+| ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
 | ![Felix Metro style frame at noon](docs/screenshots/style-frame-day.jpg?v=2) | ![Felix Metro style frame at night](docs/screenshots/style-frame-night.jpg?v=2) |
 
 ## What you will be able to do
 
-- Watch a generated city go about its day in 3D: residents commute, shop and go home, and the sun rises and sets
+- Watch a generated city go about its day in 3D: residents commute, shop and go home, and the sun rises and sets. Rush hour at 08:00 and 17:15 puts up to about 40 cars and 10 walkers on the streets of the busiest district, and about 100 cars across the harbor city at 2 by 2 (522 residents; `cargo run --release -p felix-metro-core --example density -- harbor 2` prints the counts). The log averages about 8 KB/s over a day at 20,000 residents and peaks near 17 KB/s in the busiest minute of the rush, from the hourly snapshots of each district landing together, which #95 tracks (`cargo test -p felix-metro-sim --release report_load -- --ignored --nocapture` measures it).
 - Drag the timeline back to any moment the log holds and see the city exactly as it was
 - Let go and watch it play forward and catch up to live
 - Follow one resident or car through their day
@@ -26,16 +26,16 @@ and play forward from there.
 
 ## Felix features it uses
 
-| Need | Felix feature |
-|---|---|
-| A district's history, in order | A durable stream, one shard per district |
-| Each tick written atomically, with its offset | `commit` |
-| Only one simulation writes a city | `publish_if` / `commit` expected offset |
-| The newest keyframe | Stream state (`state_get`) |
-| Loading a past moment | Bounded range reads (`read`) |
-| Playing forward into live | Subscribe from an offset, with no gap |
-| Browsers | [felix-gateway](https://github.com/GetFelix/felix-gateway) |
-| Who built what | Sender stamp on the command stream |
+| Need                                          | Felix feature                                              |
+| --------------------------------------------- | ---------------------------------------------------------- |
+| A district's history, in order                | A durable stream, one shard per district                   |
+| Each tick written atomically, with its offset | `commit`                                                   |
+| Only one simulation writes a city             | `publish_if` / `commit` expected offset                    |
+| The newest keyframe                           | Stream state (`state_get`)                                 |
+| Loading a past moment                         | Bounded range reads (`read`)                               |
+| Playing forward into live                     | Subscribe from an offset, with no gap                      |
+| Browsers                                      | [felix-gateway](https://github.com/GetFelix/felix-gateway) |
+| Who built what                                | Sender stamp on the command stream                         |
 
 ## How it works
 
@@ -56,7 +56,7 @@ there. [docs/design.md](docs/design.md) has the details.
 |---|---|---|
 | 0 | The look, locked | In progress: style frame, assets, daylight, post-processing and quality tiers done; instanced traffic, the UI shell and camera controls open |
 | 1 | A live city | Done |
-| 2 | Time travel | In progress: keyframes, seeking and the timeline scrubber done |
+| 2 | Time travel | In progress: keyframes, seeking, the timeline scrubber and rewind then follow done |
 | 3 | Follow a life | Planned |
 | 4 | Build | In progress: the sim applies build, demolish and speed commands and records who sent them; placement tools in the page, roads and zones are not built yet |
 | 5 | Branching timelines | Planned |
@@ -78,7 +78,7 @@ builder's token is applied by the sim and shows up in the page.
 
 Each [release](https://github.com/GetFelix/felix-metro/releases) has a compose bundle
 that pulls the published images instead of building them. You need Docker or Podman as
-described below.
+described below. The compose bundle runs Felix 0.6.1.
 
 ```sh
 curl -fsSL https://github.com/GetFelix/felix-metro/releases/download/v0.1.0/felix-metro-compose-0.1.0.tar.gz | tar xz

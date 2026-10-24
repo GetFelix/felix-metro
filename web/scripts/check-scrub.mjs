@@ -9,9 +9,11 @@
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { chromium } from 'playwright';
+import { withTrace } from './url.mjs';
 
-const [appUrl, out] = process.argv.slice(2);
+const [pageUrl, out] = process.argv.slice(2);
 if (!out) throw new Error('usage: check-scrub.mjs <page url> <out dir>');
+const appUrl = withTrace(pageUrl);
 mkdirSync(out, { recursive: true });
 const MINUTE = 60_000;
 const HOUR_TICKS = 240;
@@ -138,6 +140,13 @@ await page
   .waitForSelector('#back-live', { state: 'visible', timeout: 10_000 })
   .catch(() => fail('no Back to live while seeking'));
 await page.click('#back-live');
+// The city races forward and joins the live one; the held seek lands after that and must not take it back.
+await page
+  .waitForFunction(() => document.getElementById('scrub').dataset.mode === 'live', null, {
+    polling: 100,
+    timeout: 30_000,
+  })
+  .catch(() => fail('Back to live did not reach the live city'));
 await page.waitForTimeout(6000);
 const held = await read();
 if (held.mode !== 'live' || !held.shown.live || held.shown.past !== null)
@@ -209,7 +218,7 @@ if (rest.mode !== 'past') await fail(`after the drag the bar says "${rest.mode}"
 console.log(`drag ended at tick ${dragEnd}; ${drawnTicks.size} moments drawn on the way`);
 
 const pill = await page.locator('#past').innerText();
-if (!/^(just now|\d+ m ago|\d+ h \d+ m ago)\s*·\s*Back to live$/.test(pill.replace(/\s+/g, ' ').trim()))
+if (!/^(?:Play\s*)?(just now|\d+ m ago|\d+ h \d+ m ago)\s*·\s*Back to live$/.test(pill.replace(/\s+/g, ' ').trim()))
   await fail(`the past pill reads "${pill}"`);
 console.log(`past pill: "${pill.replace(/\s+/g, ' ').trim()}"`);
 await page.locator('#timeline').screenshot({ path: join(out, 'bar-past.png') });
@@ -296,5 +305,9 @@ if (await page.locator('#past').isVisible()) await fail('the past pill is still 
 await page.locator('#timeline').screenshot({ path: join(out, 'bar-back-live.png') });
 
 console.log(`${samples} frames sampled, each whole`);
+{
+  const l = await page.evaluate(() => window.__live);
+  console.log(`${l.movers} movers drawn, ${l.capped} capped, ${l.fps.toFixed(1)} fps`);
+}
 if (errors.length) await fail(`page errors:\n${errors.join('\n')}`);
 await browser.close();

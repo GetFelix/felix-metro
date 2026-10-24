@@ -79,7 +79,7 @@ jobs:
           done
           exit $failed
         env:
-          FRAME_MAX_DIFFERING_PERCENT: '0.01'
+          FRAME_MAX_DIFFERING_PERCENT: "0.01"
       # The same moment on each quality tier, and with the frame-time HUD, for review.
       - name: Quality tier screenshots
         run: |
@@ -218,6 +218,15 @@ jobs:
         run: |
           ../dev/speed.sh harbor 16
           node scripts/check-scrub.mjs 'http://127.0.0.1:8088/?tier=low' live-frames/scrub
+      # From a seek two city hours back the page plays at the city's speed, then Back to live races forward and joins the
+      # live city. Every tick the playback applied is recorded: each district's run on from the seek is contiguous with
+      # none missing or taken twice, and the cars and walkers under way do not jump between the frames either side of the join.
+      - name: The past plays forward and joins the live city
+        working-directory: web
+        timeout-minutes: 15
+        run: |
+          ../dev/speed.sh harbor 16
+          node scripts/check-playback.mjs 'http://127.0.0.1:8088/?tier=low' live-frames/playback
       # The page at /#pinecrest lists the cities the sim registered. Lakeside is seeded but held back by the sim; dev/city.sh
       # starts it and registers it while the page is open, and the page lists it without a reload and opens it on a choice.
       - name: The city list picks up a city created after the page loaded
