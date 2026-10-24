@@ -139,8 +139,12 @@ async function openHistory(name: string, districts: number, gateway: string | nu
   const url = gateway ?? `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`;
   const oidc = await fetchOidc(gateway ? url.replace(/^ws/, 'http').replace(/\/ws$/, '/') : location.origin + '/');
   if (!oidc) return null;
-  const session = await Gateway.connect(url, name, await signIn(oidc));
-  return new Seeker(session, districts * districts);
+  // A session lets four reads wait at once, so the districts spread over a few of them.
+  const token = await signIn(oidc);
+  const sessions = await Promise.all(
+    Array.from({ length: Math.min(districts * districts, HISTORY_SESSIONS) }, () => Gateway.connect(url, name, token)),
+  );
+  return new Seeker(sessions, districts * districts);
 }
 
 /** A short word on screen for something that did not work out, gone after a few seconds. */
@@ -173,6 +177,9 @@ function ago(wallUs: number): string {
   const minutes = Math.max(0, Math.round((Date.now() - wallUs / 1000) / 60_000));
   return minutes < 60 ? `${minutes} min ago` : `${Math.floor(minutes / 60)} h ${minutes % 60} m ago`;
 }
+
+/** Connections history is read over. */
+const HISTORY_SESSIONS = 4;
 
 /** Districts on a side when `?districts` does not say. */
 const DEFAULT_DISTRICTS = 2;

@@ -18,6 +18,8 @@ const RECORDS_PER_DISTRICT = 2 * TICKS_PER_HOUR;
 const KEYFRAMES_PER_DISTRICT = 4 * 24;
 /** A search that has not found its record in this many reads is not converging; the log is not what was assumed. */
 const MAX_PROBES = 48;
+/** Reads of one range sent at once, once the size of a page is known. */
+const PARALLEL_PAGES = 16;
 /** Rounds of seeking while retention moves under it, or while districts settle on one tick. */
 const MAX_ROUNDS = 8;
 
@@ -92,19 +94,18 @@ export class Seeker {
   private readonly keyframes: Map<number, Known>[];
   /** The oldest offset retention has left, by district; 0 until a read says otherwise. */
   private readonly oldest: number[];
-  /** Where each district's newest keyframe was last said to be, to start estimating from. */
-  private readonly hint: (number | null)[];
+  private readonly sessions: readonly History[];
   private readonly flights = new Map<string, Flight>();
   private current: AbortController | null = null;
 
   constructor(
-    private readonly history: History,
+    history: History | readonly History[],
     private readonly districts: number,
   ) {
+    this.sessions = Array.isArray(history) ? history : [history as History];
     this.records = Array.from({ length: districts }, () => new Map());
     this.keyframes = Array.from({ length: districts }, () => new Map());
     this.oldest = Array<number>(districts).fill(0);
-    this.hint = Array<number | null>(districts).fill(null);
   }
 
   /** The oldest tick every district can start from and the newest tick every district has. */
@@ -195,17 +196,23 @@ export class Seeker {
   }
 
   private async build(d: number, target: Known, signal: AbortSignal): Promise<DistrictSeek> {
-    const want = target.record.keyframeOffset;
-    let keyframe = await this.at(d, want, signal);
-    if (keyframe?.offset !== want || !keyframe.record.keyframe) keyframe = await this.firstKeyframe(d, target, signal);
-    if (!keyframe?.record.keyframe) {
+    let start = target.record.keyframeOffset;
+    // Retention has already taken the keyframe the record names: begin at the oldest one left.
+    if (start < this.oldest[d]!) {
+      const first = await this.firstKeyframe(d, target, signal);
+      if (!first) throw new SeekError('broken', `district ${d} has no keyframe for tick ${target.record.tick}`);
+      start = first.offset;
+    }
+    // The range starts at the keyframe itself, so reading it is not a trip of its own.
+    const records = await this.range(d, start, target.offset + 1, signal);
+    const keyframe = records[0];
+    if (!keyframe?.keyframe) {
       throw new SeekError('broken', `district ${d} has no keyframe for tick ${target.record.tick}`);
     }
     const frames = this.keyframes[d]!;
-    frames.delete(hourOf(keyframe.record.tick));
-    frames.set(hourOf(keyframe.record.tick), keyframe);
+    frames.delete(hourOf(keyframe.tick));
+    frames.set(hourOf(keyframe.tick), { offset: start, record: keyframe });
     trim(frames, KEYFRAMES_PER_DISTRICT);
-    const records = await this.range(d, keyframe.offset, target.offset + 1, signal);
     const last = records.at(-1);
     if (last?.tick !== target.record.tick || last.epoch !== target.record.epoch) {
       throw new SeekError(
@@ -236,8 +243,7 @@ export class Seeker {
 
   /** The newest record. The state read says how long the log was when it answered, which two reads confirm. */
   private async newest(d: number, signal: AbortSignal): Promise<Known> {
-    const { offset, asOf } = await keyframePointer(this.cancellable(signal), d, this.districts);
-    this.hint[d] = offset;
+    const { asOf } = await keyframePointer(this.cancellable(d, signal), d, this.districts, false);
     if (asOf !== null && asOf > 0) {
       const [last, past] = await Promise.all([this.at(d, asOf - 1, signal), this.at(d, asOf, signal)]);
       if (last && last.offset === asOf - 1 && !past) return last;
@@ -247,19 +253,21 @@ export class Seeker {
     return found;
   }
 
+  /** A district's reads go over one of the sessions, which each allow four in flight. */
+  private session(d: number): History {
+    return this.sessions[d % this.sessions.length]!;
+  }
+
   /** The session as the pointer lookup reads it: its reads share and stop with the seek, and a trimmed start says so. */
-  private cancellable(signal: AbortSignal): History {
+  private cancellable(d: number, signal: AbortSignal): History {
     return {
       stateGet: (stream, key, entity) =>
         new Promise((resolve, reject) => {
           signal.throwIfAborted();
           signal.addEventListener('abort', () => reject(signal.reason), { once: true });
-          this.history.stateGet(stream, key, entity).then(resolve, reject);
+          this.session(d).stateGet(stream, key, entity).then(resolve, reject);
         }),
-      read: async (_stream, d, from, end) => {
-        if (from < this.oldest[d]!) throw new GatewayError('trimmed', 'the keyframe is gone', this.oldest[d]);
-        return this.read(d, from, end ?? from + 1, false, signal);
-      },
+      read: async (_stream, shard, from, end) => this.read(shard, from, end ?? from + 1, false, signal),
     };
   }
 
@@ -332,7 +340,7 @@ export class Seeker {
     let flight = this.flights.get(key);
     if (!flight) {
       const cancel = new AbortController();
-      const promise = this.history.read(STREAM, d, from, end, cancel.signal);
+      const promise = this.session(d).read(STREAM, d, from, end, cancel.signal);
       flight = { promise, users: 0, cancel };
       this.stats.reads++;
       this.flights.set(key, flight);
@@ -375,8 +383,7 @@ export class Seeker {
       } else if (known.offset > best.offset) best = known;
     }
     if (best) return best;
-    const hint = this.hint[d] ?? null;
-    return (hint === null ? null : await this.at(d, hint, signal)) ?? this.at(d, this.oldest[d]!, signal);
+    return this.at(d, this.oldest[d]!, signal);
   }
 
   /**
@@ -430,30 +437,46 @@ export class Seeker {
     throw new SeekError('broken', `district ${d}: tick ${tick} was not found in ${MAX_PROBES} reads`);
   }
 
-  /** Records `from` up to, not including, `end`, in order, one page after another; what is cached is not read again. */
+  /**
+   * Records `from` up to, not including, `end`, in order. The first page says how many records a page holds; the rest
+   * are then read together. What is cached is not read again.
+   */
   private async range(d: number, from: number, end: number, signal: AbortSignal): Promise<TickRecord[]> {
-    const out: TickRecord[] = [];
-    let next = from;
-    while (next < end) {
+    const cache = this.records[d]!;
+    const got = new Map<number, TickRecord>();
+    let size = 0;
+    for (;;) {
       signal.throwIfAborted();
-      const hit = this.records[d]!.get(next);
-      if (hit) {
-        this.stats.hits++;
-        out.push(hit.record);
-        next++;
-        continue;
+      let next = from;
+      while (next < end && (got.has(next) || cache.has(next))) next++;
+      if (next >= end) break;
+      const starts = [next];
+      if (size > 0) {
+        for (let s = next + size; s < end && starts.length < PARALLEL_PAGES; s += size) starts.push(s);
       }
       // The range starts at the keyframe, the point of it: if retention takes any of it, the round starts again.
-      const page = await this.read(d, next, end, true, signal);
-      if (page.nextOffset <= next || page.records.length === 0) {
-        throw new SeekError('broken', `district ${d}: the log stopped at ${next}, before ${end}`);
-      }
-      for (const r of page.records) {
-        const record = this.decode(d, r);
-        this.keep(d, r.offset, record);
-        if (r.offset >= next && r.offset < end) out.push(record);
-      }
-      next = page.nextOffset;
+      const pages = await Promise.all(
+        starts.map((s) => this.read(d, s, size > 0 ? Math.min(s + size, end) : end, true, signal)),
+      );
+      pages.forEach((page, i) => {
+        const start = starts[i]!;
+        if (page.nextOffset <= start || page.records.length === 0) {
+          throw new SeekError('broken', `district ${d}: the log stopped at ${start}, before ${end}`);
+        }
+        if (size === 0) size = page.nextOffset - start;
+        for (const r of page.records) {
+          const record = this.decode(d, r);
+          this.keep(d, r.offset, record);
+          got.set(r.offset, record);
+        }
+      });
+    }
+    const out: TickRecord[] = [];
+    for (let o = from; o < end; o++) {
+      const record = got.get(o) ?? cache.get(o)?.record;
+      if (!record) throw new SeekError('broken', `district ${d}: offset ${o} was not read`);
+      if (!got.has(o)) this.stats.hits++;
+      out.push(record);
     }
     return out;
   }

@@ -35,6 +35,9 @@ class FakeHistory {
   private flying = new Set<string>();
   /** Identical reads that were in flight together. */
   twins = 0;
+  /** The most reads in flight together for one shard. */
+  widest = 0;
+  private open = new Map<number, number>();
   constructor(districts: number, entries: Entry[] | ((d: number) => Entry[]), keyframeEvery = 240) {
     this.logs = Array.from({ length: districts }, (_, d) => {
       let keyframe = 0;
@@ -70,8 +73,12 @@ class FakeHistory {
     const key = `${shard}:${from}:${end}`;
     if (this.flying.has(key)) this.twins++;
     this.flying.add(key);
+    const n = (this.open.get(shard) ?? 0) + 1;
+    this.open.set(shard, n);
+    this.widest = Math.max(this.widest, n);
     try {
       this.onRead?.(shard, from, end ?? -1);
+      await Promise.resolve();
       if (this.gate) {
         await Promise.race([
           this.gate,
@@ -91,6 +98,7 @@ class FakeHistory {
         records.push({ offset: o, payload: new TextEncoder().encode(JSON.stringify(log[o])) });
       return { records, nextOffset: Math.max(from, stop) };
     } finally {
+      this.open.set(shard, this.open.get(shard)! - 1);
       this.flying.delete(key);
     }
   }
@@ -127,10 +135,20 @@ describe('seek', () => {
     const ranges = h.reads.filter(([, from, end]) => end > from + 1);
     for (const d of [0, 1]) {
       const mine = ranges.filter(([shard]) => shard === d);
-      // The keyframe itself was read to check it, so the range starts just after it.
-      expect(Math.min(...mine.map(([, from]) => from))).toBe(481);
+      // The range starts at the keyframe itself.
+      expect(Math.min(...mine.map(([, from]) => from))).toBe(480);
       expect(Math.max(...mine.map(([, , end]) => end))).toBe(701);
     }
+  });
+
+  it('reads the pages of a range together once the first has said how big a page is', async () => {
+    const h = new FakeHistory(1, ticks(2000));
+    const state = await folded(seeker(h, 1), 1190, 1);
+    expect(state.ticks).toEqual([1190]);
+    // 230 records from the keyframe at 960 are four pages of 64: one first, then three at once.
+    expect(h.widest).toBeGreaterThanOrEqual(3);
+    const pages = h.reads.filter(([, from, end]) => end > from + 1);
+    expect(pages.length).toBeLessThanOrEqual(4);
   });
 
   it('finds the record in a couple of reads however far the tick is from the newest keyframe', async () => {

@@ -58,11 +58,15 @@ export async function keyframeOffset(
   return (await keyframePointer(gateway, district, districts)).offset;
 }
 
-/** {@link keyframeOffset} with the log length the state read was taken at, or null when no pointer answered. */
+/**
+ * {@link keyframeOffset} with the log length the state read was taken at, or null when no pointer answered. A caller that
+ * only wants the length passes `verify` false and skips the read that checks the pointer.
+ */
 export async function keyframePointer(
   gateway: Pick<Gateway, 'stateGet' | 'read'>,
   district: number,
   districts: number,
+  verify = true,
 ): Promise<{ offset: number; asOf: number | null }> {
   const keys = new Set<string>();
   for (const routing of ROUTINGS) {
@@ -83,6 +87,7 @@ export async function keyframePointer(
     }
     if (!payload || payload.length < 8) continue;
     const offset = Number(new DataView(payload.buffer, payload.byteOffset, payload.byteLength).getBigUint64(0, true));
+    if (!verify) return { offset, asOf };
     let page;
     try {
       page = await gateway.read(STREAM, district, offset, offset + 1);
