@@ -1,6 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import { TICKS_PER_DAY, TICKS_PER_HOUR } from './clock';
-import { STEP_TICKS, agoText, clampTick, dayBands, hourMarks, momentText, stepTick, tickAtFraction } from './timeline';
+import {
+  STEP_TICKS,
+  createDragTick,
+  agoText,
+  clampTick,
+  dayBands,
+  hourMarks,
+  momentText,
+  stepTick,
+  tickAtFraction,
+} from './timeline';
 
 const range = { oldest: 480, newest: 480 + 3 * TICKS_PER_DAY };
 
@@ -20,6 +30,11 @@ describe('timeline maths', () => {
     expect(stepTick(range, 1000, 1, true)).toBe(1000 + TICKS_PER_HOUR);
     expect(stepTick(range, 500, -1, true)).toBe(480);
     expect(stepTick(range, range.newest - 10, 1, false)).toBe(range.newest);
+    // Steps stop at the oldest moment, so a run of them is not the sum of their sizes.
+    let at = range.oldest + 150;
+    for (let i = 0; i < 3; i++) at = stepTick(range, at, -1, false);
+    expect(at).toBe(range.oldest);
+    expect(stepTick(range, at, 1, false)).toBe(range.oldest + STEP_TICKS);
     expect(clampTick(range, 1e9)).toBe(range.newest);
   });
 
@@ -46,5 +61,16 @@ describe('timeline maths', () => {
     const marks = hourMarks({ oldest: 0, newest: 6 * TICKS_PER_DAY });
     expect(marks.every((m) => m.major)).toBe(true);
     expect(marks.length).toBe(6 * 4 + 1);
+  });
+});
+
+describe('releasing the handle', () => {
+  it('keeps the tick of the last drag move when the span grew and the pointer did not', () => {
+    const drag = createDragTick();
+    const grown = { oldest: range.oldest, newest: range.newest + 400 };
+    const during = drag.at(range, 0.4, false);
+    expect(drag.at(grown, 0.4, true)).toBe(during);
+    // A release somewhere new is read against the span as it is.
+    expect(drag.at(grown, 0.5, true)).toBe(tickAtFraction(grown, 0.5));
   });
 });

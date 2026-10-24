@@ -20,6 +20,26 @@ export function tickAtFraction(range: Range, fraction: number): number {
   return clampTick(range, range.oldest + fraction * (range.newest - range.oldest));
 }
 
+/**
+ * Remembers where the last drag move put the handle. The span grows while a drag is held, so a release at the same
+ * pixel would map to a later tick than the person last saw; it keeps the tick the drag showed instead.
+ */
+export function createDragTick() {
+  let last: { x: number; tick: number } | null = null;
+  return {
+    /** The tick for a pointer at `x` (a fraction along the bar); `settle` reuses the last tick if `x` has not moved. */
+    at(range: Range, x: number, settle: boolean): number {
+      if (settle && last && last.x === x) return last.tick;
+      const tick = tickAtFraction(range, x);
+      last = { x, tick };
+      return tick;
+    },
+    reset() {
+      last = null;
+    },
+  };
+}
+
 /** One step from `from`: 15 city minutes, or an hour when `big`. */
 export function stepTick(range: Range, from: number, direction: 1 | -1, big: boolean): number {
   return clampTick(range, from + direction * (big ? TICKS_PER_HOUR : STEP_TICKS));
@@ -137,7 +157,9 @@ export function createTimeline(root: HTMLElement, handlers: TimelineHandlers) {
     const rect = track.getBoundingClientRect();
     return rect.width > 0 ? (e.clientX - rect.left) / rect.width : 0;
   };
-  const move = (e: PointerEvent, phase: 'drag' | 'end') => handlers.onMove(tickAtFraction(range, fraction(e)), phase);
+  const dragTick = createDragTick();
+  const move = (e: PointerEvent, phase: 'drag' | 'end') =>
+    handlers.onMove(dragTick.at(range, fraction(e), phase === 'end'), phase);
 
   root.addEventListener('pointerdown', (e) => {
     if (e.button !== 0 || e.target === tip) return;
@@ -155,6 +177,7 @@ export function createTimeline(root: HTMLElement, handlers: TimelineHandlers) {
     if (!dragging) return;
     dragging = false;
     move(e, 'end');
+    dragTick.reset();
     engage();
   };
   root.addEventListener('pointerup', release);
