@@ -1,16 +1,19 @@
 # The web app, and the gateway behind the same address so the page needs no cross-origin settings: /oidc says how to
-# sign in and /ws is the WebSocket.
+# sign in and /ws is the WebSocket. The image fills ${NGINX_LOCAL_RESOLVERS} from the container's own resolver. The
+# gateway's name goes through a variable so nginx looks it up again, as a recreated gateway has a new address.
 server {
     listen 80;
     root /usr/share/nginx/html;
     index index.html;
+    resolver ${NGINX_LOCAL_RESOLVERS} valid=2s ipv6=off;
+    set $gateway http://gateway:8787;
 
     location = /oidc {
-        proxy_pass http://gateway:8787;
+        proxy_pass $gateway;
     }
 
     location = /ws {
-        proxy_pass http://gateway:8787;
+        proxy_pass $gateway;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";

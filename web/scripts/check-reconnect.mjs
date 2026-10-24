@@ -2,17 +2,21 @@
 // checks what a person would see and what the page took: the `Reconnecting…` pill shows, the city's clock keeps
 // running, the pill goes away when the gateway is back, and every district's records were taken in order with none
 // missing and none taken twice. Also shoots the loading screen, with the gateway's answers slowed so it stays up.
-// Usage: node scripts/check-reconnect.mjs <page url> <out dir>, with GATEWAY_STOP and GATEWAY_START set to the commands
-// that take the gateway away and bring it back (dev/gateway.sh stop, dev/gateway.sh start). The page url needs ?trace.
+// Then replaces the gateway with one at a new address, which the web server has to find on its own.
+// Usage: node scripts/check-reconnect.mjs <page url> <out dir>, with GATEWAY_STOP, GATEWAY_START and GATEWAY_RECREATE set
+// to the commands that take the gateway away, bring it back, and bring it back elsewhere (dev/gateway.sh stop, start
+// and recreate). The page url needs ?trace.
 import { execSync } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { chromium } from 'playwright';
 
 const [appUrl, out] = process.argv.slice(2);
-const { GATEWAY_STOP, GATEWAY_START } = process.env;
-if (!out || !GATEWAY_STOP || !GATEWAY_START) {
-  throw new Error('usage: GATEWAY_STOP=... GATEWAY_START=... check-reconnect.mjs <page url> <out dir>');
+const { GATEWAY_STOP, GATEWAY_START, GATEWAY_RECREATE } = process.env;
+if (!out || !GATEWAY_STOP || !GATEWAY_START || !GATEWAY_RECREATE) {
+  throw new Error(
+    'usage: GATEWAY_STOP=... GATEWAY_START=... GATEWAY_RECREATE=... check-reconnect.mjs <page url> <out dir>',
+  );
 }
 mkdirSync(out, { recursive: true });
 const MINUTE = 60_000;
@@ -97,6 +101,27 @@ await page
   .catch(() => fail(page, `the tick stayed at ${back} after the reconnect`));
 await page.screenshot({ path: join(out, 'reconnected.png') });
 console.log(`live again at tick ${back}; now ${await tick()}`);
+
+// The gateway comes back at another address. nginx resolved the old one once if it was not told to look again, and
+// /ws would answer 502 for good.
+await page.evaluate(() => {
+  window.__reconnecting = false;
+  new MutationObserver(() => {
+    if (document.getElementById('pill').textContent === 'Reconnecting…') window.__reconnecting = true;
+  }).observe(document.getElementById('pill'), { childList: true, characterData: true, subtree: true });
+});
+execSync(GATEWAY_RECREATE, { stdio: 'inherit' });
+await page
+  .waitForFunction(() => window.__reconnecting && document.getElementById('pill').textContent === 'LIVE', null, {
+    polling: 250,
+    timeout: 3 * MINUTE,
+  })
+  .catch(() => fail(page, 'the pill never went back to LIVE after the gateway moved'));
+const moved = await tick();
+await page
+  .waitForFunction((t) => window.__live.tick > t + 16, moved, { polling: 250, timeout: MINUTE })
+  .catch(() => fail(page, `the tick stayed at ${moved} after the gateway moved`));
+console.log(`live again at tick ${moved} with the gateway at its new address`);
 
 // 3. What the page took: per district, each applied tick is the one after the last, and nothing was seen twice.
 const trace = await page.evaluate(() => window.__trace ?? []);

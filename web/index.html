@@ -148,6 +148,17 @@
         opacity: 0;
         pointer-events: none;
       }
+      .notice {
+        position: fixed;
+        inset: 42% 24px auto;
+        z-index: 5;
+        margin: 0;
+        text-align: center;
+        color: var(--muted);
+        font-size: 18px;
+        text-shadow: 0 1px 12px var(--void);
+        pointer-events: none;
+      }
       .loader p {
         margin: 0;
         color: var(--muted);
@@ -306,6 +317,9 @@
       <div class="loader-grid" aria-hidden="true"></div>
       <p>Loading…</p>
     </div>
+    <p class="notice hidden" id="notice" role="alert">
+      We couldn’t find that city, or you can’t open it. Choose another from the Felix Metro menu.
+    </p>
     <div class="chip brand" id="brand">
       <img src="brand/felix-metro-mark.png" alt="" />
       <button

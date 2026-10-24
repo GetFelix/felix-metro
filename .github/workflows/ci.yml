@@ -198,13 +198,15 @@ jobs:
         timeout-minutes: 10
         run: START_CITY='../dev/city.sh lakeside' node scripts/check-cities.mjs 'http://127.0.0.1:8088/?tier=low' live-frames/cities
       # The gateway container is stopped for five seconds under an open page: the pill shows, the clock runs on, and
-      # after the restart every district's ticks are contiguous with none missing or taken twice.
+      # after the restart every district's ticks are contiguous with none missing or taken twice. Then the gateway is
+      # recreated at a new address and the page must come back through the web server again.
       - name: The page rides out the gateway going away for five seconds
         working-directory: web
         timeout-minutes: 10
         run: |
           ../dev/speed.sh harbor 16
           GATEWAY_STOP='../dev/gateway.sh stop' GATEWAY_START='../dev/gateway.sh start' \
+          GATEWAY_RECREATE='../dev/gateway.sh recreate' \
             node scripts/check-reconnect.mjs 'http://127.0.0.1:8088/?tier=low&trace#harbor' live-frames/reconnect
       - if: always()
         uses: actions/upload-artifact@v4

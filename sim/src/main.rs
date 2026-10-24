@@ -6,13 +6,16 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use felix_metro_core::City;
-use felix_metro_sim::{FelixLog, Settings, announce, connect, run_city, serve_speed_control};
-use tokio::sync::{Notify, watch};
+use felix_metro_sim::{
+    Connection, FelixLog, Settings, StartRequest, announce_later, connect, run_city,
+    serve_speed_control,
+};
+use tokio::sync::{mpsc, watch};
 use tokio::task::JoinSet;
-use tracing::info;
+use tracing::{error, info};
 use tracing_subscriber::EnvFilter;
 
-use crate::config::Config;
+use crate::config::{CitySpec, Config};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -32,38 +35,52 @@ async fn main() -> Result<()> {
 
     let mut cities = JoinSet::new();
     let mut controls = std::collections::HashMap::new();
-    let mut starts = std::collections::HashMap::new();
-    let all = config.cities.iter().map(|spec| (spec, None)).chain(
-        config
-            .on_demand
-            .iter()
-            .map(|spec| (spec, Some(Arc::new(Notify::new())))),
-    );
-    for (spec, later) in all {
+    let mut starts: std::collections::HashMap<String, mpsc::Sender<StartRequest>> =
+        std::collections::HashMap::new();
+    let all = config
+        .cities
+        .iter()
+        .map(|spec| (spec, None))
+        .chain(config.on_demand.iter().map(|spec| {
+            let (requests, held) = mpsc::channel(4);
+            starts.insert(spec.name.clone(), requests);
+            (spec, Some(held))
+        }));
+    for (spec, held) in all {
         let (control, speed) = watch::channel(config.ticks_per_second);
         controls.insert(spec.name.clone(), control);
-        if let Some(start) = &later {
-            starts.insert(spec.name.clone(), Arc::clone(start));
-        }
         let (client, connection, spec) =
             (Arc::clone(&client), config.connection.clone(), spec.clone());
         let ticks_per_second = config.ticks_per_second;
         cities.spawn(async move {
-            // A city held back starts when something asks for it, at its first tick like any other.
-            if let Some(start) = later {
-                start.notified().await;
-                info!(city = %spec.name, "city started on request");
-            }
-            let city = City::generate(&spec.name, spec.districts_per_side)
-                .with_context(|| format!("generate {}", spec.name))?;
-            let log = FelixLog::open(
+            // A city held back starts when something asks for it, at its first tick like any other. One whose
+            // streams will not open fails that request and waits to be asked again.
+            let (city, log) = match held {
+                None => open_city(&client, &connection, &spec).await?,
+                Some(mut requests) => loop {
+                    let Some(reply) = requests.recv().await else {
+                        return Ok(spec.name);
+                    };
+                    match open_city(&client, &connection, &spec).await {
+                        Ok(opened) => {
+                            info!(city = %spec.name, "city started on request");
+                            let _ = reply.send(Ok(()));
+                            break opened;
+                        }
+                        Err(err) => {
+                            let why = format!("{err:#}");
+                            error!(city = %spec.name, error = %why, "city could not start");
+                            let _ = reply.send(Err(why));
+                        }
+                    }
+                },
+            };
+            announce_later(
                 Arc::clone(&client),
-                &connection,
-                &spec.name,
-                city.districts.len(),
-            )
-            .await?;
-            announce(&client, &connection, &spec.name, spec.districts_per_side).await?;
+                connection,
+                spec.name.clone(),
+                spec.districts_per_side,
+            );
             let settings = Settings {
                 ticks_per_second,
                 speed: Some(speed),
@@ -89,4 +106,22 @@ async fn main() -> Result<()> {
         anyhow::bail!("{name} stopped");
     }
     Ok(())
+}
+
+/// The city and its streams, ready to run.
+async fn open_city(
+    client: &Arc<felix_client::ClusterClient>,
+    connection: &Connection,
+    spec: &CitySpec,
+) -> Result<(City, FelixLog)> {
+    let city = City::generate(&spec.name, spec.districts_per_side)
+        .with_context(|| format!("generate {}", spec.name))?;
+    let log = FelixLog::open(
+        Arc::clone(client),
+        connection,
+        &spec.name,
+        city.districts.len(),
+    )
+    .await?;
+    Ok((city, log))
 }

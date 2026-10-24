@@ -7,4 +7,4 @@ cd "$(dirname "$0")"
 source ./compose.sh
 
 city="${1:?usage: dev/city.sh <city>}"
-"${compose[@]}" exec -T sim curl -fsS -X POST "http://127.0.0.1:8090/cities/$city/start"
+"${compose[@]}" exec -T sim curl -sS --fail-with-body -X POST "http://127.0.0.1:8090/cities/$city/start"

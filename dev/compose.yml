@@ -169,7 +169,7 @@ services:
       dockerfile: dev/web.Dockerfile
     ports:
       - "127.0.0.1:8088:80"
-    # nginx resolves the gateway's name when it starts.
+    # nginx looks the gateway's name up again as it needs it, so a recreated gateway is found.
     depends_on:
       gateway:
         condition: service_started

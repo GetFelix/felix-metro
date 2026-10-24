@@ -3,14 +3,19 @@
 import { signIn, type Oidc } from './auth';
 import type { CityState, TickRecord } from './city';
 import { decodeRecord, districtKey } from './core/felix_metro_core.js';
-import { Gateway, GatewayError, type EventFrame } from './gateway';
+import { Gateway, GatewayError, RETRY_MS, type EventFrame } from './gateway';
 import { Registry, type CityEntry } from './registry';
 
 const STREAM = 'events';
 const ROUTINGS = ['modulo', 'jump_hash'];
-const RETRY_MS = [1000, 2000, 5000];
 
 export type Status = 'live' | 'reconnecting';
+
+/** The city whose session lends the city list when the one asked for is refused. */
+const LIST_CITY = 'harbor';
+
+/** The gateway turns a join down for good with `forbidden`: the city is not there or this person may not open it. */
+const refusal = (err: unknown) => err instanceof GatewayError && err.code === 'forbidden';
 
 export interface LiveOptions {
   /** The gateway's WebSocket URL. */
@@ -20,6 +25,8 @@ export interface LiveOptions {
   city: string;
   state: CityState;
   onStatus?: (status: Status) => void;
+  /** Told when the gateway refuses the city for good; the page stops retrying and the city list keeps working. */
+  onRefused?: () => void;
   /** Told when a district has caught up for the first time, for the loading screen. */
   onDistrict?: (district: number) => void;
   /** Told with every city the registry lists, each time it changes. */
@@ -87,8 +94,6 @@ class Feed {
   private waiting: { offset: number | null; record: TickRecord | null }[] = [];
   private caughtUp = false;
   private resyncing = false;
-  /** Retention passed where this had to resume: records are skipped up to the next keyframe, which refolds the state. */
-  private refold = false;
   /** Counts the sessions this feed has been attached to, so a stale resync does not touch the current one. */
   private generation = 0;
   private gateway!: Gateway;
@@ -149,13 +154,6 @@ class Feed {
       if (offset <= this.last) return true;
       if (this.last >= 0 && offset !== this.last + 1 && !lenient) return false;
     }
-    if (this.refold) {
-      if (!record?.keyframe) {
-        if (offset !== null) this.last = offset;
-        return true;
-      }
-      this.refold = false;
-    }
     if (record && this.state.apply(record, lenient) === 'gap') return false;
     if (offset !== null) this.last = offset;
     return true;
@@ -185,11 +183,12 @@ class Feed {
       try {
         page = await gateway.read(STREAM, this.district, from, tail);
       } catch (err) {
-        // Retention moved past where this needs to start: what is left is folded from its first keyframe.
+        // Retention moved past where this needs to start: resume at the newest keyframe left, which refolds the
+        // state, or with none at what is left. Either way the log is already there, so nothing waits for a future one.
         if (err instanceof GatewayError && err.code === 'trimmed' && err.oldest !== undefined && err.oldest > from) {
-          from = err.oldest;
+          const keyframe = await keyframeOffset(gateway, this.district, this.districts);
+          from = Math.max(keyframe, err.oldest);
           this.last = from - 1;
-          this.refold = true;
           lenient = true;
           continue;
         }
@@ -235,14 +234,19 @@ export async function follow(
 
 /**
  * Connect, catch up and keep following. Resolves when the first attempt has finished, with `connected` false when it
- * failed; either way a dropped or missing session is replaced, with the same state carrying on.
+ * failed; either way a dropped or missing session is replaced, with the same state carrying on. A city the gateway
+ * refuses is not retried: `refused` is true, `onRefused` is told, and the city list is followed through another city.
  */
-export async function connectLive(options: LiveOptions): Promise<{ connected: boolean; close(): void }> {
-  const { url, oidc, city, state, onStatus, onDistrict, onCities } = options;
+export async function connectLive(
+  options: LiveOptions,
+): Promise<{ connected: boolean; refused: boolean; close(): void }> {
+  const { url, oidc, city, state, onStatus, onRefused, onDistrict, onCities } = options;
   let closed = false;
   let current: Gateway | null = null;
   const feeds = createFeeds(state);
   const registry = new Registry(onCities);
+  const pause = (attempt: number) =>
+    new Promise((r) => setTimeout(r, RETRY_MS[Math.min(attempt, RETRY_MS.length - 1)]));
 
   const session = async () => {
     const token = await signIn(oidc);
@@ -274,12 +278,51 @@ export async function connectLive(options: LiveOptions): Promise<{ connected: bo
     return { ended };
   };
 
+  // The city list through a city that is there, for a page whose own city was refused.
+  const browse = async () => {
+    for (let attempt = 0; !closed; attempt++) {
+      try {
+        const gateway = await Gateway.connect(url, LIST_CITY, await signIn(oidc));
+        attempt = 0;
+        current = gateway;
+        const ended = new Promise<void>((end) => {
+          gateway.onError = (err) => {
+            if (err.code === 'closed') end();
+            else if (err.code === 'subscription_ended') registry.lost();
+          };
+        });
+        void registry.attach(gateway);
+        await ended;
+      } catch (err) {
+        if (refusal(err)) return;
+        console.warn('the city list could not be reached', err);
+      }
+      await pause(attempt);
+    }
+  };
+
+  const refuse = () => {
+    console.warn(`the gateway refused the city ${city}`);
+    onRefused?.();
+    void browse();
+  };
+  const handle = {
+    close() {
+      closed = true;
+      current?.close();
+    },
+  };
+
   let ended: Promise<void> | null = null;
   let connected = false;
   try {
     ({ ended } = await session());
     connected = true;
   } catch (err) {
+    if (refusal(err)) {
+      refuse();
+      return { connected, refused: true, ...handle };
+    }
     console.warn('the first connection failed', err);
     onStatus?.('reconnecting');
   }
@@ -291,22 +334,17 @@ export async function connectLive(options: LiveOptions): Promise<{ connected: bo
         onStatus?.('reconnecting');
       }
       for (let attempt = 0; ; attempt++) {
-        await new Promise((r) => setTimeout(r, RETRY_MS[Math.min(attempt, RETRY_MS.length - 1)]));
+        await pause(attempt);
         if (closed) return;
         try {
           ({ ended } = await session());
           break;
         } catch (err) {
+          if (refusal(err)) return refuse();
           console.error('reconnect', err);
         }
       }
     }
   })();
-  return {
-    connected,
-    close() {
-      closed = true;
-      current?.close();
-    },
-  };
+  return { connected, refused: false, ...handle };
 }

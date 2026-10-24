@@ -1,5 +1,7 @@
 //! The city registry: the `metro.cities` stream every page follows for the list of cities.
 
+use std::future::Future;
+use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
@@ -66,11 +68,57 @@ pub async fn announce(
     unreachable!("the last attempt returns")
 }
 
+/// How long to wait before announcing again once a round of attempts has failed.
+const RETRY_AFTER: Duration = Duration::from_secs(30);
+
+/// Announces `name` in the background until it is listed. A city that runs without a registry entry is only missing
+/// from the picker, which is no reason to stop it.
+pub fn announce_later(
+    client: Arc<ClusterClient>,
+    connection: Connection,
+    name: String,
+    districts_per_side: u16,
+) {
+    tokio::spawn(async move {
+        until_listed(&name, RETRY_AFTER, || {
+            announce(&client, &connection, &name, districts_per_side)
+        })
+        .await;
+    });
+}
+
+async fn until_listed<F, Fut>(name: &str, pause: Duration, mut announce: F)
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = Result<()>>,
+{
+    while let Err(err) = announce().await {
+        warn!(city = name, error = %format!("{err:#}"), "not listed in the registry, trying again");
+        tokio::time::sleep(pause).await;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use felix_metro_core::record::RegistryRecord;
 
-    use super::created;
+    use std::sync::atomic::{AtomicU32, Ordering};
+    use std::time::Duration;
+
+    use super::{created, until_listed};
+
+    #[tokio::test(start_paused = true)]
+    async fn a_failed_announce_is_tried_again_until_it_works() {
+        let tries = AtomicU32::new(0);
+        until_listed("lakeside", Duration::from_secs(30), || async {
+            if tries.fetch_add(1, Ordering::SeqCst) < 2 {
+                anyhow::bail!("broker not ready");
+            }
+            Ok(())
+        })
+        .await;
+        assert_eq!(tries.load(Ordering::SeqCst), 3);
+    }
 
     #[test]
     fn the_record_names_the_city_its_seed_and_its_size() {

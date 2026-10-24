@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { EventFrame, Gateway, Subscribed } from './gateway';
+import { GatewayError, type EventFrame, type Gateway, type Subscribed } from './gateway';
 
 vi.mock('./core/felix_metro_core.js', () => ({
   decodeRecord: (bytes: Uint8Array) => new TextDecoder().decode(bytes),
@@ -90,11 +90,36 @@ describe('Registry', () => {
     expect(gateway.handler).not.toBeNull();
   });
 
-  it('keeps a page without a registry working', async () => {
-    const gateway = { subscribe: () => Promise.reject(new Error('no such stream')) };
+  it('tries again after a failed subscribe, with the same backoff as the city', async () => {
+    vi.useFakeTimers();
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    await expect(new Registry().attach(gateway as unknown as Gateway)).resolves.toBeUndefined();
+    const gateway = new FakeGateway();
+    gateway.write(created('harbor'), false);
+    const subscribe = gateway.subscribe.bind(gateway);
+    let fails = 2;
+    gateway.subscribe = (...args) => (fails-- > 0 ? Promise.reject(new Error('busy')) : subscribe(...args));
+    const lists: { name: string }[][] = [];
+    const attached = new Registry((c) => lists.push(c)).attach(as(gateway));
+    await vi.advanceTimersByTimeAsync(3000);
+    await attached;
+    expect(names(lists)).toEqual(['harbor']);
     warn.mockRestore();
+    vi.useRealTimers();
+  });
+
+  it('stops trying when its session is gone', async () => {
+    const gateway = { subscribe: () => Promise.reject(new GatewayError('closed', 'gone')) };
+    await expect(new Registry().attach(gateway as unknown as Gateway)).resolves.toBeUndefined();
+  });
+
+  it('lets the latest record of a name win', async () => {
+    const gateway = new FakeGateway();
+    gateway.write(created('harbor', 2), false);
+    gateway.write(created('pinecrest', 2), false);
+    gateway.write(created('harbor', 4), false);
+    const registry = new Registry();
+    await registry.attach(as(gateway));
+    expect([...registry.cities.values()].map((c) => `${c.name}:${c.districts}`)).toEqual(['harbor:4', 'pinecrest:2']);
   });
 });
 

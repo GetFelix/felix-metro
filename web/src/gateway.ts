@@ -5,6 +5,9 @@
 /** The optional protocol features the city needs. */
 export const FEATURES = ['binary_events', 'slots', 'shards', 'state', 'read'] as const;
 
+/** How long to wait before each new try after a failed one; the last step repeats. */
+export const RETRY_MS = [1000, 2000, 5000];
+
 /** A session may have this many reads waiting at once; the gateway refuses a fifth. */
 const READS_IN_FLIGHT = 4;
 

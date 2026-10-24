@@ -1,7 +1,7 @@
 // The list of cities, as the registry stream tells it: every `created` and `forked` record, in the order they were
 // written. Followed through the same session as the city on screen.
 import { decodeRecord } from './core/felix_metro_core.js';
-import { Gateway, GatewayError, type EventFrame } from './gateway';
+import { Gateway, GatewayError, RETRY_MS, type EventFrame } from './gateway';
 
 const STREAM = 'cities';
 const SLOT = 'cities';
@@ -76,21 +76,23 @@ export class Registry {
     });
   }
 
+  /** Subscribe from the last offset handled plus one, trying again until it takes or the session is gone. */
   private async subscribe(gateway: Gateway): Promise<void> {
     let from = this.last + 1;
-    for (let attempt = 0; attempt < 2; attempt++) {
+    for (let attempt = 0; gateway === this.gateway; ) {
       try {
         await gateway.subscribe(STREAM, SLOT, 0, from, (frame) => this.onFrame(gateway, frame));
         return;
       } catch (err) {
+        if (err instanceof GatewayError && err.code === 'closed') return;
         // Retention is off for the registry, but if it ever trims, start from what is left.
-        if (err instanceof GatewayError && err.code === 'trimmed' && err.oldest !== undefined) {
+        if (err instanceof GatewayError && err.code === 'trimmed' && err.oldest !== undefined && err.oldest > from) {
           from = err.oldest;
           this.last = from - 1;
           continue;
         }
         console.warn('the city list is not available', err);
-        return;
+        await new Promise((r) => setTimeout(r, RETRY_MS[Math.min(attempt++, RETRY_MS.length - 1)]));
       }
     }
   }
@@ -100,7 +102,10 @@ export class Registry {
     if (frame.skippedBefore > 0 || (this.last >= 0 && frame.offset !== this.last + 1)) return this.lost();
     this.last = frame.offset;
     const entry = parseEntry(frame.payload);
-    if (!entry || this.cities.has(entry.name)) return;
+    if (!entry) return;
+    // The latest record of a name wins, so a city restarted at another size is listed at that size.
+    const known = this.cities.get(entry.name);
+    if (known && known.districts === entry.districts && known.parent === entry.parent) return;
     this.cities.set(entry.name, entry);
     this.onChange([...this.cities.values()]);
   }

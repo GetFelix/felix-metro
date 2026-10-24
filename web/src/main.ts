@@ -49,8 +49,8 @@ interface Link {
 }
 
 /**
- * Sign in at the gateway and follow the city's log; `null` when nothing here answers like a gateway, so the page
- * still draws the city, without its people. A gateway that is there but cannot be reached right now is not that: the
+ * Sign in at the gateway and follow the city's log; `null` when nothing here answers like a gateway or the city is
+ * refused, so the page still draws the city, without its people. A gateway that is there but cannot be reached right now is not that: the
  * page shows `Reconnecting…` and keeps trying, and the city fills in when it gets through.
  */
 async function follow(
@@ -80,6 +80,10 @@ async function follow(
     state,
     onDistrict: (d) => loader.ready(d),
     onCities: (cities) => picker.update(cities),
+    onRefused: () => {
+      pill.classList.add('hidden');
+      document.getElementById('notice')!.classList.remove('hidden');
+    },
     onStatus: (status) => {
       link.down = status !== 'live';
       pill.textContent = link.down ? 'Reconnecting…' : 'LIVE';
@@ -89,7 +93,11 @@ async function follow(
   });
   // Closing the sockets by hand, not leaving it to the browser, so the gateway sees the city's subscriptions end.
   addEventListener('pagehide', () => live.close());
-  return { state, link };
+  // A page restored from the back-forward cache has closed sockets and a stale city; a fresh load is the way back.
+  addEventListener('pageshow', (e) => {
+    if (e.persisted) location.reload();
+  });
+  return live.refused ? null : { state, link };
 }
 
 /** Districts on a side when `?districts` does not say. */

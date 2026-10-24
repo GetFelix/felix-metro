@@ -67,8 +67,10 @@ What runs today: the sim, the dev stack and a browser page that shows a city liv
 cars and walkers moving in time with the sim and the sun following the tick. The page
 opens on a loading screen that fills in district by district, then drifts down onto the
 city. If the connection drops, a `Reconnecting…` pill shows, the city keeps moving, and
-the page picks up where it left off with nothing missed or repeated. The city name in the
-top left opens a list of every city. Scrubbing back in time, following a resident and
+the page reads what it missed from the log and carries on in order. If retention has
+already dropped what it missed, it restarts that district from the newest keyframe left.
+A city the gateway refuses (a misspelled name, or no access) shows a message instead of
+retrying. The city name in the top left opens a list of every city. Scrubbing back in time, following a resident and
 building are not built yet.
 
 ## Run it locally
@@ -101,7 +103,9 @@ Click the city name in the top left to switch cities, or open `/#pinecrest` (any
 in the list) directly. Choosing a city opens its page afresh, so the old city's
 connections close with the old page. The list comes from the registry, which the sim
 writes to as each city starts, so a city that starts while the page is open appears in the
-list without a reload. The stack seeds a third city, `lakeside`, and the sim keeps it idle
+list without a reload (a city started again at another size is listed at the latest one).
+If a city cannot open its streams when you start it, `dev/city.sh` fails with the reason
+and the sim keeps running. The stack seeds a third city, `lakeside`, and the sim keeps it idle
 and unlisted until you start it:
 
 ```sh
@@ -115,6 +119,9 @@ start it again (the page shows `Reconnecting…` and carries on):
 dev/gateway.sh stop
 dev/gateway.sh start
 ```
+
+`dev/gateway.sh recreate` brings the gateway back at a new address instead; the web
+container looks the name up again, so the page reconnects through it.
 
 To watch ticks arrive the way a browser gets them, through the gateway (needs Node 22):
 

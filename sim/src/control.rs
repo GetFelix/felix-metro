@@ -10,7 +10,7 @@ use std::time::Duration;
 use anyhow::{Result, bail};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::{Notify, watch};
+use tokio::sync::{mpsc, oneshot, watch};
 use tracing::{info, warn};
 
 /// The speeds a city may run at, in ticks per second; 0 is paused.
@@ -27,11 +27,12 @@ pub fn check_speed(ticks_per_second: u8) -> Result<u8> {
 /// Serves `PUT /cities/<name>/speed` (body: 0, 4, 8 or 16) and
 /// `GET /cities/<name>/speed` on `listener`, which must be bound to a loopback
 /// address because the endpoint has no authentication. `POST
-/// /cities/<name>/start` starts a city in `starts`, one that was held back.
+/// /cities/<name>/start` starts a city in `starts`, one that was held back, and
+/// answers once its streams are open, or with a 500 when they would not open.
 pub async fn serve(
     listener: TcpListener,
     cities: HashMap<String, watch::Sender<u8>>,
-    starts: HashMap<String, Arc<Notify>>,
+    starts: HashMap<String, mpsc::Sender<StartRequest>>,
 ) -> Result<()> {
     if !listener.local_addr()?.ip().is_loopback() {
         bail!("the speed endpoint has no authentication and must bind to a loopback address");
@@ -51,12 +52,18 @@ pub async fn serve(
     }
 }
 
+/// A request to start a held-back city. The city answers `Ok` once it runs, or why it could not
+/// start, and then waits for the next request.
+pub type StartRequest = oneshot::Sender<Result<(), String>>;
+
 /// What the endpoint can reach.
 struct Cities {
     speeds: HashMap<String, watch::Sender<u8>>,
-    starts: HashMap<String, Arc<Notify>>,
+    starts: HashMap<String, mpsc::Sender<StartRequest>>,
 }
 
+/// How long a start request waits for the city's streams to open.
+const START_TIMEOUT: Duration = Duration::from_secs(60);
 /// How long a client gets to send its request.
 const READ_TIMEOUT: Duration = Duration::from_secs(5);
 /// A speed request is a few dozen bytes.
@@ -79,7 +86,7 @@ async fn handle(mut stream: TcpStream, peer: SocketAddr, cities: &Cities) -> Res
             Ok(()) => {
                 let mut first = head.lines().next().unwrap_or("").split_whitespace();
                 let (method, path) = (first.next().unwrap_or(""), first.next().unwrap_or(""));
-                respond(method, path, &body, cities, peer)
+                respond(method, path, &body, cities, peer).await
             }
         },
     };
@@ -158,7 +165,7 @@ fn check_origin(head: &str, port: u16) -> Result<(), Reject> {
     Ok(())
 }
 
-fn respond(
+async fn respond(
     method: &str,
     path: &str,
     body: &str,
@@ -176,8 +183,17 @@ fn respond(
             return ("405 Method Not Allowed", "use POST\n".into());
         }
         info!(%peer, city = name, "start requested");
-        start.notify_one();
-        return ("200 OK", "started\n".into());
+        let (reply, answer) = oneshot::channel();
+        // A city that is running has dropped its requests, and one that started while this waited drops this.
+        if start.send(reply).await.is_err() {
+            return ("200 OK", "already started\n".into());
+        }
+        return match tokio::time::timeout(START_TIMEOUT, answer).await {
+            Ok(Ok(Ok(()))) => ("200 OK", "started\n".into()),
+            Ok(Ok(Err(why))) => ("500 Internal Server Error", format!("{why}\n")),
+            Ok(Err(_)) => ("200 OK", "already started\n".into()),
+            Err(_) => ("504 Gateway Timeout", "the city is still starting\n".into()),
+        };
     }
     let city = path
         .strip_prefix("/cities/")

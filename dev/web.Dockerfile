@@ -29,5 +29,7 @@ COPY --from=core /out src/core
 RUN npm run build
 
 FROM docker.io/library/nginx:1.27-alpine
-COPY dev/nginx.conf /etc/nginx/conf.d/default.conf
+# The image turns templates into conf.d on start, and with this set fills NGINX_LOCAL_RESOLVERS.
+ENV NGINX_ENTRYPOINT_LOCAL_RESOLVERS=1
+COPY dev/nginx.conf.template /etc/nginx/templates/default.conf.template
 COPY --from=web /src/web/dist /usr/share/nginx/html

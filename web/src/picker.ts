@@ -8,8 +8,9 @@ export interface Picker {
 /** The page address for a city, keeping the other parameters. A size the page cannot learn goes in `?districts`. */
 function hrefFor(name: string, size: number, defaultSize: number): string {
   const url = new URL(location.href);
+  // An unknown size leaves the page's own, which beats a guess.
   if (size > 0 && size !== defaultSize) url.searchParams.set('districts', String(size));
-  else url.searchParams.delete('districts');
+  else if (size > 0) url.searchParams.delete('districts');
   url.hash = encodeURIComponent(name);
   return url.pathname + url.search + url.hash;
 }
@@ -35,14 +36,15 @@ export function createPicker(current: string, defaultSize: number): Picker {
     }
   });
 
+  // Items are kept as cities arrive, so a list the person is moving through keeps its focus.
+  const links = new Map<string, HTMLAnchorElement>();
   return {
     update(cities) {
       const byName = new Map(cities.map((c) => [c.name, c]));
-      list.replaceChildren(
-        ...cities.map((city) => {
-          const item = document.createElement('li');
-          const link = document.createElement('a');
-          link.href = hrefFor(city.name, citySize(city, byName), defaultSize);
+      for (const city of cities) {
+        let link = links.get(city.name);
+        if (!link) {
+          link = document.createElement('a');
           link.textContent = displayName(city.name);
           if (city.name === current) link.setAttribute('aria-current', 'page');
           if (city.parent) {
@@ -50,10 +52,13 @@ export function createPicker(current: string, defaultSize: number): Picker {
             note.textContent = `from ${displayName(city.parent)}`;
             link.append(note);
           }
+          const item = document.createElement('li');
           item.append(link);
-          return item;
-        }),
-      );
+          list.append(item);
+          links.set(city.name, link);
+        }
+        link.href = hrefFor(city.name, citySize(city, byName), defaultSize);
+      }
       button.disabled = cities.length === 0;
       chevron.classList.toggle('hidden', cities.length === 0);
     },

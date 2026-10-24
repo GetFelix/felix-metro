@@ -1,10 +1,9 @@
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::time::Duration;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::{Notify, watch};
+use tokio::sync::{mpsc, watch};
 
 use super::*;
 
@@ -167,8 +166,8 @@ async fn a_client_that_stalls_is_cut_off() {
 async fn post_starts_a_city_held_back_and_nothing_else() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let start = Arc::new(Notify::new());
-    let starts = HashMap::from([("lakeside".to_owned(), Arc::clone(&start))]);
+    let (requests, mut starting) = mpsc::channel(1);
+    let starts = HashMap::from([("lakeside".to_owned(), requests)]);
     tokio::spawn(serve(listener, HashMap::new(), starts));
 
     for (method, path, status) in [
@@ -178,12 +177,48 @@ async fn post_starts_a_city_held_back_and_nothing_else() {
         let reply = request(addr, method, path, "").await;
         assert!(reply.starts_with(&format!("HTTP/1.1 {status}")), "{reply}");
     }
-    let waiting = tokio::time::timeout(Duration::from_millis(100), start.notified());
-    assert!(waiting.await.is_err(), "a refused request started the city");
+    assert!(
+        starting.try_recv().is_err(),
+        "a refused request started the city"
+    );
 
-    let reply = request(addr, "POST", "/cities/lakeside/start", "").await;
-    assert!(reply.starts_with("HTTP/1.1 200"), "{reply}");
-    tokio::time::timeout(Duration::from_secs(1), start.notified())
+    let reply =
+        tokio::spawn(async move { request(addr, "POST", "/cities/lakeside/start", "").await });
+    let answer = tokio::time::timeout(Duration::from_secs(1), starting.recv())
         .await
-        .expect("the city was not started");
+        .expect("the city was not asked to start")
+        .unwrap();
+    answer.send(Ok(())).unwrap();
+    let reply = reply.await.unwrap();
+    assert!(reply.starts_with("HTTP/1.1 200"), "{reply}");
+}
+
+#[tokio::test]
+async fn a_city_that_cannot_start_is_a_500_and_can_be_asked_again() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (requests, mut starting) = mpsc::channel(1);
+    let starts = HashMap::from([("lakeside".to_owned(), requests)]);
+    tokio::spawn(serve(listener, HashMap::new(), starts));
+
+    let first =
+        tokio::spawn(async move { request(addr, "POST", "/cities/lakeside/start", "").await });
+    starting
+        .recv()
+        .await
+        .unwrap()
+        .send(Err("no streams".into()))
+        .unwrap();
+    let reply = first.await.unwrap();
+    assert!(reply.starts_with("HTTP/1.1 500"), "{reply}");
+    assert!(reply.contains("no streams"), "{reply}");
+
+    let second =
+        tokio::spawn(async move { request(addr, "POST", "/cities/lakeside/start", "").await });
+    starting.recv().await.unwrap().send(Ok(())).unwrap();
+    assert!(second.await.unwrap().starts_with("HTTP/1.1 200"));
+    // Once the city runs nobody listens for requests, and asking again is harmless.
+    drop(starting);
+    let again = request(addr, "POST", "/cities/lakeside/start", "").await;
+    assert!(again.starts_with("HTTP/1.1 200"), "{again}");
 }
