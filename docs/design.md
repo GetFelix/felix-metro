@@ -26,7 +26,7 @@ enough to keep days of it.
 
 **Out of scope**
 
-- Economy depth (budgets, taxes, land value). The city has a few headline numbers, not a finance model
+- Economy depth beyond what [game.md](game.md) proposes. The city has a budget, not a finance model
 - Utilities, disasters, public transport networks beyond what a milestone names
 - Accurate traffic modelling. Congestion is simple and plausible, not a research model
 - Anything that needs a second datastore. If a feature cannot be expressed in streams, stream state, caches and counters, it is out
