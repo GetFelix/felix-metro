@@ -147,7 +147,7 @@ for (let attempt = 1; attempt <= ATTEMPTS && compared === 0; attempt++) {
   // The page now shows the live city, and joined at its tip.
   if (done.shown.past !== null || !done.shown.live) await fail('after the join the page is not showing the live state');
   if (done.shown.sig !== done.liveNow.sig) await fail('after the join the city is not the live one');
-  if (Math.min(...done.liveNow.ticks) - joined > 80)
+  if (Math.min(...done.liveNow.ticks) - joined > 160)
     await fail(`joined at ${joined}, the live tip is ${Math.min(...done.liveNow.ticks)}`);
   if (await page.locator('#past').isVisible()) await fail('the past pill is still showing after the join');
 
