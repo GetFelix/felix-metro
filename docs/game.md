@@ -1,6 +1,6 @@
 # Felix Metro as a game
 
-Draft. [design.md](design.md) describes a city you watch and build in, and a log you
+[design.md](design.md) describes a city you watch and build in, and a log you
 can scrub through. This note is about what turns that into something you play: a
 reason to act, a way to know how you are doing, and choices that cost something.
 
@@ -174,13 +174,17 @@ The numbers are placeholders until the economy is in the sim and measured.
 
 1. Persistence across a restart.
 2. Money and the `ledger` event, shown as one number on the page and on the timeline.
-3. Policy commands, two of them.
-4. Goals and the first chapter, without forks: the player commits changes for real.
-5. Investigations, one or two.
-6. Forks and what-ifs.
-7. Demand, moving in and out, land value.
-8. Story events and more chapters.
-9. Several mayors.
+3. Factions: three satisfaction numbers from the log, their demands, and the recall
+   warning with its countdown.
+4. Policy commands, two of them, with a cooldown.
+5. Goals and the first chapter, without forks: the player commits changes for real.
+6. Investigations, one or two, checked as a batch.
+7. Measure a fork's morning rush on one broker; then forks, what-ifs and policy
+   previews.
+8. Comparing a chapter's fix with other players' fixes.
+9. Demand, moving in and out, land value.
+10. Story events and more chapters; the public city as a creative mode.
+11. Several mayors.
 
 Each step is playable on its own. The first chapter is the test: if it is not fun
 without forks, forks will not save it.
@@ -243,8 +247,16 @@ them together. A hint names a street or an hour worth looking at, never the answ
   ([Engadget](https://www.engadget.com/2018-07-09-opus-magnum-zachtronics-irl.html)).
   Commands already carry who sent them.
 
-## Still open
+## The pressure the player feels
 
-- How fast one broker can run a fork's morning rush. The 10-second budget needs a
-  measurement before forks go in the order.
-- Whether factions replace the account as the main pressure or sit beside it.
+Factions are the main pressure and money is the constraint. A player reads "harbor
+residents are angry about the bridge" more easily than a falling balance, and a
+faction can say why. Money decides what you can afford to do about it. The page
+shows the three factions' satisfaction and the account, nothing else, until a chapter
+needs more.
+
+## Measured before it is promised
+
+Forks go into the order only once one broker runs a morning rush (about 1,000 ticks
+of one city) in under 10 seconds. If it can't, the what-if shrinks to the goal's
+street or district rather than the wait growing.
