@@ -5,6 +5,7 @@
 //! same on every platform.
 
 pub mod city;
+pub mod keys;
 pub mod kinds;
 pub mod names;
 pub mod record;
@@ -18,6 +19,7 @@ pub mod wasm;
 pub use city::{
     City, District, Door, GenerateError, Lot, RoadPiece, RoadTile, Segment, SegmentClass, Zone,
 };
+pub use keys::{Routing, district_key};
 pub use kinds::{BuildingKind, KINDS, KindInfo};
 pub use names::resident_name;
 pub use resident::{Places, Resident, day_hash};

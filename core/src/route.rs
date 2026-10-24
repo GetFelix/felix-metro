@@ -121,6 +121,22 @@ impl Trip {
         done
     }
 
+    /// The leg the trip is on at `tick` and how far along it is, in
+    /// thousandths. Held at the first leg's start before the trip leaves and
+    /// at the last leg's end after it ends.
+    pub fn leg_progress(&self, tick: u32) -> (usize, u16) {
+        let mut start = self.depart;
+        for (i, leg) in self.legs.iter().enumerate() {
+            if tick < leg.end || i + 1 == self.legs.len() {
+                let span = leg.end - start;
+                let done = interpolate(1000, tick.saturating_sub(start), span);
+                return (i, done as u16);
+            }
+            start = leg.end;
+        }
+        unreachable!("a trip has a leg")
+    }
+
     /// The position at `tick`, held at the first door before the trip leaves
     /// and at the last one after it ends.
     pub fn position_at(&self, city: &City, tick: u32) -> Position {

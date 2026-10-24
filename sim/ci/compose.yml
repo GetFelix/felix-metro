@@ -1,0 +1,87 @@
+# A Felix broker for the sim's integration test: a control plane, one broker
+# and a stand-in IdP, and a one-shot seed that creates the city's event stream
+# with a shard for each district. `sim/ci/up.sh` starts it and waits until the
+# broker is ready.
+name: felix-metro-sim
+
+services:
+  idp:
+    image: docker.io/library/node:24-alpine
+    command: ["node", "/app/idp.mjs"]
+    environment:
+      IDP_ISSUER: http://idp:9400
+    volumes:
+      - ./idp.mjs:/app/idp.mjs:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9400/jwks.json"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+
+  controlplane:
+    image: ghcr.io/getfelix/felix-controlplane:0.6.0-preview.9
+    environment:
+      # In-memory store: a restart of the stack starts from nothing.
+      FELIX_BOOTSTRAP_ENABLED: "true"
+      FELIX_BOOTSTRAP_BIND_ADDR: 0.0.0.0:9095
+      FELIX_BOOTSTRAP_TOKEN: dev-bootstrap
+      # The IdP is plain HTTP on the compose network.
+      FELIX_CONTROLPLANE_OIDC_ALLOW_INSECURE_HTTP: "true"
+      FELIX_EXCHANGE_TOKEN_TTL_SECONDS: "86400"
+      RUST_LOG: info
+    depends_on:
+      idp:
+        condition: service_healthy
+
+  seed:
+    image: docker.io/library/node:24-alpine
+    command: ["node", "/app/seed.mjs"]
+    volumes:
+      - ./seed.mjs:/app/seed.mjs:ro
+      - ./state:/state
+    depends_on:
+      controlplane:
+        condition: service_healthy
+
+  broker:
+    image: ghcr.io/getfelix/felix-broker:0.6.0-preview.9
+    environment:
+      FELIX_CONTROLPLANE_URL: http://controlplane:8443
+      FELIX_NODE_TOKEN_FILE: /state/node.token
+      FELIX_DURABLE_STORAGE_DIR: /var/lib/felix
+      FELIX_TLS_CERT_EXPORT: /state/broker-cert.pem
+      # A broker without a node id is not a cluster member, and a stream on it
+      # has one shard. Joining as a cluster of one is what gives it four.
+      FELIX_NODE_ID: broker-0
+      # Peers reach the internal listener here; with one node there are none.
+      FELIX_NODE_ADVERTISE_ADDR: 127.0.0.1:5001
+      FELIX_INTERNAL_ALLOW_UNAUTHENTICATED: "true"
+      # One listener, so the one published UDP port is the only one clients use.
+      FELIX_QUIC_LISTENERS: "1"
+      # Acknowledge after the write, so a commit's answer carries its offset.
+      FELIX_ACK_ON_COMMIT: "true"
+      RUST_LOG: info
+    ports:
+      - "127.0.0.1:5000:5000/udp"
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ./state:/state
+      - felix-data:/var/lib/felix
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+
+  # Atomic commits stay off until the fleet finalizes them, which needs a
+  # serving broker.
+  finalize:
+    image: docker.io/library/node:24-alpine
+    command: ["node", "/app/finalize.mjs"]
+    volumes:
+      - ./finalize.mjs:/app/finalize.mjs:ro
+      - ./state:/state
+    depends_on:
+      broker:
+        condition: service_started
+
+volumes:
+  felix-data:

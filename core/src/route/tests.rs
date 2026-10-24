@@ -239,3 +239,24 @@ fn a_walked_trip_takes_the_shortest_way_whatever_the_traffic() {
     }
     assert!(walks > 0 && multi > 0);
 }
+
+#[test]
+fn leg_progress_follows_position_at_and_never_goes_back() {
+    for city in cities() {
+        for (a, b) in pairs(&city, 40) {
+            let Some(trip) = route(&city, a, b, 100, &Congestion::FREE) else {
+                continue;
+            };
+            let last = trip.legs().len() - 1;
+            assert_eq!(trip.leg_progress(0), (0, 0));
+            assert_eq!(trip.leg_progress(trip.arrive() + 50), (last, 1000));
+            let mut before = (0, 0);
+            for tick in trip.depart..=trip.arrive() {
+                let now = trip.leg_progress(tick);
+                assert_eq!(now.0, usize::from(trip.position_at(&city, tick).leg));
+                assert!(now.1 <= 1000 && now >= before, "{before:?} then {now:?}");
+                before = now;
+            }
+        }
+    }
+}

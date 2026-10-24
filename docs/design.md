@@ -97,6 +97,12 @@ event stream. The sim routes every commit with the district as its entity key.
 This keeps each district's history in order on its own shard and spreads a big
 city over brokers.
 
+Felix maps an entity key to a shard by hashing it, and the keys `d00` to `d03`
+do not land on four different shards of a four-shard stream. So district `i`
+commits with `d<NN>` where that hashes to shard `i`, and with `d<NN>.<n>` for
+the first `n` that does where it does not. The stream needs a shard for every
+district, and district `i` is always shard `i`.
+
 One sim task steps all districts of a city in lockstep. Each tick it commits one
 record per district, in parallel, and waits for all of them before the next
 tick. Because one process owns every district, a resident crossing a district
@@ -202,6 +208,13 @@ each from the one before), then one speed byte per leg. A vehicle state is kind
 `u8`, progress along its first leg in thousandths `u16` (0 to 1000), and a
 route.
 
+An activity `kind` is the schedule's activity: 0 home, 1 work, 2 school, 3 shop,
+4 leisure. Sleep is not one; a viewer shows a resident at home through the night
+as asleep. A vehicle `kind` of 0 is a walker. In a tick, a resident's `arrived`
+and `activity` are in the district of the lot they reach, `trip` is in the
+district of the lot they leave, and a resident who drives into another district
+is `left` there and `entered` here, in the tick the vehicle first is in it.
+
 ### Keyframes
 
 Every 240 ticks (one real minute, one city hour) each district commits a
@@ -215,7 +228,7 @@ commit also writes the stream state key `keyframe`, so the newest one is one
 | buildings | varint count; per lot that differs from the generated city: lot delta, kind `u16` (65535 for none), rotation `u8` |
 | roads | varint count; per segment closed or added: segment delta, change `u8` |
 | residents | varint count; per resident in the district: id delta, then a framed state: tag `0`, kind `u8`, lot `u32` and until varint (an activity in that lot), or tag `1` and a vehicle state (a trip in progress) |
-| counts | varints: home, at work, on the road, asleep |
+| counts | varints: home, at work, on the road, asleep. Home between 22:00 and 06:00 is asleep; work and school are at work; shopping and leisure are in none of them |
 
 Because buildings and roads are diffs against the city the seed generates, the
 keyframe of a city nobody has built in carries none of them, and the cost is
@@ -259,9 +272,18 @@ reasons felix-arena uses it: the answer carries the offset (the next tick
 record needs the keyframe's offset), a keyframe and its state pointer land
 together, and the sim waits for each answer, so records land in tick order.
 
-The sim fences itself with `publish_if`/`commit`'s expected offset on each
-district, so a stale sim that comes back after a replacement took over is
-refused at the broker instead of writing a second history.
+Every commit is a `commit_if` at the offset the sim expects the district's shard
+to be at, so the sim always knows the offset a record will have. A keyframe
+puts that offset in its own `keyframe_offset` and in the `keyframe` state key
+in the same commit. A stale sim that comes back after a replacement took over is
+refused at the broker instead of writing a second history, and a sim that
+starts over a city that already has history stops.
+
+A district that gets no answer is sent the same bytes again at the same
+expected offset, after a growing wait. If the shard's tail shows the earlier
+send landed, that is the answer. The sim does not move on until every district
+has answered, and a slow tick runs late: the next one starts a period after it
+ends, so no tick is skipped and none is made up in a burst.
 
 ## Seeking
 
