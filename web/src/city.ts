@@ -1,5 +1,6 @@
 // The city as the log tells it: what each district's records add up to. Buildings are the generated city's plus the
 // ones `built` and `demolished` events and keyframes change; trips are handed on to whatever draws them.
+import { WINDOW, progress } from './construction';
 import type { City } from './layout';
 
 /** A building kind that means the lot is empty. */
@@ -74,7 +75,26 @@ export interface Building {
   rotation: number;
 }
 
+/** A building that went up at `tick`, which the page draws rising until the window ends. */
+export interface Rising extends Building {
+  tick: number;
+}
+
+/** A building demolished at `tick`, which the page draws coming down from `from` of its height. */
+export interface Falling extends Building {
+  tick: number;
+  from: number;
+}
+
 export class CityState {
+  /**
+   * Lots whose building went up within the last few ticks, by the tick of the `built` event. The log has one instant
+   * per event, so this is the only record of when a building began: a keyframe lists the finished lot alone, and
+   * {@link recover} fills in what it can from the records before it. A lot with no entry is drawn finished.
+   */
+  readonly rising = new Map<number, Rising>();
+  /** Lots demolished within the last few ticks, with the building that stood there. */
+  readonly falling = new Map<number, Falling>();
   /** Lots that differ from the generated city. */
   readonly built = new Map<number, Building>();
   /** Segments closed, added or removed since the city was generated, by segment: a `ROAD_*` change. */
@@ -149,6 +169,7 @@ export class CityState {
         if (old) this.finishing.push(old);
         this.voyages.set(t.resident, { resident: t.resident, vehicle: t.vehicle, depart: t.depart, journey });
       } else if (e.type === 'built' || e.type === 'demolished') {
+        this.mark(e, record.tick, this.rising, this.falling);
         this.set(
           e.lot,
           e.type === 'built' ? { kind: e.kind, rotation: e.rotation } : { kind: NO_BUILDING, rotation: 0 },
@@ -159,7 +180,59 @@ export class CityState {
         this.speed = e.ticksPerSecond;
       }
     }
+    this.prune(d, record.tick);
     return 'applied';
+  }
+
+  // Remember when a lot changed, for the animation. A demolition during a rise comes down from the height reached.
+  private mark(
+    e: { type: 'built' | 'demolished'; lot: number; kind: number; rotation: number },
+    tick: number,
+    rising: Map<number, Rising>,
+    falling: Map<number, Falling>,
+  ): void {
+    if (e.type === 'built') {
+      falling.delete(e.lot);
+      rising.set(e.lot, { kind: e.kind, rotation: e.rotation, tick });
+    } else {
+      const was = rising.get(e.lot);
+      rising.delete(e.lot);
+      falling.set(e.lot, { kind: e.kind, rotation: e.rotation, tick, from: was ? progress(was.tick, tick) : 1 });
+    }
+  }
+
+  // Entries stay a little past their window, since the page draws a tick or two behind the newest record.
+  private prune(district: number, tick: number): void {
+    const done = (lot: number, at: number) => this.city.lots[lot]?.district === district && at + WINDOW + 2 <= tick;
+    for (const [lot, r] of this.rising) if (done(lot, r.tick)) this.rising.delete(lot);
+    for (const [lot, f] of this.falling) if (done(lot, f.tick)) this.falling.delete(lot);
+  }
+
+  /**
+   * Take the start ticks the records before a keyframe tell of, for a state folded from that keyframe. A building that
+   * went up or came down in the few ticks before a keyframe is listed there as it stands, so a seek to a tick inside
+   * its window reads those records (oldest first) to find when it began. An entry the state already has, or one the
+   * state's lot no longer matches, is left alone.
+   */
+  recover(before: readonly TickRecord[]): void {
+    const rising = new Map<number, Rising>();
+    const falling = new Map<number, Falling>();
+    for (const r of before) {
+      for (const e of r.events)
+        if (e.type === 'built' || e.type === 'demolished') this.mark(e, r.tick, rising, falling);
+    }
+    for (const [lot, r] of rising) {
+      const now = this.built.get(lot);
+      if (now?.kind === r.kind && now.rotation === r.rotation && !this.rising.has(lot) && !this.falling.has(lot)) {
+        this.rising.set(lot, r);
+      }
+    }
+    for (const [lot, f] of falling) {
+      if (this.built.get(lot)?.kind === NO_BUILDING && !this.rising.has(lot) && !this.falling.has(lot)) {
+        this.falling.set(lot, f);
+      }
+    }
+    for (let d = 0; d < this.ticks.length; d++) if (this.ticks[d]! >= 0) this.prune(d, this.ticks[d]!);
   }
 
   /** Every voyage to draw: those under way and those a later trip replaced that have yet to arrive. */
@@ -194,6 +267,10 @@ export class CityState {
   // generated one again.
   private keyframe(district: number, diffs: [number, number, number][], roads: [number, number][]): void {
     const listed = new Set(diffs.map((b) => b[0]));
+    // The keyframe says what stands, not when it went up.
+    for (const lot of [...this.rising.keys()]) if (this.city.lots[lot]?.district === district) this.rising.delete(lot);
+    for (const lot of [...this.falling.keys()])
+      if (this.city.lots[lot]?.district === district) this.falling.delete(lot);
     for (const lot of [...this.built.keys()]) {
       if (this.city.lots[lot]?.district === district && !listed.has(lot)) this.set(lot, null);
     }

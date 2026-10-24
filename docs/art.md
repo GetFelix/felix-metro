@@ -27,9 +27,8 @@ Considered and left out:
 - **Nature Kit**: an older, flat-coloured style that does not match the city kits. Trees come from the suburban pack.
 - **Anything not Kenney**: mixing families is how low-poly scenes end up looking like asset flips.
 
-Gaps for later milestones: no buses or trams, no parks furniture beyond parasols,
-no construction states for "building goes up". Kenney's Roads kit has
-construction cones and barriers, which may be enough for M4.
+Gaps for later milestones: no buses or trams, no parks furniture beyond parasols.
+Construction has no models of its own; see [Construction](#construction).
 
 ## Asset pipeline
 
@@ -62,6 +61,24 @@ The app (`web/`) draws the city generated from the seed in the URL hash (`/#harb
 
 The screenshots above are `?t=12&still`, `?t=17.8&still` and `?t=21&still` at
 1600 × 900.
+
+## Construction
+
+A building takes 8 ticks (two seconds at the default speed) to go up or come down, from the tick of its `built` or
+`demolished` event. Both are drawn from the tick on screen alone, so scrubbing plays them backwards.
+
+- **Rising:** the building grows from the ground to its height and a scaffold climbs round it: a square frame of four
+  posts and four rails in warm timber (`0xd9a05b`), 0.94 tiles wide, standing a little taller than the wall and settling
+  to its height as the building tops out. Nothing is left once the 8 ticks are up.
+- **Coming down:** the building shrinks to the ground (from the height it had, when a rise was cut short) while eight
+  tan dust sprites per puff spread and fade over the lot.
+- **Cost:** the frame and the dust are pools made once (8 scaffolds, 3 puffs), nothing is allocated per frame, and a lot
+  past the pool is drawn without. The low tier leaves out the scaffold and the dust and only scales the building.
+
+`web/construction.html` draws one lot at a tick from the URL (`?mode=build|demolish&tick=104&via=forward|seek|back&tier=low`)
+and `web/scripts/check-construction.mjs` compares it with `web/references/construction-rise.png` and
+`construction-fall.png` in CI. They are renders of the page on software GL, so rewrite them with
+`UPDATE_REFERENCES=1 node scripts/check-construction.mjs <url> <out>` after a change to the look.
 
 ## Quality tiers
 

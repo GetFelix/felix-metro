@@ -6,6 +6,7 @@ import type { CityState, TickRecord } from './city';
 import { GatewayError, pastEnd, type Gateway, type Page } from './gateway';
 import { keyframePointer, parse } from './live';
 import { TICKS_PER_HOUR } from './clock';
+import { WINDOW } from './construction';
 
 const STREAM = 'events';
 
@@ -77,6 +78,11 @@ export interface DistrictSeek {
   records: TickRecord[];
   /** The offset of the tick's record: a live subscription resumes at the one after. */
   offset: number;
+  /**
+   * The few records before the keyframe, oldest first, read only when the tick is inside a construction window that
+   * may have begun before the keyframe; empty otherwise. See {@link CityState.recover}.
+   */
+  before: TickRecord[];
 }
 
 export interface SeekResult {
@@ -159,7 +165,7 @@ export class Seeker {
       tick: at,
       requested: tick,
       exact: at === tick,
-      districts: frames.map((f) => ({ records: [f!.record], offset: f!.offset })),
+      districts: frames.map((f) => ({ records: [f!.record], offset: f!.offset, before: [] })),
     };
   }
 
@@ -345,7 +351,32 @@ export class Seeker {
         `district ${d}: the records from the keyframe do not end at tick ${target.record.tick}`,
       );
     }
-    return { records, offset: target.offset };
+    return { records, offset: target.offset, before: await this.lookBack(d, start, keyframe, target.record, signal) };
+  }
+
+  /**
+   * The ticks of the window before a keyframe, for a target so near the keyframe that a building built just before it
+   * is still going up. Only the keyframe's lot diff would otherwise be known, and it has no start tick. A tick further
+   * on, or a read that fails, costs nothing: the lot then draws finished.
+   */
+  private async lookBack(
+    d: number,
+    start: number,
+    keyframe: TickRecord,
+    target: TickRecord,
+    signal: AbortSignal,
+  ): Promise<TickRecord[]> {
+    const from = Math.max(this.oldest[d]!, start - WINDOW);
+    if (target.epoch !== keyframe.epoch || target.tick - keyframe.tick >= WINDOW || from >= start) return [];
+    try {
+      const records = await this.range(d, from, start, signal);
+      return records.filter(
+        (r) => r.epoch === keyframe.epoch && r.tick < keyframe.tick && r.tick > keyframe.tick - WINDOW,
+      );
+    } catch {
+      signal.throwIfAborted();
+      return [];
+    }
   }
 
   /** Retention took the keyframe the record names: the oldest one left. */
@@ -673,6 +704,7 @@ function trim<K, V>(map: Map<K, V>, max: number): void {
  */
 export function fold(state: CityState, seek: SeekResult): void {
   for (const { records } of seek.districts) for (const r of records) state.apply(r, true);
+  for (const { before } of seek.districts) state.recover(before);
   state.ticks.forEach((tick, d) => {
     if (tick !== seek.tick) throw new SeekError('broken', `district ${d} folded to tick ${tick}, not ${seek.tick}`);
   });

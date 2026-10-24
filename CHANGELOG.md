@@ -4,6 +4,13 @@
 
 ### Building
 
+- A building rises over 8 ticks from its `built` tick inside a timber scaffold, and a demolished one
+  scales down under a puff of dust. The picture is a function of the event's tick and the tick on
+  screen, so a rewind plays it backwards and a seek into a window shows the right partial state.
+  A seek within 8 ticks of its keyframe also reads the records before it, since a keyframe lists the
+  finished lot without when it began. The low tier skips the scaffold and the dust. CI renders a lot
+  mid-rise and mid-fall at a fixed tick, by a forward run, a seek and a rewind, and compares them
+  with `web/references/`.
 - The sim reads each city's command stream and applies `build` and `demolish` before
   the next tick. Every command is recorded as a `command` event with a hash of who
   sent it and a result, in the district it touched, beside the `built` or

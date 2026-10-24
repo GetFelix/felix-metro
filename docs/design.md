@@ -416,7 +416,7 @@ One seek runs at a time, always for the newest target, and each result is drawn
 as it completes, so scrubbing faster than a seek takes still shows the city
 moving; a seek is never cancelled by the next move. A target ahead of the city
 on screen in the same hour folds only the records after the last one it holds;
-any move back refolds from the keyframe. The newest record of each district is
+any move back refolds from the keyframe (and so replays a construction backwards). The newest record of each district is
 trusted for a second between seeks. The bar spans the first hour that can be
 started from to the live tip, with days as bands and a tick for every hour.
 Arrow keys step 15 city minutes, `Shift` or the page keys an hour, `Home` goes to
@@ -436,6 +436,16 @@ city's command stream, a gateway `stamp_sender` stream. The sim applies
 commands at the next tick and records the result as a `command` event in the
 district it touched, with a hash of the principal. Every change to the city
 carries who made it, and that is visible on the timeline.
+
+A `built` or `demolished` event is instantaneous in the log. The page spreads it over the next 8 ticks of city time
+(`web/src/construction.ts`): a building rises from nothing inside a scaffold from the event's tick, and a demolished one
+scales down under a puff of dust. What is drawn is a function of the event's tick and the tick on screen, with no
+clock of its own, so a rewind plays it backwards and a seek into the middle of a window shows the right partial state.
+`CityState` keeps the event's tick for every lot inside its window (`rising`, `falling`) and drops it after. A keyframe
+lists only the finished lot, so a seek whose tick is within 8 ticks after its keyframe also reads the 7 records before
+the keyframe, the cheapest way to find a start that came just before it; further on the cost is nothing. The live
+join does not, since it has no earlier tick to compare with: a building that went up just before the keyframe a joining
+page starts from is drawn finished.
 
 Building is only allowed at the live tip. A builder who scrubs back sees the
 past read-only, and building there means forking.
