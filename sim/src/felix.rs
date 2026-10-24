@@ -148,7 +148,7 @@ impl Log for FelixLog {
             ops.push(CommitOp::put(
                 &*self.stream,
                 "keyframe",
-                expected.to_le_bytes().to_vec(),
+                (expected + 1).to_le_bytes().to_vec(),
             ));
         }
         let key = &self.keys[usize::from(district)];
