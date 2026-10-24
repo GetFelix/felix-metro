@@ -60,6 +60,9 @@ jobs:
           ffmpeg -y -ss "$at" -i "metro-$CITY.mp4" -frames:v 1 -q:v 3 "metro-$CITY.jpg"
           ffprobe -v error -show_entries stream=codec_name,profile,width,height,r_frame_rate,pix_fmt,bit_rate:format=duration,size \
             -of default=nw=1 "metro-$CITY.mp4" | tee specs.txt
+      - name: An mp4 was written
+        if: ${{ !inputs.timing && github.event_name != 'push' }}
+        run: test -s "web/clip-out/metro-$CITY.mp4"
       # A few frames to look at without downloading the whole set.
       - name: Pick sample frames
         if: always()
