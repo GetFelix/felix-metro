@@ -22,10 +22,27 @@ describe('sample', () => {
     expect(near!).toBeLessThan(0.1);
   });
 
-  it('keeps moving past a middle key instead of stopping on it', () => {
-    const before = sample(keys, 990)[1]!;
-    const after = sample(keys, 1010)[1]!;
-    expect(after - before).toBeGreaterThan(0.1);
+  it('keeps moving past a middle key that is on the way somewhere', () => {
+    const rising: Key[] = [
+      { t: 0, v: [0] },
+      { t: 1000, v: [5] },
+      { t: 2000, v: [10] },
+    ];
+    expect(sample(rising, 1010)[0]! - sample(rising, 990)[0]!).toBeGreaterThan(0.05);
+  });
+
+  it('never goes past its keys, so a camera does not dip under the ground', () => {
+    const swing: Key[] = [
+      { t: 0, v: [1] },
+      { t: 1000, v: [0.5] },
+      { t: 1500, v: [9] },
+      { t: 3000, v: [9] },
+    ];
+    for (let t = 0; t <= 3000; t += 10) {
+      const v = sample(swing, t)[0]!;
+      expect(v).toBeGreaterThanOrEqual(0.5 - 1e-9);
+      expect(v).toBeLessThanOrEqual(9 + 1e-9);
+    }
   });
 
   it('is monotonic between keys that rise', () => {

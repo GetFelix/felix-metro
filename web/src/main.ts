@@ -35,7 +35,7 @@ declare global {
       /** Trips from the log that matched no route of their resident; zero when the sim and this page agree. */
       unplaced: number;
       /** Where each car and walker drawn now stands, in tiles from the middle of the map. */
-      where(): { resident: number; car: boolean; x: number; z: number }[];
+      where(): { resident: number; car: boolean; x: number; z: number; heading: number }[];
       /** Put the camera low beside the first car drawn. */
       closeUp(): boolean;
     };
@@ -109,6 +109,8 @@ interface CaptureFrame {
   walkersInView: number;
   /** Draw calls, triangles and shader programs of the last draw, and the ms the GPU took to finish it. */
   gpu: { calls: number; triangles: number; programs: number; finishMs: number };
+  /** Where the ms of this frame went: waiting for the sim, drawing, and turning the canvas into a picture. */
+  spent: { waitMs: number; drawMs: number; imageMs: number };
 }
 
 /** Whether the connection is down; the clock runs on its own meanwhile. */
@@ -653,6 +655,7 @@ async function main() {
   function frame() {
     const now = performance.now();
     draw(now, now - last, still ? 0 : Math.min(clock.getDelta(), 0.05));
+    requestAnimationFrame(frame);
   }
   /** Draw one frame `dt` seconds on from the last. */
   function draw(now: number, frameMs: number, dt: number, paint = true) {
@@ -698,14 +701,15 @@ async function main() {
       const { textures, geometries } = renderer.info.memory;
       memory.push({ tier: quality.tier, textures, geometries });
     }
-    requestAnimationFrame(frame);
   }
   /** The clip script's way in: one frame at a time at a video time, the camera and the tick following the path it set. */
   function captureApi(): NonNullable<Window['__capture']> {
     let path: Path = { position: [], target: [], ticks: [] };
     let base: number | null = null;
     let lastMs: number | null = null;
+    let held: { x: number; z: number } | null = null;
     let still: HTMLImageElement | null = null;
+    const picture = new URLSearchParams(location.search).has('picture');
     const view = new THREE.Vector3();
     const inView = (x: number, z: number) => {
       view.set(x, 0.1, z).project(camera);
@@ -717,10 +721,43 @@ async function main() {
         path = next;
       },
       async frame(tMs) {
+        const began = performance.now();
         await scrubSettled();
         const [cam, aim] = [sample(path.position, tMs), sample(path.target, tMs)];
         if (cam.length) camera.position.set(cam[0]!, cam[1]!, cam[2]!);
         if (aim.length) controls.target.set(aim[0]!, aim[1]!, aim[2]!);
+        const follow = path.follow;
+        if (follow && tMs < follow.until && traffic) {
+          let cars = traffic.where().filter((w) => w.car);
+          let lead = cars.find((w) => w.resident === follow.resident);
+          if (!lead && held) {
+            // The car has arrived; carry on behind the nearest one to where the camera was.
+            const near = cars.sort(
+              (a, b) => Math.hypot(a.x - held!.x, a.z - held!.z) - Math.hypot(b.x - held!.x, b.z - held!.z),
+            )[0];
+            if (near && Math.hypot(near.x - held.x, near.z - held.z) < 6) follow.resident = (lead = near).resident;
+          }
+          if (lead) {
+            const [fx, fz] = [Math.sin(lead.heading), Math.cos(lead.heading)];
+            const back = follow.back + (follow.backEnd - follow.back) * Math.min(1, tMs / follow.until);
+            held = { x: lead.x, z: lead.z };
+            const w = Math.min(1, Math.max(0, (follow.until - tMs) / follow.blend));
+            const e = w * w * (3 - 2 * w);
+            const mix = (a: number, b: number) => b + (a - b) * e;
+            const own = [lead.x - fx * back + fz * follow.side, follow.up, lead.z - fz * back - fx * follow.side];
+            const look = [lead.x + fx * follow.ahead, 0.25, lead.z + fz * follow.ahead];
+            camera.position.set(
+              mix(own[0]!, camera.position.x),
+              mix(own[1]!, camera.position.y),
+              mix(own[2]!, camera.position.z),
+            );
+            controls.target.set(
+              mix(look[0]!, controls.target.x),
+              mix(look[1]!, controls.target.y),
+              mix(look[2]!, controls.target.z),
+            );
+          }
+        }
         captureTick = null;
         if (pastTick === null && liveState && path.ticks.length) {
           base ??= Math.floor(liveState.latest) - 1;
@@ -732,24 +769,28 @@ async function main() {
           }
           captureTick = want;
         }
+        const waited = performance.now();
         const dt = lastMs === null ? 0 : Math.max(0, (tMs - lastMs) / 1000);
         lastMs = tMs;
         draw(performance.now(), 1000 / 30, dt, false);
         // Cars and walkers get their models a share a frame; update on, without drawing, until all of them have one.
         for (let i = 0; i < 600 && traffic && traffic.waiting > 0; i++) draw(performance.now(), 0, 0, false);
         draw(performance.now(), 0, 0);
-        // A screenshot of a WebGL canvas waits on the compositor, which software GL makes take minutes. The canvas is read
-        // out now and shown as a picture under the overlay, so the page can be screenshotted without it.
+        // With ?picture the canvas is read out now and shown as a picture under the overlay, for a machine whose GL is
+        // software and too slow to screenshot.
         const canvas = renderer.domElement;
+        const drawn = performance.now();
         const finishAt = performance.now();
-        renderer.getContext().finish();
         const finishMs = performance.now() - finishAt;
-        still ??= document.createElement('img');
-        still.style.cssText = 'position:absolute;top:0;left:0;display:block;z-index:0;width:100vw;height:100vh';
-        still.src = canvas.toDataURL('image/jpeg', 0.95);
-        await still.decode();
-        if (!still.isConnected) canvas.after(still);
-        canvas.style.visibility = 'hidden';
+        if (picture) {
+          still ??= document.createElement('img');
+          still.style.cssText = 'position:absolute;top:0;left:0;display:block;z-index:0;width:100vw;height:100vh';
+          still.src = canvas.toDataURL('image/jpeg', 0.95);
+          await still.decode();
+          if (!still.isConnected) canvas.after(still);
+          canvas.style.visibility = 'hidden';
+        }
+        const imaged = performance.now();
         const where = traffic?.where() ?? [];
         const cars = where.filter((w) => w.car);
         const walkers = where.filter((w) => !w.car);
@@ -760,6 +801,7 @@ async function main() {
           walkers: walkers.length,
           carsInView: cars.filter((w) => inView(w.x, w.z)).length,
           walkersInView: walkers.filter((w) => inView(w.x, w.z)).length,
+          spent: { waitMs: waited - began, drawMs: drawn - waited, imageMs: imaged - drawn },
           gpu: {
             calls: renderer.info.render.calls,
             triangles: renderer.info.render.triangles,
@@ -776,8 +818,6 @@ async function main() {
   if (city && !still && frozenHour === null && !reduced && !capture)
     intro = startIntro(camera, controls, performance.now());
   if (capture) {
-    camera.near = 0.02;
-    camera.updateProjectionMatrix();
     controls.enabled = false;
     window.__capture = captureApi();
     draw(performance.now(), 0, 0);

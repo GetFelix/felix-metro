@@ -14,7 +14,7 @@ import { chromium } from 'playwright';
 
 const [base, city, secondsArg, out] = process.argv.slice(2);
 if (!out) throw new Error('usage: clip.mjs <page url> <city> <seconds> <out dir>');
-const SECONDS = Math.max(12, Number(secondsArg) || 30);
+const SECONDS = Math.max(Number(process.env.CLIP_MIN_SECONDS ?? 12), Number(secondsArg) || 30);
 const FPS = 30;
 const [W, H] = [1600, 900];
 const TIER = process.env.CLIP_TIER ?? 'medium';
@@ -25,8 +25,24 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const frames = join(out, 'frames');
 mkdirSync(frames, { recursive: true });
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
-const speed = (v) => execFileSync(join(root, 'dev', 'speed.sh'), [city, String(v)], { encoding: 'utf8' }).trim();
-const GPU = ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'];
+// CLIP_SPEED_CMD names another way to set the sim's speed (called with the city and the speed), for a stack that is not
+// dev/compose.yml. CLIP_BROWSER=msedge (or chrome) draws on the machine's GPU in a visible window; by default the
+// bundled Chromium draws in software, as on a CI runner.
+const speedCmd = process.env.CLIP_SPEED_CMD ? process.env.CLIP_SPEED_CMD.split(' ') : [join(root, 'dev', 'speed.sh')];
+const speed = (v) => execFileSync(speedCmd[0], [...speedCmd.slice(1), city, String(v)], { encoding: 'utf8' }).trim();
+const channel = process.env.CLIP_BROWSER || undefined;
+const GPU = channel ? [] : ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'];
+const launch = () =>
+  chromium.launch({
+    channel,
+    headless: !channel,
+    args: [
+      ...GPU,
+      '--disable-backgrounding-occluded-windows',
+      '--disable-renderer-backgrounding',
+      '--disable-background-timer-throttling',
+    ],
+  });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // CLIP_TIMING=1 only times a few frames at each tier, to see which one a runner can draw.
@@ -37,7 +53,7 @@ if (process.env.CLIP_TIMING) {
     ['low', W, H, 6],
     ['medium', 800, 450, 4],
   ]) {
-    const b = await chromium.launch({ args: GPU });
+    const b = await launch();
     const p = await b.newPage({ viewport: { width: w, height: h }, deviceScaleFactor: 1 });
     await p.goto(`${base}/?tier=${tier}&capture&trace#${city}`, { waitUntil: 'load', timeout: 300_000 });
     await p.waitForFunction(() => window.__capture && Number.isFinite(window.__live?.tick), null, {
@@ -58,48 +74,56 @@ if (process.env.CLIP_TIMING) {
   process.exit(0);
 }
 
-// 1. Run the sim to the start of the rush, counting what is on the road on the way, then hold it there.
-const probeBrowser = await chromium.launch({ args: GPU });
-const probe = await probeBrowser.newPage({ viewport: { width: 480, height: 270 } });
-await probe.goto(`${base}/?tier=low&trace#${city}`, { waitUntil: 'load', timeout: 300_000 });
-await probe.waitForFunction(() => Number.isFinite(window.__live?.tick), null, { polling: 250, timeout: 300_000 });
-const first = await probe.evaluate(() => window.__live.tick);
-const startTick = Math.ceil((first - START_HOUR * 240) / TICKS_PER_DAY) * TICKS_PER_DAY + Math.round(START_HOUR * 240);
-log(`city at tick ${Math.floor(first)}, the clip starts at tick ${startTick}`);
-speed(16);
-const byHour = {};
-for (;;) {
-  const s = await probe.evaluate(() => {
-    const w = window.__live.where();
-    return { tick: window.__live.tick, cars: w.filter((x) => x.car).length, walkers: w.filter((x) => !x.car).length };
-  });
-  const hour = Math.floor((s.tick % TICKS_PER_DAY) / 240);
-  const h = (byHour[hour] ??= { samples: 0, carsMax: 0, carsSum: 0, walkersMax: 0, walkersSum: 0 });
-  h.samples++;
-  h.carsMax = Math.max(h.carsMax, s.cars);
-  h.carsSum += s.cars;
-  h.walkersMax = Math.max(h.walkersMax, s.walkers);
-  h.walkersSum += s.walkers;
-  if (s.tick >= startTick - 6) break;
-  await sleep(250);
+// 1. Run the sim to the start of the rush, counting what is on the road on the way, then hold it there. CLIP_NOW=1 skips
+// this and starts wherever the sim is, to try a camera path.
+if (!process.env.CLIP_NOW) {
+  const probeBrowser = await launch();
+  const probe = await probeBrowser.newPage({ viewport: { width: 480, height: 270 } });
+  await probe.goto(`${base}/?tier=low&trace#${city}`, { waitUntil: 'load', timeout: 300_000 });
+  await probe.waitForFunction(() => Number.isFinite(window.__live?.tick), null, { polling: 250, timeout: 300_000 });
+  const first = await probe.evaluate(() => window.__live.tick);
+  const startTick =
+    Math.ceil((first - START_HOUR * 240) / TICKS_PER_DAY) * TICKS_PER_DAY + Math.round(START_HOUR * 240);
+  log(`city at tick ${Math.floor(first)}, the clip starts at tick ${startTick}`);
+  speed(16);
+  const byHour = {};
+  for (;;) {
+    const s = await probe.evaluate(() => {
+      const w = window.__live.where();
+      return { tick: window.__live.tick, cars: w.filter((x) => x.car).length, walkers: w.filter((x) => !x.car).length };
+    });
+    const hour = Math.floor((s.tick % TICKS_PER_DAY) / 240);
+    const h = (byHour[hour] ??= { samples: 0, carsMax: 0, carsSum: 0, walkersMax: 0, walkersSum: 0 });
+    h.samples++;
+    h.carsMax = Math.max(h.carsMax, s.cars);
+    h.carsSum += s.cars;
+    h.walkersMax = Math.max(h.walkersMax, s.walkers);
+    h.walkersSum += s.walkers;
+    if (s.tick >= startTick - 6) break;
+    await sleep(250);
+  }
+  speed(0);
+  writeFileSync(join(out, 'density.json'), JSON.stringify(byHour, null, 1));
+  log('cars and walkers drawn by hour (max over samples):');
+  for (const [hour, h] of Object.entries(byHour))
+    log(`  ${hour.padStart(2)}:00  cars ${h.carsMax}  walkers ${h.walkersMax}  (${h.samples} samples)`);
+  await probeBrowser.close();
+  await sleep(3000);
 }
-speed(0);
-writeFileSync(join(out, 'density.json'), JSON.stringify(byHour, null, 1));
-log('cars and walkers drawn by hour (max over samples):');
-for (const [hour, h] of Object.entries(byHour))
-  log(`  ${hour.padStart(2)}:00  cars ${h.carsMax}  walkers ${h.walkersMax}  (${h.samples} samples)`);
-await probeBrowser.close();
-await sleep(3000);
 
 // 2. The capture page, opened with the sim held, so its first tick is the start of the rush.
-const browser = await chromium.launch({ args: GPU });
+const browser = await launch();
 const page = await browser.newPage({ viewport: { width: W, height: H }, deviceScaleFactor: 1 });
 const errors = [];
 page.on('pageerror', (e) => errors.push(String(e)));
 page.on('console', (m) => {
-  if (m.type() === 'error') errors.push(`console.error: ${m.text()}`);
+  // A missing icon is not worth stopping a recording for; it is logged.
+  if (m.type() === 'error') log(`console.error: ${m.text()}`);
 });
-await page.goto(`${base}/?tier=${TIER}&capture&trace#${city}`, { waitUntil: 'load', timeout: 300_000 });
+await page.goto(`${base}/?tier=${TIER}&capture&trace${process.env.CLIP_PICTURE ? '&picture' : ''}#${city}`, {
+  waitUntil: 'load',
+  timeout: 300_000,
+});
 await page.waitForFunction(() => window.__capture && Number.isFinite(window.__live?.tick), null, {
   polling: 250,
   timeout: 300_000,
@@ -133,34 +157,25 @@ const dist0 = Math.hypot(11.1, 12.2) * sp;
 // Frame 0 is drawn from the default view, to see where the cars are.
 const f0 = await capture(0);
 const cars = await page.evaluate(() => window.__live.where().filter((w) => w.car));
-// The busiest spot is the car with the most others within four tiles.
+// The busiest spot is the car with the most others within four tiles; the camera stands on the road behind it.
 let best = null;
 for (const c of cars) {
   const near = cars.filter((o) => Math.hypot(o.x - c.x, o.z - c.z) < 4);
   if (!best || near.length > best.near.length) best = { c, near };
 }
-const spot = best
-  ? {
-      x: best.near.reduce((a, o) => a + o.x, 0) / best.near.length,
-      z: best.near.reduce((a, o) => a + o.z, 0) / best.near.length,
-    }
-  : { x: 0, z: 0 };
+const lead = best?.c ?? { x: 0, z: 0, heading: 0 };
 log(
-  `frame 0: tick ${Math.floor(f0.tick)} ${f0.clock}, ${f0.cars} cars and ${f0.walkers} walkers drawn, busiest spot (${spot.x.toFixed(1)}, ${spot.z.toFixed(1)}) with ${best?.near.length ?? 0} cars within 4 tiles`,
+  `frame 0: tick ${Math.floor(f0.tick)} ${f0.clock}, ${f0.cars} cars and ${f0.walkers} walkers drawn, the camera follows the road behind (${lead.x.toFixed(1)}, ${lead.z.toFixed(1)}) with ${best?.near.length ?? 0} cars within 4 tiles`,
 );
 
 const path = {
   position: [
-    { t: 0, v: [spot.x + 3.4, 1.7, spot.z + 3.4] },
-    { t: ms(T.rush), v: [spot.x + 2.4, 1.2, spot.z + 2.6] },
-    { t: ms(T.rush + 1.5 * k), v: orbit(az0 - 0.45, dist0 * 0.8, 7 * sp) },
+    { t: ms(T.rush + 0.5 * k), v: orbit(az0 - 0.45, dist0 * 0.8, 7 * sp) },
     { t: ms(T.dusk), v: orbit(az0 + 0.25, dist0 * 0.95, 9 * sp) },
     { t: ms(T.live), v: orbit(az0 + 0.5, dist0 * 1.0, 9.6 * sp) },
   ],
   target: [
-    { t: 0, v: [spot.x, 0.2, spot.z] },
-    { t: ms(T.rush), v: [spot.x, 0.2, spot.z] },
-    { t: ms(T.rush + 1.5 * k), v: [0, 0, 0] },
+    { t: ms(T.rush + 0.5 * k), v: [0, 0, 0] },
     { t: ms(T.live), v: [0, 0, 0] },
   ],
   // City minutes the video covers: the rush at about three ticks a second, then the evening in a rush to the lights.
@@ -171,6 +186,16 @@ const path = {
     { t: ms(T.dusk), v: [470] },
     { t: ms(T.live), v: [470] },
   ],
+};
+path.follow = {
+  resident: lead.resident,
+  back: 3.4,
+  backEnd: 1.8,
+  up: 0.8,
+  side: 0.3,
+  ahead: 3,
+  until: ms(T.rush + 0.5 * k),
+  blend: ms(1.5 * k),
 };
 await page.evaluate((p) => window.__capture.setPath(p), path);
 
@@ -191,6 +216,7 @@ const step = async (until, extra) => {
   for (; t <= ms(until); t += 1000 / FPS) {
     const info = await capture(Math.round(t), extra);
     note(t, info);
+    if (n % 30 === 0) log(`spent ${JSON.stringify(info.spent)}`);
     if (n % 30 === 0)
       log(
         `frame ${n}, video ${(t / 1000).toFixed(1)} s, ${((Date.now() - started) / n / 1000).toFixed(2)} s a frame, ${info.clock}, ${info.carsInView} cars in view`,

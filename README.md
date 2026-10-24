@@ -11,8 +11,8 @@ and play forward from there.
 > [docs/design.md](docs/design.md) and the work is tracked in
 > [milestones](https://github.com/GetFelix/felix-metro/milestones).
 
-| Day | Night |
-|---|---|
+| Day                                                                          | Night                                                                           |
+| ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
 | ![Felix Metro style frame at noon](docs/screenshots/style-frame-day.jpg?v=2) | ![Felix Metro style frame at night](docs/screenshots/style-frame-night.jpg?v=2) |
 
 ## What you will be able to do
@@ -26,16 +26,16 @@ and play forward from there.
 
 ## Felix features it uses
 
-| Need | Felix feature |
-|---|---|
-| A district's history, in order | A durable stream, one shard per district |
-| Each tick written atomically, with its offset | `commit` |
-| Only one simulation writes a city | `publish_if` / `commit` expected offset |
-| The newest keyframe | Stream state (`state_get`) |
-| Loading a past moment | Bounded range reads (`read`) |
-| Playing forward into live | Subscribe from an offset, with no gap |
-| Browsers | [felix-gateway](https://github.com/GetFelix/felix-gateway) |
-| Who built what | Sender stamp on the command stream |
+| Need                                          | Felix feature                                              |
+| --------------------------------------------- | ---------------------------------------------------------- |
+| A district's history, in order                | A durable stream, one shard per district                   |
+| Each tick written atomically, with its offset | `commit`                                                   |
+| Only one simulation writes a city             | `publish_if` / `commit` expected offset                    |
+| The newest keyframe                           | Stream state (`state_get`)                                 |
+| Loading a past moment                         | Bounded range reads (`read`)                               |
+| Playing forward into live                     | Subscribe from an offset, with no gap                      |
+| Browsers                                      | [felix-gateway](https://github.com/GetFelix/felix-gateway) |
+| Who built what                                | Sender stamp on the command stream                         |
 
 ## How it works
 
@@ -52,16 +52,16 @@ there. [docs/design.md](docs/design.md) has the details.
 
 ## Status
 
-| M | Milestone | State |
-|---|---|---|
-| 0 | The look, locked | Planned |
-| 1 | A live city | Done |
-| 2 | Time travel | In progress: keyframes, seeking and the timeline scrubber done |
-| 3 | Follow a life | Planned |
-| 4 | Build | Planned |
-| 5 | Branching timelines | Planned |
-| 6 | Scale and failover | Planned |
-| 7 | Self-hosting | Planned |
+| M   | Milestone           | State                                                          |
+| --- | ------------------- | -------------------------------------------------------------- |
+| 0   | The look, locked    | Planned                                                        |
+| 1   | A live city         | Done                                                           |
+| 2   | Time travel         | In progress: keyframes, seeking and the timeline scrubber done |
+| 3   | Follow a life       | Planned                                                        |
+| 4   | Build               | Planned                                                        |
+| 5   | Branching timelines | Planned                                                        |
+| 6   | Scale and failover  | Planned                                                        |
+| 7   | Self-hosting        | Planned                                                        |
 
 What runs today: the sim, the dev stack and a browser page that shows a city live, with
 cars and walkers moving in time with the sim and the sun following the tick. The page
@@ -75,13 +75,27 @@ building are not built yet.
 
 ## Recording the clip
 
-The Clip workflow (`.github/workflows/clip.yml`, run by hand) brings up the dev stack,
-runs the sim to the evening rush and draws the city one frame at a time at 1600 × 900,
-30 fps: the street at rush hour, the evening coming on, the timeline dragged back to the
-morning and, once Play is in the page, played forward and back to live. ffmpeg turns the
-frames into an mp4 and posters, uploaded with `density.json` and `shots.csv`, which count
-the cars and walkers drawn. `cargo run --release --example density -- harbor 2` in
-`core/` prints the same from the schedules alone.
+`web/scripts/clip-local.mjs` records it on this machine's GPU. It takes the backend from a
+release bundle in Podman (nothing is built), serves this checkout's page with Vite, draws
+the city in a visible Edge window one frame at a time and encodes the frames with ffmpeg:
+
+```
+cd web && npm run core
+node scripts/clip-local.mjs harbor 30 ~/clips      # city, seconds, output directory
+CLIP_SIM=native node scripts/clip-local.mjs ...    # this checkout's sim in place of the bundle's image
+```
+
+The page draws frame by frame only under `?capture&trace`, with the camera and the city's
+tick following a path the script sets, so the clip is smooth however long a frame takes. The
+shots are the street at rush hour, the evening coming on, the timeline dragged back to the
+morning and, once the page has Play, played forward and back to live (skipped with a log
+line until then). `density.json` and `shots.csv` count the cars and walkers drawn. Everything
+the script starts is stopped when it ends. The sim has to be native (`CLIP_SIM=native`)
+for any sim change that is not in the release bundle's image.
+
+The Clip workflow (`.github/workflows/clip.yml`, run by hand) does the same on a CI runner in
+software GL, as a fallback; it fails when no mp4 is written. `cargo run --release --example
+density -- harbor 2` in `core/` prints the cars and walkers on the road from the schedules alone.
 
 ## Install a release
 

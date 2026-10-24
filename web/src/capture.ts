@@ -26,13 +26,22 @@ export function sample(keys: readonly Key[], t: number): number[] {
   const s2 = s * s;
   const s3 = s2 * s;
   return a.v.map((_, k) => {
-    // Tangents by central difference; zero at the two ends.
-    const ma = i === 0 ? 0 : (b.v[k]! - keys[i - 1]!.v[k]!) / (b.t - keys[i - 1]!.t);
-    const mb = i + 2 >= keys.length ? 0 : (keys[i + 2]!.v[k]! - a.v[k]!) / (keys[i + 2]!.t - a.t);
+    const ma = i === 0 ? 0 : tangent(keys[i - 1]!, a, b, k);
+    const mb = i + 2 >= keys.length ? 0 : tangent(a, b, keys[i + 2]!, k);
     return (
       (2 * s3 - 3 * s2 + 1) * a.v[k]! + (s3 - 2 * s2 + s) * h * ma + (-2 * s3 + 3 * s2) * b.v[k]! + (s3 - s2) * h * mb
     );
   });
+}
+
+/**
+ * The slope through `mid` of component `k`: zero where the track turns around and the harmonic mean of the two slopes
+ * otherwise, so the curve never overshoots a key. A camera that swings past its mark dips under the ground.
+ */
+function tangent(before: Key, mid: Key, after: Key, k: number): number {
+  const d0 = (mid.v[k]! - before.v[k]!) / (mid.t - before.t);
+  const d1 = (after.v[k]! - mid.v[k]!) / (after.t - mid.t);
+  return d0 * d1 <= 0 ? 0 : (2 * d0 * d1) / (d0 + d1);
 }
 
 /** What the script gives the page: where the camera stands and looks, and how many ticks past the first frame's the city is. */
@@ -40,4 +49,19 @@ export interface Path {
   position: Key[];
   target: Key[];
   ticks: Key[];
+  /**
+   * Hold the camera behind a car instead of on the keyed path until `until`, then hand over to the path over `blend` ms.
+   * `back` (closing to `backEnd` by `until`), `up` and `side` are tiles behind the car, above the road and to its right; `ahead` is how far in front the
+   * camera looks. The car handed over to is the nearest one when its own trip ends.
+   */
+  follow?: {
+    resident: number;
+    back: number;
+    backEnd: number;
+    up: number;
+    side: number;
+    ahead: number;
+    until: number;
+    blend: number;
+  };
 }

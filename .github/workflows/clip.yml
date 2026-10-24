@@ -3,8 +3,6 @@ name: Clip
 # Records the clip for getfelix.dev: the dev stack runs, the page draws the city one frame at a time (web/scripts/clip.mjs)
 # and ffmpeg encodes the frames. The mp4 and its posters are in the artifact, with the density numbers of the run.
 on:
-  push:
-    branches: [clip]
   workflow_dispatch:
     inputs:
       city:
@@ -32,7 +30,9 @@ jobs:
       CITY: ${{ inputs.city || 'harbor' }}
       LENGTH: ${{ inputs.length || '30' }}
       CLIP_TIER: ${{ inputs.tier || 'medium' }}
-      CLIP_TIMING: ${{ (inputs.timing || github.event_name == 'push') && '1' || '' }}
+      # Software GL is slow to screenshot, so the page hands the canvas over as a picture.
+      CLIP_PICTURE: '1'
+      CLIP_TIMING: ${{ inputs.timing && '1' || '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -49,19 +49,19 @@ jobs:
           npx playwright install --with-deps chromium
           node scripts/clip.mjs 'http://127.0.0.1:8088' "$CITY" "$LENGTH" clip-out
       - name: Encode
-        if: ${{ !inputs.timing && github.event_name != 'push' }}
+        if: ${{ !inputs.timing }}
         working-directory: web/clip-out
         run: |
           command -v ffmpeg >/dev/null || sudo apt-get install -y ffmpeg
-          at="$(node -p "require('./meta.json').posterAt / 1000")"
-          ffmpeg -y -framerate 30 -i frames/f%05d.jpg -c:v libx264 -profile:v high -pix_fmt yuv420p \
+          at="$(node -p "require('./meta.json').posterAt")"
+          ffmpeg -y -framerate 30 -i frames/f%05d.jpg -vf scale=in_range=pc:out_range=tv,format=yuv420p -c:v libx264 -profile:v high \
             -crf 22 -preset slow -movflags +faststart -an "metro-$CITY.mp4"
           ffmpeg -y -ss "$at" -i "metro-$CITY.mp4" -frames:v 1 -c:v libwebp -quality 82 "metro-$CITY.webp"
           ffmpeg -y -ss "$at" -i "metro-$CITY.mp4" -frames:v 1 -q:v 3 "metro-$CITY.jpg"
           ffprobe -v error -show_entries stream=codec_name,profile,width,height,r_frame_rate,pix_fmt,bit_rate:format=duration,size \
             -of default=nw=1 "metro-$CITY.mp4" | tee specs.txt
       - name: An mp4 was written
-        if: ${{ !inputs.timing && github.event_name != 'push' }}
+        if: ${{ !inputs.timing }}
         run: test -s "web/clip-out/metro-$CITY.mp4"
       # A few frames to look at without downloading the whole set.
       - name: Pick sample frames
