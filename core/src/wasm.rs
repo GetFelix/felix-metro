@@ -111,10 +111,13 @@ impl Metro {
         } else {
             crate::Mode::Drive
         };
-        let trip = known.as_ref()?.trip_from_route(city, depart, &legs, mode)?;
+        let (trip, from_lot, to_lot) = known
+            .as_ref()?
+            .trip_between_lots(city, depart, &legs, mode)?;
         Some(Journey {
             city: Rc::clone(&self.city),
             trip,
+            lots: [from_lot, to_lot],
         })
     }
 }
@@ -124,6 +127,7 @@ impl Metro {
 pub struct Journey {
     city: Rc<crate::City>,
     trip: crate::Trip,
+    lots: [u32; 2],
 }
 
 #[wasm_bindgen]
@@ -131,6 +135,14 @@ impl Journey {
     /// The tick the trip ends.
     pub fn arrive(&self) -> u32 {
         self.trip.arrive()
+    }
+
+    /// Writes the ids of the lot the trip leaves and the lot it enters into `out`.
+    pub fn lots(&self, out: &mut [u32]) {
+        if let [from, to, ..] = out {
+            *from = self.lots[0];
+            *to = self.lots[1];
+        }
     }
 
     /// Writes thousandths of a tile from the city's north-west corner, x then z, into `out`.

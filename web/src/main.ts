@@ -394,7 +394,8 @@ async function main() {
   };
   /** The state the live connection feeds, which keeps taking records while the page is held in the past. */
   const liveState = state;
-  const traffic = state && fleet ? new Traffic(fleet, city ? (city.tiles - 1) / 2 : 0) : null;
+  const traffic =
+    state && fleet ? new Traffic(fleet, city ? (city.tiles - 1) / 2 : 0, undefined, city?.lots ?? []) : null;
   if (traffic) traffic.cap = settingsFor(quality.tier).movers;
   if (state && traffic) {
     // The sun follows the tick the page draws, so the slider is only a readout.
