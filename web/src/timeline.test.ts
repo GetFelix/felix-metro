@@ -215,7 +215,7 @@ describe('the days the bar labels', () => {
     const span = barSpan(guessOldest(tip), tip);
     expect(span.oldest).toBe(0);
     expect(liveFraction(span.oldest, tip)).toBeCloseTo(4100 / TICKS_PER_DAY);
-    expect(dayBands(span)[0].day).toBe(1);
+    expect(dayBands(span)[0]?.day).toBe(1);
     const late = 9600;
     const s2 = barSpan(guessOldest(late), late);
     expect(s2.live).toBe(s2.newest);

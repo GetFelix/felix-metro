@@ -822,7 +822,13 @@ async function main() {
       syncRefresh(bar.dragging || inPast);
       const at = Math.min(scrubTarget ?? pastTick ?? tick, tip);
       if (usable)
-        bar.update({ ready: range !== null, oldest: range?.oldest ?? guessOldest(tip), newest: tip, at, live: !inPast });
+        bar.update({
+          ready: range !== null,
+          oldest: range?.oldest ?? guessOldest(tip),
+          newest: tip,
+          at,
+          live: !inPast,
+        });
       if (inPast !== wasPast) {
         const first = wasPast === null;
         wasPast = inPast;
