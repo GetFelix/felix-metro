@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### The page
+
+- Timeline: label the days the bar shows. Until the retained range was read (it is read on hover), the bar started
+  one tick before the live tip, so the live head sat at the left edge and the bands were labelled from the tip's
+  day on. The bar now starts a day behind the tip until the range is read, so the live head sits at its place on the scale.
+
 ## [0.2.1] - 2026-10-24
 
 ### The city
