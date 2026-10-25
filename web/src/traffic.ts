@@ -115,12 +115,13 @@ export class Traffic {
   }
 
   /** Where each model in use stands, in tiles from the middle of the map. */
-  where(): { resident: number; car: boolean; x: number; z: number }[] {
+  where(): { resident: number; car: boolean; x: number; z: number; heading: number }[] {
     return [...this.slots].map(([resident, { figure, kind }]) => ({
       resident,
       car: kind !== 'walk',
       x: figure.o.position.x,
       z: figure.o.position.z,
+      heading: figure.o.rotation.y,
     }));
   }
 

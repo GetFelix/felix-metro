@@ -17,7 +17,14 @@ describe('parseParams', () => {
       gateway: null,
       at: null,
       trace: false,
+      capture: false,
     });
+  });
+
+  it('hands the render clock to the clip script only together with ?trace', () => {
+    expect(parseParams('?capture&trace').capture).toBe(true);
+    expect(parseParams('?capture').capture).toBe(false);
+    expect(parseParams('?trace').capture).toBe(false);
   });
 
   it('follows the gateway unless told not to, and takes another gateway’s address', () => {
