@@ -122,6 +122,8 @@ declare global {
       tiles: number;
       /** Where the camera stands and looks and how far the tick runs, by video time in ms. */
       setPath(path: Path): void;
+      /** The newest tick the live city has reached, however far the clip has drawn. */
+      latest(): number;
       /** Draw the frame at video time `tMs` and say what is in it. */
       frame(tMs: number): Promise<CaptureFrame>;
     };
@@ -1056,6 +1058,7 @@ async function main() {
       setPath(next) {
         path = next;
       },
+      latest: () => liveState?.latest ?? NaN,
       async frame(tMs) {
         const began = performance.now();
         await scrubSettled();
@@ -1096,7 +1099,7 @@ async function main() {
         }
         captureTick = null;
         if (pastTick === null && liveState && path.ticks.length) {
-          base ??= Math.floor(liveState.latest) - 1;
+          base ??= path.base ?? Math.floor(liveState.latest) - 1;
           const want = base + sample(path.ticks, tMs)[0]!;
           // The sim runs ahead of the clip; if it has not got there yet, wait for it rather than draw a gap.
           for (let waited = 0; liveState.latest < want + 1; waited += 25) {

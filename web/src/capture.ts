@@ -49,6 +49,8 @@ export interface Path {
   position: Key[];
   target: Key[];
   ticks: Key[];
+  /** The tick that a `ticks` value of 0 stands for; by default the live city's newest when the first frame is drawn. */
+  base?: number;
   /**
    * Hold the camera behind a car instead of on the keyed path until `until`, then hand over to the path over `blend` ms.
    * `back` (closing to `backEnd` by `until`), `up` and `side` are tiles behind the car, above the road and to its right; `ahead` is how far in front the
