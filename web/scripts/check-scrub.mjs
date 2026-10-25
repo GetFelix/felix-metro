@@ -92,8 +92,18 @@ await page.goto(`${appUrl}#harbor`, { waitUntil: 'load', timeout: 5 * MINUTE });
 await page
   .waitForFunction(() => window.__ready === true && window.__metro, null, { polling: 250, timeout: 5 * MINUTE })
   .catch(() => fail('the page never became ready'));
-// Until the bar is reached for, its scale comes from the tip alone. It must hold still from the first frame: the
-// oldest end fixed, the bar never hidden and shown again.
+// Until the bar is reached for, its scale comes from the tip alone. It must hold still from the frame it first shows:
+// the oldest end fixed, the bar never hidden again. It stays hidden until every district has a tick.
+await page
+  .waitForFunction(
+    () => {
+      const bar = document.getElementById('scrub');
+      return !bar.classList.contains('hidden') && bar.style.getPropertyValue('--oldest') !== '';
+    },
+    null,
+    { polling: 50, timeout: 2 * MINUTE },
+  )
+  .catch(() => fail('the bar never showed'));
 const scale = await page.evaluate(
   () =>
     new Promise((resolve) => {

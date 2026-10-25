@@ -42,8 +42,8 @@ export const guessOldest = (tip: number): number => Math.max(0, tip - MIN_SPAN);
 
 /**
  * The guess held still: the oldest end is fixed from the first tip seen, so the scale does not slide with every tick
- * the tip moves while nobody has read the range. It starts over only when the tip leaves the day the guess covers
- * (the city restarted, or the tip jumped).
+ * the tip moves while nobody has read the range. It starts over when the tip goes behind it or more than a day past
+ * the first tip (the city restarted, or the tip jumped).
  */
 export function createGuess() {
   let anchor: number | null = null;
