@@ -812,8 +812,6 @@ async function main() {
       // Until the span is read the bar has just the live tip.
       const usable = range === null ? hasLive : tip > range.oldest;
       if (usable !== barShown) {
-        // Read the span once as the bar first shows, so it is right without a hover.
-        if (usable && range === null) void refreshRange();
         barShown = usable;
         bar.show(usable);
         timelineEl.toggleAttribute('data-scrub', usable);
