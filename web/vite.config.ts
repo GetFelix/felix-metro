@@ -45,6 +45,8 @@ function sharedAssets(): Plugin {
   };
 }
 
+const gatewayPort = process.env.FELIX_GATEWAY_PORT ?? '8787';
+
 export default defineConfig({
   plugins: [sharedAssets()],
   build: {
@@ -57,11 +59,12 @@ export default defineConfig({
     },
   },
   // A gateway on the host answers /oidc and /ws for the dev server, as the dev stack's web container does.
+  // FELIX_GATEWAY_PORT moves it when 8787 is taken.
   server: {
     fs: { allow: ['..'] },
     proxy: {
-      '/oidc': 'http://127.0.0.1:8787',
-      '/ws': { target: 'ws://127.0.0.1:8787', ws: true },
+      '/oidc': `http://127.0.0.1:${gatewayPort}`,
+      '/ws': { target: `ws://127.0.0.1:${gatewayPort}`, ws: true },
     },
   },
   preview: { proxy: {} },
