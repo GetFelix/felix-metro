@@ -48,6 +48,8 @@ const env = {
   ...process.env,
   CONTAINER_ENGINE: 'podman',
   DOCKER_CONFIG: mkdtempSync(join(os.tmpdir(), 'docker-config-')),
+  // Its own compose project, so the `down --volumes` at the end never reaches a felix-metro stack started by hand.
+  COMPOSE_PROJECT_NAME: process.env.COMPOSE_PROJECT_NAME ?? 'felix-metro-clip',
 };
 const sh = (cmd, args, opts = {}) => execFileSync(cmd, args, { stdio: 'inherit', env, ...opts });
 const children = [];
@@ -173,6 +175,8 @@ try {
       ...env,
       CLIP_BROWSER: process.env.CLIP_BROWSER ?? 'msedge',
       CLIP_SPEED_CMD: speedCmd,
+      // The builder bot finds the gateway here; it is on the moved port.
+      GATEWAY_URL: `ws://127.0.0.1:${gatewayPort}/ws`,
       CLIP_TIER: process.env.CLIP_TIER ?? 'high',
     },
   });

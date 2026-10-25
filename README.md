@@ -97,7 +97,8 @@ for any sim change that is not in the release bundle's image.
 The bundle's ports are moved so it runs beside another Felix stack: broker 5100/udp, 28080,
 18443, and the gateway on `CLIP_GATEWAY_PORT` (default 18787, which Vite proxies through
 `FELIX_GATEWAY_PORT`). The native sim's control address is `CLIP_SIM_PORT` (default 18090).
-The run stops if 5173 is already in use.
+The run stops if 5173 is already in use. It runs as its own compose project, `felix-metro-clip`, so its cleanup never
+removes a felix-metro stack you started yourself; stop that stack first, since both use 8088 and 9400.
 
 The Clip workflow (`.github/workflows/clip.yml`, run by hand) does the same on a CI runner in
 software GL, as a fallback; it fails when no mp4 is written. `cargo run --release --example

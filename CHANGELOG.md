@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Tools
+
+- `clip-local.mjs` points the builder bot at the moved gateway port, and runs its stack as its own compose project so
+  its cleanup cannot remove a felix-metro stack started by hand.
+
 ## [0.2.2] - 2026-10-25
 
 ### Tools
