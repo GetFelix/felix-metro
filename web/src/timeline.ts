@@ -35,6 +35,12 @@ export function barSpan(oldest: number, tip: number): Span {
 }
 
 /**
+ * Where the bar starts before the retained range has been read: a day behind the tip, so the live head sits at the
+ * right end and the bands carry the tip's day, instead of the head at the left edge of a one-tick bar.
+ */
+export const guessOldest = (tip: number): number => Math.max(0, tip - MIN_SPAN);
+
+/**
  * The span the bar maps the pointer through. A drag holds the span it began with: if the scale moved under a held
  * pointer, every move would read a different tick and the seeks would chase it. Updates during a drag are kept for
  * after the release.

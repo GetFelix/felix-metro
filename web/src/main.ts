@@ -16,7 +16,7 @@ import { Gateway, GatewayError } from './gateway';
 import { Playback, handOver } from './playback';
 import { IDLE_MS, SeekError, Seeker, fold, tryFoldMore, type SeekResult } from './seek';
 import { Latest } from './scrub';
-import { agoText, createTimeline, stepTick, clampTick, type Range } from './timeline';
+import { agoText, createTimeline, guessOldest, stepTick, clampTick, type Range } from './timeline';
 import { createLoader, type Loader } from './loader';
 import { createPicker } from './picker';
 import { displayName } from './registry';
@@ -812,6 +812,8 @@ async function main() {
       // Until the span is read the bar has just the live tip.
       const usable = range === null ? hasLive : tip > range.oldest;
       if (usable !== barShown) {
+        // Read the span once as the bar first shows, so it is right without a hover.
+        if (usable && range === null) void refreshRange();
         barShown = usable;
         bar.show(usable);
         timelineEl.toggleAttribute('data-scrub', usable);
@@ -820,7 +822,7 @@ async function main() {
       syncRefresh(bar.dragging || inPast);
       const at = Math.min(scrubTarget ?? pastTick ?? tick, tip);
       if (usable)
-        bar.update({ ready: range !== null, oldest: range?.oldest ?? tip - 1, newest: tip, at, live: !inPast });
+        bar.update({ ready: range !== null, oldest: range?.oldest ?? guessOldest(tip), newest: tip, at, live: !inPast });
       if (inPast !== wasPast) {
         const first = wasPast === null;
         wasPast = inPast;
