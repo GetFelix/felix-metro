@@ -193,8 +193,11 @@ const settled = (expected) =>
 // folded state and the clock agree and have not changed for several polls, so a release target that is still on its
 // way cannot be mistaken for the rest.
 const STABLE_POLLS = 8;
-const atRest = () =>
-  page.waitForFunction(
+const atRest = async () => {
+  // The count is kept on the page: a stale one from the last rest would pass at once, before a click just made has
+  // reached the handle, which moves on the next frame.
+  await page.evaluate(() => delete window.__restPoll);
+  return page.waitForFunction(
     (need) => {
       const s = document.getElementById('scrub');
       const { past } = window.__metro.shown();
@@ -208,6 +211,7 @@ const atRest = () =>
     STABLE_POLLS,
     { polling: 100, timeout: MINUTE },
   );
+};
 await atRest().catch(async () =>
   fail(`after the drag the city did not rest at the handle: ${JSON.stringify(await read())}`),
 );
@@ -228,6 +232,13 @@ await page.screenshot({ path: join(out, 'past.png') });
 // quarter-hours back, and the bar stops at the oldest moment held, which moves up as retention does. The drag ended
 // a fraction of the span from the oldest end, so start from the middle, where the whole sum fits with room to spare.
 await page.mouse.click(xAt(0.6), y);
+// The handle leaves the drag's end first; only then can rest mean the click's moment.
+await page
+  .waitForFunction((from) => Number(document.getElementById('scrub').dataset.at) !== from, dragEnd, {
+    polling: 50,
+    timeout: MINUTE,
+  })
+  .catch(() => fail(`the click did not move the handle from tick ${dragEnd}`));
 await atRest().catch(async () =>
   fail(`after the click the city did not rest at the handle: ${JSON.stringify(await read())}`),
 );
