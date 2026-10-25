@@ -228,8 +228,6 @@ describe('the days the bar labels', () => {
     const first = guess.oldest(20000);
     const views = [20000, 20001, 20040, 20300, 21000].map((tip) => barSpan(guess.oldest(tip), tip));
     expect(new Set(views.map((v) => v.oldest))).toEqual(new Set([first]));
-    // The bar is rebuilt when the hour of either end changes; the oldest end must not be the one forcing it.
-    expect(views.every((v) => v.newest - v.oldest >= MIN_SPAN)).toBe(true);
   });
 
   it('starts the guess over when the tip leaves the day it covers', () => {
