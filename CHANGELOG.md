@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-10-25
+
+### Tools
+
+- A Clip workflow (`.github/workflows/clip.yml`) and `web/scripts/clip-local.mjs` that record the getfelix.dev video: the page can draw frame by frame (`?capture&trace`) and a script drives the camera, the tick and the timeline.
+
 ### The page
 
 - Timeline: the bar no longer shifts in the first seconds after the page opens. Until the retained range is read, its
@@ -92,7 +98,6 @@
 - `dev/check-commands.mjs` publishes commands as a mayor from a plain client; the
   dev-stack CI job runs it. It reads keyframe records too, fails when a result never
   appears, and checks a later keyframe lists the built lot.
-- A Clip workflow that records the getfelix.dev video: the page can draw frame by frame (`?capture&trace`) and a script drives the camera, the tick and the timeline.
 
 ### The city
 
