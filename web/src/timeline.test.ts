@@ -5,6 +5,7 @@ import {
   MIN_SPAN,
   barSpan,
   guessOldest,
+  createGuess,
   createSpanHold,
   startsDrag,
   tickAtPointer,
@@ -220,6 +221,20 @@ describe('the days the bar labels', () => {
     const s2 = barSpan(guessOldest(late), late);
     expect(s2.live).toBe(s2.newest);
     expect(dayBands(s2).map((b) => b.day)).toContain(2);
+  });
+
+  it('holds the guessed scale still while the tip moves', () => {
+    const guess = createGuess();
+    const first = guess.oldest(20000);
+    const views = [20000, 20001, 20040, 20300, 21000].map((tip) => barSpan(guess.oldest(tip), tip));
+    expect(new Set(views.map((v) => v.oldest))).toEqual(new Set([first]));
+  });
+
+  it('starts the guess over when the tip leaves the day it covers', () => {
+    const guess = createGuess();
+    guess.oldest(20000);
+    expect(guess.oldest(100)).toBe(0);
+    expect(guess.oldest(100 + 3 * TICKS_PER_DAY)).toBe(100 + 2 * TICKS_PER_DAY);
   });
 
   it('keeps the live fraction once the range is read', () => {

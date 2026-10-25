@@ -41,6 +41,21 @@ export function barSpan(oldest: number, tip: number): Span {
 export const guessOldest = (tip: number): number => Math.max(0, tip - MIN_SPAN);
 
 /**
+ * The guess held still: the oldest end is fixed from the first tip seen, so the scale does not slide with every tick
+ * the tip moves while nobody has read the range. It starts over when the tip goes behind it or more than a day past
+ * the first tip (the city restarted, or the tip jumped).
+ */
+export function createGuess() {
+  let anchor: number | null = null;
+  return {
+    oldest(tip: number): number {
+      if (anchor === null || tip < anchor || tip - anchor > 2 * MIN_SPAN) anchor = guessOldest(tip);
+      return anchor;
+    },
+  };
+}
+
+/**
  * The span the bar maps the pointer through. A drag holds the span it began with: if the scale moved under a held
  * pointer, every move would read a different tick and the seeks would chase it. Updates during a drag are kept for
  * after the release.

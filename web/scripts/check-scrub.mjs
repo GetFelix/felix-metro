@@ -92,7 +92,40 @@ await page.goto(`${appUrl}#harbor`, { waitUntil: 'load', timeout: 5 * MINUTE });
 await page
   .waitForFunction(() => window.__ready === true && window.__metro, null, { polling: 250, timeout: 5 * MINUTE })
   .catch(() => fail('the page never became ready'));
-await page.waitForTimeout(4000);
+// Until the bar is reached for, its scale comes from the tip alone. It must hold still from the frame it first shows:
+// the oldest end fixed, the bar never hidden again. It stays hidden until every district has a tick.
+await page
+  .waitForFunction(
+    () => {
+      const bar = document.getElementById('scrub');
+      return !bar.classList.contains('hidden') && bar.style.getPropertyValue('--oldest') !== '';
+    },
+    null,
+    { polling: 50, timeout: 2 * MINUTE },
+  )
+  .catch(() => fail('the bar never showed'));
+const scale = await page.evaluate(
+  () =>
+    new Promise((resolve) => {
+      const bar = document.getElementById('scrub');
+      const seen = [];
+      const timer = setInterval(() => {
+        seen.push({
+          oldest: bar.style.getPropertyValue('--oldest'),
+          hidden: bar.classList.contains('hidden'),
+          live: bar.dataset.mode,
+        });
+        if (seen.length >= 100) {
+          clearInterval(timer);
+          resolve(seen);
+        }
+      }, 100);
+    }),
+);
+const oldests = new Set(scale.map((s) => s.oldest));
+console.log(`bar scale over the first 10 s: oldest ${[...oldests].join(', ')}`);
+if (oldests.size > 1) await fail(`the bar's scale slid before it was reached for: oldest ${[...oldests].join(', ')}`);
+if (scale.some((s) => s.hidden || s.live !== 'live')) await fail('the bar was hidden or off live in its first 10 s');
 if (await page.evaluate(() => window.__metro.historyOpen()))
   await fail('history was opened by a viewer who never reached for the bar');
 const bar0 = await page.locator('#scrub').boundingBox();

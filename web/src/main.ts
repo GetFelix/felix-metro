@@ -16,7 +16,7 @@ import { Gateway, GatewayError } from './gateway';
 import { Playback, handOver } from './playback';
 import { IDLE_MS, SeekError, Seeker, fold, tryFoldMore, type SeekResult } from './seek';
 import { Latest } from './scrub';
-import { agoText, createTimeline, guessOldest, stepTick, clampTick, type Range } from './timeline';
+import { agoText, createGuess, createTimeline, stepTick, clampTick, type Range } from './timeline';
 import { createLoader, type Loader } from './loader';
 import { createPicker } from './picker';
 import { displayName } from './registry';
@@ -836,12 +836,13 @@ async function main() {
       void togglePlay();
     });
     let barShown = false;
+    const guess = createGuess();
     let wasPast: boolean | null = null;
     let agoShown = '';
     timelineFrame = (tick) => {
       const tip = tipTick();
       // Until the span is read the bar has just the live tip.
-      const usable = range === null ? hasLive : tip > range.oldest;
+      const usable = range === null ? hasLive && tip >= 0 : tip > range.oldest;
       if (usable !== barShown) {
         barShown = usable;
         bar.show(usable);
@@ -853,7 +854,7 @@ async function main() {
       if (usable)
         bar.update({
           ready: range !== null,
-          oldest: range?.oldest ?? guessOldest(tip),
+          oldest: range ? range.oldest : guess.oldest(tip),
           newest: tip,
           at,
           live: !inPast,

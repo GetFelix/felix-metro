@@ -4,6 +4,9 @@
 
 ### The page
 
+- Timeline: the bar no longer shifts in the first seconds after the page opens. Until the retained range is read, its
+  left end followed the live tip tick by tick, so the day bands and hour marks crept and were rebuilt as the city
+  advanced. The left end is now fixed from the first tip, and the bar waits for every district to have a tick before it shows.
 - Timeline: label the days the bar shows. Until the retained range was read (it is read on hover), the bar started
   one tick before the live tip, so the live head sat at the left edge and the bands were labelled from the tip's
   day on. The bar now starts a day behind the tip until the range is read, so the live head sits at its place on the scale.
