@@ -14,8 +14,8 @@ mod tests;
 
 /// Ticks a second of real time at normal speed; segment speeds are per real second.
 const TICKS_PER_SECOND: u64 = 4;
-/// A route this short, in thousandths of a tile, is walked.
-pub const WALK_MAX: u32 = 4000;
+/// A route this short, in thousandths of a tile, is walked: far enough that errands put people on the pavements.
+pub const WALK_MAX: u32 = 8000;
 /// Walking speed in thousandths of a tile a second.
 const WALK_SPEED: u32 = 300;
 /// A jammed segment never drives slower than this percentage of its speed.

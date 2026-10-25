@@ -53,6 +53,8 @@ export interface TickRecord {
 export interface Journey {
   arrive(): number;
   positionAt(tick: number, out: Uint32Array): void;
+  /** Writes the ids of the lot the trip leaves and the lot it enters. */
+  lots(out: Uint32Array): void;
   free(): void;
 }
 

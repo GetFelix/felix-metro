@@ -74,8 +74,8 @@ export function createPost(
     composer.addPass(bloom);
   }
 
-  // Tilt-shift as a miniature photo: blur grows with distance from the focus plane through the orbit target, so
-  // anything at that depth, however tall, stays sharp.
+  // Distance haze: nothing is blurred up to the focus plane through the orbit target plus a wide sharp band, then the
+  // blur grows toward the horizon. Nothing in front of the focus is ever blurred.
   let tilt: ShaderPass | null = null;
   let depthRT: THREE.WebGLRenderTarget | null = null;
   let depthMat: THREE.MeshBasicMaterial | null = null;
@@ -92,9 +92,9 @@ export function createPost(
         cameraNear: { value: camera.near },
         cameraFar: { value: camera.far },
         focus: { value: 19 },
-        band: { value: 2.2 },
-        range: { value: 9.0 },
-        amount: { value: 7.0 },
+        band: { value: 25.0 },
+        range: { value: 40.0 },
+        amount: { value: 3.5 },
       },
       vertexShader: VERTEX,
       fragmentShader: `
@@ -103,14 +103,14 @@ export function createPost(
     uniform float cameraNear, cameraFar, focus, band, range, amount; varying vec2 vUv;
     float dist(vec2 uv) { return -perspectiveDepthToViewZ(texture2D(tDepth, uv).x, cameraNear, cameraFar); }
     void main() {
-      float r = amount * smoothstep(0.0, range, abs(dist(vUv) - focus) - band);
+      float r = amount * smoothstep(0.0, range, dist(vUv) - focus - band);
       if (r < 0.01) { gl_FragColor = texture2D(tDiffuse, vUv); return; }
       vec4 sum = vec4(0.0); float w = 0.0;
       for (int i = 0; i < 12; i++) {
         float a = float(i) * 2.39996;
         vec2 o = vec2(cos(a), sin(a)) * sqrt(float(i) / 12.0) * r / resolution;
         // A sharp foreground pixel must not bleed into a blurred one behind it.
-        float rr = amount * smoothstep(0.0, range, abs(dist(vUv + o) - focus) - band);
+        float rr = amount * smoothstep(0.0, range, dist(vUv + o) - focus - band);
         float k = clamp(rr / max(r, 0.001), 0.25, 1.0);
         sum += texture2D(tDiffuse, vUv + o) * k; w += k;
       }
@@ -154,11 +154,18 @@ export function createPost(
       const show = hide();
       scene.overrideMaterial = depthMat;
       renderer.setRenderTarget(depthRT);
-      renderer.render(scene, camera);
-      renderer.setRenderTarget(null);
-      scene.overrideMaterial = null;
-      show();
-      tilt.uniforms.focus!.value = camera.position.distanceTo(target);
+      // A throw here must not leave the depth material or the hidden glows behind for every later frame.
+      try {
+        renderer.render(scene, camera);
+      } finally {
+        renderer.setRenderTarget(null);
+        scene.overrideMaterial = null;
+        show();
+      }
+      const focus = camera.position.distanceTo(target);
+      tilt.uniforms.focus!.value = focus;
+      // The sharp band grows with the zoom, so a far camera over a big city keeps most of it sharp.
+      tilt.uniforms.band!.value = focus + 6;
     }
     composer.render();
   }

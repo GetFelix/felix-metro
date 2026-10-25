@@ -2,8 +2,27 @@
 
 ## [Unreleased]
 
+### The city
+
+- A new city starts with a day behind it. On its first start the sim commits `SIM_WARMUP_HOURS` of ticks
+  (40 by default, so live begins at 16:00 on day 2) as fast as the broker takes them, then runs at normal
+  speed. The page opens on an evening commute with history to scrub through instead of an empty dark city.
+  Warm-up ticks are stamped with wall times spread back from the start of the warm-up at the city's speed.
+  A city with records, or one that starts paused, skips it; `SIM_WARMUP_HOURS=0` starts at midnight as before.
+- `dev/lib/gateway.mjs` skipped each keyframe resident one byte short, so a keyframe with events after it
+  misparsed once residents were mid-trip; the command check now reads them.
+- `GET /cities/<name>/warmup` on the sim's endpoint says whether a city is still warming up, and `dev/up.sh`
+  (and the compose bundle's `up.sh`) waits for every city to go live.
+- A city is listed in the registry only once its warm-up is done, so the picker never offers a city whose districts
+  are still far apart in the log.
+- A sim killed during warm-up leaves partial history and is refused on restart, so the streams need a reset
+  (`dev/up.sh` starts fresh); restarting over history is tracked in
+  [#105](https://github.com/GetFelix/felix-metro/issues/105).
+
 ### Fixed
 
+- A failed depth pre-pass no longer leaves the depth material on the scene and the glows hidden for
+  every later frame.
 - The timeline bar holds still while it is dragged. Its scale used to follow the growing city, so in a
   young city each pointer move mapped to a different moment and the drag flashed. A drag now keeps the
   scale it began with, and releasing at the right end goes live. The bar spans at least one city day,
@@ -12,6 +31,14 @@
   through a one-tick placeholder.
 - A press on the live head picks the handle up at once; it used to land on the head's own button, so the
   bar needed a click before it could be dragged.
+
+### Changed
+
+- The blur is far-only. Nothing in front of the focus is blurred, a sharp band as wide as the camera
+  distance follows it, and a gentle haze (amount 3.5, down from 7) builds toward the horizon, so the
+  city reads sharp at the default view and zoomed in. The style frame uses the same blur.
+- People on the pavements: a route of 8 tiles or less is walked (it was 4), so lunches, shopping and park trips are on foot. The harbor city at 2 by 2 peaks at 72 walkers instead of 20 and 72 cars instead of 91, and the busiest district holds 24 to 36 walkers at the rush and about 21 at lunch. Walkers are drawn about 1.3 times larger. The log rate is unchanged: trips are still route intents.
+- Cars and walkers no longer vanish on the road: in the last tick of a trip they turn off the road onto the lot the trip leaves or enters, on whichever side of the road it stands, and shrink away; a departure does the reverse. The pose is a function of the trip and the tick alone, so a rewind or seek draws the same.
 
 ## [0.2.0] - 2026-10-24
 

@@ -29,10 +29,13 @@ pub fn check_speed(ticks_per_second: u8) -> Result<u8> {
 /// address because the endpoint has no authentication. `POST
 /// /cities/<name>/start` starts a city in `starts`, one that was held back, and
 /// answers once its streams are open, or with a 500 when they would not open.
+/// `GET /cities/<name>/warmup` answers `warming` until the city has committed
+/// its warm-up and `live` after, so a script can wait for a city to go live.
 pub async fn serve(
     listener: TcpListener,
     cities: HashMap<String, watch::Sender<u8>>,
     starts: HashMap<String, mpsc::Sender<StartRequest>>,
+    warming: HashMap<String, watch::Receiver<bool>>,
 ) -> Result<()> {
     if !listener.local_addr()?.ip().is_loopback() {
         bail!("the speed endpoint has no authentication and must bind to a loopback address");
@@ -40,6 +43,7 @@ pub async fn serve(
     let cities = Arc::new(Cities {
         speeds: cities,
         starts,
+        warming,
     });
     loop {
         let (stream, peer) = listener.accept().await?;
@@ -60,6 +64,7 @@ pub type StartRequest = oneshot::Sender<Result<(), String>>;
 struct Cities {
     speeds: HashMap<String, watch::Sender<u8>>,
     starts: HashMap<String, mpsc::Sender<StartRequest>>,
+    warming: HashMap<String, watch::Receiver<bool>>,
 }
 
 /// How long a start request waits for the city's streams to open.
@@ -194,6 +199,19 @@ async fn respond(
             Ok(Err(_)) => ("200 OK", "already started\n".into()),
             Err(_) => ("504 Gateway Timeout", "the city is still starting\n".into()),
         };
+    }
+    if let Some(name) = path
+        .strip_prefix("/cities/")
+        .and_then(|p| p.strip_suffix("/warmup"))
+    {
+        let Some(warming) = cities.warming.get(name) else {
+            return ("404 Not Found", "no such city\n".into());
+        };
+        if method != "GET" {
+            return ("405 Method Not Allowed", "use GET\n".into());
+        }
+        let state = if *warming.borrow() { "warming" } else { "live" };
+        return ("200 OK", format!("{state}\n"));
     }
     let city = path
         .strip_prefix("/cities/")

@@ -17,7 +17,7 @@ and play forward from there.
 
 ## What you will be able to do
 
-- Watch a generated city go about its day in 3D: residents commute, shop and go home, and the sun rises and sets. Rush hour at 08:00 and 17:15 puts up to about 30 cars and 7 walkers on the streets of the busiest district, and about 90 cars across the harbor city at 2 by 2 (522 residents; `cargo run --release -p felix-metro-core --example density -- harbor 2` prints the counts). The log averages about 8 KB/s over a day at 20,000 residents and peaks near 17 KB/s in the busiest minute of the rush, from the hourly snapshots of each district landing together, which #95 tracks (`cargo test -p felix-metro-sim --release report_load -- --ignored --nocapture` measures it).
+- Watch a generated city go about its day in 3D: residents commute, shop and go home, and the sun rises and sets. Rush hour at 08:00 and 17:15 puts about 23 to 29 cars and 24 to 36 walkers on the streets of the busiest district, and about 70 cars and 70 walkers across the harbor city at 2 by 2 (522 residents; `cargo run --release -p felix-metro-core --example density -- harbor 2` prints the counts). The log is estimated at about 8 KB/s averaged over a day at 20,000 residents (`design.md` has the arithmetic); the measured harbor city of 522 residents in 4 districts averages 656 B/s, and scaled to 20,000 residents in 16 districts the busiest minute of the rush peaks near 17 KB/s, from the hourly snapshots of each district landing together, which #95 tracks (`cargo test -p felix-metro-sim --release report_load -- --ignored --nocapture` measures it).
 - Drag the timeline back to any moment the log holds and see the city exactly as it was
 - Let go and watch it play forward and catch up to live
 - Follow one resident or car through their day
@@ -141,10 +141,11 @@ over each time. Stop it with `docker compose -f dev/compose.yml down --volumes`
 
 Open <http://127.0.0.1:8088/#harbor>: the page signs in as `viewer` at the stand-in
 provider, follows the city through the gateway and draws its residents driving and
-walking in time with the sim, with the sun following the tick. A city starts at
-midnight, so for traffic run `dev/speed.sh harbor 16` and give it a few minutes
-(the morning commute is around 06:00). Without a gateway the page draws the
-city alone.
+walking in time with the sim, with the sun following the tick. A new city
+first commits a day and a half of ticks in a few seconds (`SIM_WARMUP_HOURS`, 40 by default),
+so it opens in the late afternoon of its second day with a day behind it to scrub through and
+the evening commute under way; `dev/up.sh` returns once that is done. Run `dev/speed.sh harbor 16`
+to move faster. Without a gateway the page draws the city alone.
 
 Click the city name in the top left to switch cities, or open `/#pinecrest` (any name
 in the list) directly. Choosing a city opens its page afresh, so the old city's
@@ -249,6 +250,7 @@ seed against a broker for the sim's integration test.
 
 - [docs/design.md](docs/design.md): the design, data model and build order
 - [docs/art.md](docs/art.md): art direction, the asset packs and the style frame
+- [docs/game.md](docs/game.md): draft of what makes it a game: money, policy, goals, investigations, what-ifs
 - [Felix docs](https://docs.getfelix.dev/)
 
 ## Felix version
