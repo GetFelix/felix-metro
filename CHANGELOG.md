@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-10-24
+
 ### The city
 
 - A new city starts with a day behind it. On its first start the sim commits `SIM_WARMUP_HOURS` of ticks
