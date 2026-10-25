@@ -26,7 +26,7 @@ enough to keep days of it.
 
 **Out of scope**
 
-- Economy depth (budgets, taxes, land value). The city has a few headline numbers, not a finance model
+- Economy depth beyond what [game.md](game.md) proposes. The city has a budget, not a finance model
 - Utilities, disasters, public transport networks beyond what a milestone names
 - Accurate traffic modelling. Congestion is simple and plausible, not a research model
 - Anything that needs a second datastore. If a feature cannot be expressed in streams, stream state, caches and counters, it is out
@@ -488,7 +488,7 @@ timelines locked to the same tick.
 - **Three.js**, plain TypeScript, no UI framework, built with Vite.
 - **Kenney city kits** (Roads, Commercial, Suburban, Industrial, Car Kit): CC0, one consistent style, restyled by material name to one palette.
 - **Instanced meshes** for cars, people, trees and repeated buildings.
-- **Tilt-shift**: a depth-of-field pass weighted to the top and bottom of the frame, with saturated colour, so the city reads as a model.
+- **Distance haze**: a depth-of-field pass that blurs only what lies beyond a wide sharp band past the focus, with saturated colour, so the city reads sharp up close and softens toward the horizon.
 - **Day and night from the tick.** Sun angle, sky, street lights and window lights all follow the city clock, live and while scrubbing.
 - **Quality tiers** so the look degrades before the frame rate does. The target is 60 fps at 20,000 residents on a laptop iGPU.
 
