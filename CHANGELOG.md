@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Built on Felix 0.6.2: the sim's `felix-client` and `felix-wire` pins, the dev stack and CI images.
+
 ### Tools
 
 - `clip-local.mjs` points the builder bot at the moved gateway port, and runs its stack as its own compose project so
