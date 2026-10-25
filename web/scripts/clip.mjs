@@ -10,7 +10,7 @@
 import { execFileSync, spawn } from 'node:child_process';
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 
@@ -178,7 +178,7 @@ log(
 // 3. The builder bot raises buildings in the development area. Its commands apply at the next tick, so the sim runs
 // while it works and is held again when it is done. Nothing is drawn meanwhile; the clip replays these ticks.
 const base0 = Math.floor(await latest()) - 1;
-const botLog = join(out, 'bot.ndjson');
+const botLog = resolve(out, 'bot.ndjson');
 const botArgs = [
   join(root, 'dev', 'builder-bot.mjs'),
   city,
