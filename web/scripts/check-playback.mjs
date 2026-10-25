@@ -19,6 +19,11 @@ const HOUR_TICKS = 240;
 const ATTEMPTS = 4;
 /** The fastest road in tiles per tick (1.5 tiles a second, 4 ticks a second): the most any resident can move. */
 const MAX_TILES_PER_TICK = 0.375;
+/**
+ * Tiles a trip eases between the road and its lot in a tick: the turn-in covers the gap in one tick, and a lot stands
+ * at most a tile from the road.
+ */
+const MAX_TURN_TILES_PER_TICK = 1;
 const MIN_COMPARED = 5;
 
 const browser = await chromium.launch({
@@ -184,7 +189,9 @@ for (let attempt = 1; attempt <= ATTEMPTS && compared < MIN_COMPARED; attempt++)
   // No resident moves further between two frames than the fastest road allows for the ticks between them.
   let comparedHere = 0;
   for (let i = lo; i < Math.min(frames.length, j + 4); i++) {
-    const allowed = MAX_TILES_PER_TICK * Math.max(0, frames[i].tick - frames[i - 1].tick) + 0.2;
+    // Along the road, plus the turn-in a trip makes at each end, which is a function of the tick like the road.
+    const allowed =
+      (MAX_TILES_PER_TICK + MAX_TURN_TILES_PER_TICK) * Math.max(0, frames[i].tick - frames[i - 1].tick) + 0.2;
     for (const [resident, step] of steps(frames, i, i)) {
       comparedHere++;
       if (step > allowed)

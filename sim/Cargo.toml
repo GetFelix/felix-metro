@@ -1,7 +1,7 @@
 [package]
 name = "felix-metro-sim"
 description = "The authority for each city: steps its districts in lockstep and commits every tick to Felix"
-version = "0.2.0"
+version = "0.2.1"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

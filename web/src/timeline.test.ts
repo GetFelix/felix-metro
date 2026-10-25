@@ -4,6 +4,7 @@ import {
   STEP_TICKS,
   MIN_SPAN,
   barSpan,
+  guessOldest,
   createSpanHold,
   startsDrag,
   tickAtPointer,
@@ -192,5 +193,37 @@ describe('pressing the live head', () => {
     expect(t.moves.at(-1)).toEqual([TICKS_PER_DAY, 'drag']);
     t.fire('pointerup', { target: t.tip, clientX: 500 });
     expect(t.lives()).toBe(0);
+  });
+});
+
+describe('the days the bar labels', () => {
+  const days = (oldest: number, tip: number) => dayBands(barSpan(oldest, tip)).map((b) => b.day);
+  const liveFraction = (oldest: number, tip: number) => {
+    const s = barSpan(oldest, tip);
+    return (s.live - s.oldest) / (s.newest - s.oldest);
+  };
+
+  it('labels the days a span from mid-day, from 0 and after retention dropped the start', () => {
+    expect(days(4000, 4600)).toEqual([1, 2]);
+    expect(days(0, 4100)).toEqual([1, 2]);
+    expect(days(0, 2 * TICKS_PER_DAY + 10)).toEqual([1, 2, 3]);
+    expect(days(3 * TICKS_PER_DAY + 100, 4 * TICKS_PER_DAY + 500)).toEqual([4, 5]);
+  });
+
+  it('before the range is read, puts live at the right end and the tip on its own day', () => {
+    const tip = 4100;
+    const span = barSpan(guessOldest(tip), tip);
+    expect(span.oldest).toBe(0);
+    expect(liveFraction(span.oldest, tip)).toBeCloseTo(4100 / TICKS_PER_DAY);
+    expect(dayBands(span)[0]?.day).toBe(1);
+    const late = 9600;
+    const s2 = barSpan(guessOldest(late), late);
+    expect(s2.live).toBe(s2.newest);
+    expect(dayBands(s2).map((b) => b.day)).toContain(2);
+  });
+
+  it('keeps the live fraction once the range is read', () => {
+    expect(liveFraction(0, 4100)).toBeCloseTo(4100 / TICKS_PER_DAY);
+    expect(liveFraction(0, 3 * TICKS_PER_DAY)).toBe(1);
   });
 });

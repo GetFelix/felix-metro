@@ -110,15 +110,15 @@ that pulls the published images instead of building them. You need Docker or Pod
 described below. The compose bundle runs Felix 0.6.1.
 
 ```sh
-curl -fsSL https://github.com/GetFelix/felix-metro/releases/download/v0.2.0/felix-metro-compose-0.2.0.tar.gz | tar xz
-cd felix-metro-compose-0.2.0
+curl -fsSL https://github.com/GetFelix/felix-metro/releases/download/v0.2.1/felix-metro-compose-0.2.1.tar.gz | tar xz
+cd felix-metro-compose-0.2.1
 ./up.sh
 ```
 
 It starts the same stack as `dev/up.sh` and returns once the cities are serving. The web
 app is at <http://127.0.0.1:8088>. `./speed.sh` and `./city.sh` work as the `dev/` ones
 do. `SHA256SUMS` on the release lists a checksum for each download, and
-`felix-metro-web-v0.2.0.tar.gz` is the built web app alone.
+`felix-metro-web-v0.2.1.tar.gz` is the built web app alone.
 
 ## Run it locally
 
