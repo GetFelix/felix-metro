@@ -46,17 +46,20 @@ export function bindInput(rig: CameraRig, dom: HTMLElement): () => void {
 
   const move = (e: PointerEvent) => {
     const p = pointers.get(e.pointerId);
-    if (!p || !mode || !rig.enabled) return;
+    if (!p) return;
     if (e.pointerType === 'mouse' && e.buttons === 0) return up(e);
+    // Positions and `from` stay current even when nothing is applied (three fingers, or a disabled rig), so the next move is a step and not a jump.
     [p.x, p.y] = [e.clientX, e.clientY];
     const now = measure();
-    if (mode === 'orbit') {
-      const k = TURN_PER_HEIGHT / dom.clientHeight;
-      rig.orbit(-(now.x - from.x) * k, -(now.y - from.y) * k);
-    } else {
-      rig.grab(ndc(from.x, from.y), ndc(now.x, now.y));
-      if (mode === 'pinch' && from.spread > 0 && now.spread > 0)
-        rig.zoomAt(ndc(now.x, now.y), from.spread / now.spread);
+    if (mode && rig.enabled) {
+      if (mode === 'orbit') {
+        const k = TURN_PER_HEIGHT / dom.clientHeight;
+        rig.orbit(-(now.x - from.x) * k, -(now.y - from.y) * k);
+      } else {
+        rig.grab(ndc(from.x, from.y), ndc(now.x, now.y));
+        if (mode === 'pinch' && from.spread > 0 && now.spread > 0)
+          rig.zoomAt(ndc(now.x, now.y), from.spread / now.spread);
+      }
     }
     from = now;
   };
@@ -78,12 +81,13 @@ export function bindInput(rig: CameraRig, dom: HTMLElement): () => void {
   };
 
   const keyDown = (e: KeyboardEvent) => {
+    // The browser drops the keyup of a key released while Cmd or Ctrl is down, so nothing else would stop it.
+    if (e.metaKey || e.ctrlKey) rig.releaseAll();
     const action = actionFor(e);
     if (!action || !rig.enabled) return;
     e.preventDefault();
     if (action === 'reset') {
       if (e.repeat) return;
-      rig.dispatchEvent({ type: 'start' });
       rig.reset();
     } else rig.hold(action, true);
   };
@@ -92,6 +96,22 @@ export function bindInput(rig: CameraRig, dom: HTMLElement): () => void {
     if (action && action !== 'reset') rig.hold(action, false);
   };
   const letGo = () => rig.releaseAll();
+
+  // Safari sends a trackpad pinch as gesture events with a running scale, not as Ctrl and wheel.
+  type Gesture = Event & { scale: number; clientX: number; clientY: number };
+  let gestureScale = 1;
+  const gestureStart = (e: Event) => {
+    e.preventDefault();
+    gestureScale = (e as Gesture).scale || 1;
+  };
+  const gestureChange = (e: Event) => {
+    e.preventDefault();
+    const g = e as Gesture;
+    if (!rig.enabled || !(g.scale > 0)) return;
+    rig.zoomAt(ndc(g.clientX, g.clientY), gestureScale / g.scale);
+    gestureScale = g.scale;
+  };
+  const gestureEnd = (e: Event) => e.preventDefault();
   const noMenu = (e: Event) => e.preventDefault();
 
   dom.style.touchAction = 'none';
@@ -101,6 +121,9 @@ export function bindInput(rig: CameraRig, dom: HTMLElement): () => void {
   dom.addEventListener('pointercancel', up);
   dom.addEventListener('wheel', wheel, { passive: false });
   dom.addEventListener('contextmenu', noMenu);
+  dom.addEventListener('gesturestart', gestureStart);
+  dom.addEventListener('gesturechange', gestureChange);
+  dom.addEventListener('gestureend', gestureEnd);
   addEventListener('keydown', keyDown);
   addEventListener('keyup', keyUp);
   addEventListener('blur', letGo);
@@ -112,6 +135,9 @@ export function bindInput(rig: CameraRig, dom: HTMLElement): () => void {
     dom.removeEventListener('pointercancel', up);
     dom.removeEventListener('wheel', wheel);
     dom.removeEventListener('contextmenu', noMenu);
+    dom.removeEventListener('gesturestart', gestureStart);
+    dom.removeEventListener('gesturechange', gestureChange);
+    dom.removeEventListener('gestureend', gestureEnd);
     removeEventListener('keydown', keyDown);
     removeEventListener('keyup', keyUp);
     removeEventListener('blur', letGo);

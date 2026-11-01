@@ -118,6 +118,8 @@ function rayAt(v: View, at: Ndc, lens: Lens): { x: number; y: number; z: number 
  * cursor can slip a little instead of letting the view leave the city.
  */
 export function zoomToward(v: View, at: Ndc, factor: number, lens: Lens, limits: Limits): View {
+  // clampView turns NaN into 0, which would throw the view to the origin.
+  if (!Number.isFinite(factor) || !Number.isFinite(at.x) || !Number.isFinite(at.y)) return v;
   const distance = Math.min(limits.maxDistance, Math.max(limits.minDistance, v.distance * factor));
   const ground = groundPoint(v, at, lens);
   if (!ground || distance === v.distance) return clampView({ ...v, distance }, limits);
@@ -134,7 +136,7 @@ export function zoomToward(v: View, at: Ndc, factor: number, lens: Lens, limits:
 /** Drag the ground: move the look-at point so the ground that was under `from` is under `to`. */
 export function panGrab(v: View, from: Ndc, to: Ndc, lens: Lens, limits: Limits): View {
   const [a, b] = [groundPoint(v, from, lens), groundPoint(v, to, lens)];
-  if (!a || !b) return v;
+  if (!a || !b || ![a.x, a.z, b.x, b.z].every(Number.isFinite)) return v;
   return clampView({ ...v, x: v.x + a.x - b.x, z: v.z + a.z - b.z }, limits);
 }
 

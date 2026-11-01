@@ -109,6 +109,8 @@ export class CameraRig extends THREE.EventDispatcher<{ start: object }> {
     polar: number,
     options: MoveOptions = {},
   ) {
+    // The app taking the camera ends the opening drift too, or its next frame would place the camera back.
+    this.dispatchEvent({ type: 'start' });
     const to = clampView(
       { x: target.x, z: target.z, distance, azimuth: nearestAngle(this.goal.azimuth, azimuth), polar },
       this.limits,
@@ -177,7 +179,7 @@ export class CameraRig extends THREE.EventDispatcher<{ start: object }> {
     const now = performance.now();
     const elapsed = dt ?? (now - this.last) / 1000;
     this.last = now;
-    // The spring is exact for any step, so a slow frame still arrives on time; a held key moves by the step, so it is capped.
+    // The spring is exact for any step, but a long pause is capped so a stalled tab does not lurch; held keys are capped tighter.
     const step = Math.min(0.25, elapsed);
     if (this.enabled && this.held.size) this.keys(Math.min(0.1, elapsed));
     const before = this.view();

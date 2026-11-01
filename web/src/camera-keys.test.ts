@@ -77,4 +77,27 @@ describe('isTyping', () => {
   it('is false for nothing', () => {
     expect(isTyping(undefined)).toBe(false);
   });
+
+  it('is true for text fields, selects and editable content', () => {
+    for (const type of ['text', 'search', 'email', 'url', 'tel', 'password', 'number', 'date', 'time'])
+      expect(isTyping({ tagName: 'INPUT', type })).toBe(true);
+    expect(isTyping({ tagName: 'input' })).toBe(true);
+    expect(isTyping({ tagName: 'TEXTAREA' })).toBe(true);
+    expect(isTyping({ tagName: 'SELECT' })).toBe(true);
+    expect(isTyping({ tagName: 'DIV', isContentEditable: true })).toBe(true);
+  });
+
+  it('is false for inputs that take no typed text, so W still moves with a checkbox focused', () => {
+    for (const type of ['checkbox', 'radio', 'range', 'button', 'file', 'color'])
+      expect(isTyping({ tagName: 'INPUT', type })).toBe(false);
+    expect(isTyping({ tagName: 'BUTTON' })).toBe(false);
+    expect(press('w', { target: { tagName: 'INPUT', type: 'range' } })).toBe('panForward');
+  });
+});
+
+describe('a key event with no key', () => {
+  it('is no action, as autofill sends', () => {
+    expect(keyAction(undefined)).toBeNull();
+    expect(press(undefined as unknown as string)).toBeNull();
+  });
 });

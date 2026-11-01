@@ -230,6 +230,29 @@ describe('the opening drift', () => {
     expect(camera.position.distanceTo(final)).toBeLessThan(1e-5);
   });
 
+  it('ends when the app moves the camera, so a deep link is not drifted away from', () => {
+    for (const move of [
+      (rig: CameraRig) => rig.setState({ x: 5, z: -3, distance: 15, azimuth: 1, polar: 0.8 }, { ease: false }),
+      (rig: CameraRig) => rig.moveTo({ x: 5, z: -3 }, 15, 1, 0.8, { ease: false }),
+      (rig: CameraRig) => rig.reset({ ease: false }),
+    ]) {
+      const { camera, rig } = make();
+      const intro = startIntro(camera, rig, 1000);
+      intro.step(1200);
+      move(rig);
+      const placed = camera.position.clone();
+      expect(intro.step(1400)).toBe(false);
+      expect(camera.position.distanceTo(placed)).toBe(0);
+    }
+  });
+
+  it('is not ended by its own placing', () => {
+    const { camera, rig } = make();
+    const intro = startIntro(camera, rig, 1000);
+    expect(intro.step(1100)).toBe(true);
+    expect(intro.step(1200)).toBe(true);
+  });
+
   it('ends when the person takes the controls, and the camera goes on from where it was', () => {
     const { camera, rig } = make();
     const intro = startIntro(camera, rig, 1000);

@@ -135,6 +135,25 @@ describe('zoomToward', () => {
   });
 });
 
+describe('a number that is not finite', () => {
+  const start: View = { ...home, x: 6, z: -4 };
+
+  it('leaves the view where it is when a zoom is not a number', () => {
+    for (const bad of [NaN, Infinity, -Infinity]) {
+      expect(zoomToward(start, { x: 0.3, y: 0.2 }, bad, lens, limits)).toEqual(start);
+      expect(zoomToward(start, { x: bad, y: 0 }, 0.9, lens, limits)).toEqual(start);
+      expect(zoomToward(start, { x: 0, y: bad }, 0.9, lens, limits)).toEqual(start);
+    }
+  });
+
+  it('leaves the view where it is when a drag is not a number', () => {
+    for (const bad of [NaN, Infinity]) {
+      expect(panGrab(start, { x: 0, y: 0 }, { x: bad, y: 0 }, lens, limits)).toEqual(start);
+      expect(panGrab(start, { x: 0, y: bad }, { x: 0.2, y: 0 }, lens, limits)).toEqual(start);
+    }
+  });
+});
+
 describe('panGrab', () => {
   it('puts the ground that was under the first spot under the second', () => {
     const [a, b] = [

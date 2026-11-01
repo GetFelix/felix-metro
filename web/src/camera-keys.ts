@@ -1,4 +1,4 @@
-// What moves the camera, as data: the page reads the keyboard from the first table, and the key list in the UI shows both.
+// What moves the camera, as data: the page reads the keyboard from the first table. The key list in the UI is to read both.
 
 /** What a key does. The first group is held down to keep moving; `reset` happens once per press. */
 export type CameraAction =
@@ -58,15 +58,21 @@ export function actionFor(e: {
 }
 
 /** The action a key is bound to, with no other checks: a key let go must stop its motion even if Ctrl is down by then. */
-export function keyAction(key: string): CameraAction | null {
+export function keyAction(key: string | undefined): CameraAction | null {
+  // Browser autofill dispatches key events with no key.
+  if (typeof key !== 'string') return null;
   return BY_KEY.get(key.toLowerCase()) ?? null;
 }
 
+// The same rule as isTypingTarget in the UI shell: a checkbox, radio or range takes no typed text, so W still moves.
+const TEXT_INPUTS = new Set(['text', 'search', 'email', 'url', 'tel', 'password', 'number', 'date', 'time']);
+
 /** Whether keys typed at `target` belong to a text field and not to the page. */
 export function isTyping(target: unknown): boolean {
-  const el = target as { tagName?: string; isContentEditable?: boolean } | null | undefined;
+  const el = target as { tagName?: string; type?: string; isContentEditable?: boolean } | null | undefined;
   if (!el) return false;
   if (el.isContentEditable) return true;
   const tag = el.tagName?.toUpperCase();
-  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+  if (tag === 'TEXTAREA' || tag === 'SELECT') return true;
+  return tag === 'INPUT' && TEXT_INPUTS.has((el.type ?? 'text').toLowerCase());
 }
