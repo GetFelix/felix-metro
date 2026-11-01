@@ -8,6 +8,10 @@
 
 ### Tools
 
+- The builder bot with `--rebuild` no longer leaves a lot bare without a word when a demolish gets no answer: the sim
+  may have applied it, so the bot goes on to the build and, if that is refused, the restore, and logs an `orphan`
+  line (`restored: null` when the restore is not answered either). `dev/lib/turn.mjs` holds a lot's turn so a test
+  (`node --test dev/lib/turn.test.mjs`, run in CI) can stand in for the sim.
 - `clip-local.mjs` points the builder bot at the moved gateway port, and runs its stack as its own compose project so
   its cleanup cannot remove a felix-metro stack started by hand.
 
