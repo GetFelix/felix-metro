@@ -10,6 +10,10 @@
 
 - Timeline: a drag no longer seeks to a moment retention has just dropped. The drag keeps the bar it began on, so a move
   at the left end could land before the oldest tick the city still holds; it now stops at the oldest one held.
+- Scrubbing hard no longer leaves buildings behind. A lot whose building changed twice in quick succession (the
+  second before the first was drawn) was drawn twice, and only the older drawing was tracked, so the other stayed in
+  the scene for good. A burst of 101 swaps on one lot left 100 stray objects; the construction check now runs that
+  burst and wants none.
 
 ### Tools
 
