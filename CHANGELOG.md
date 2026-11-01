@@ -8,8 +8,8 @@
 
 ### The page
 
-- Scrubbing hard no longer leaves buildings behind. A lot whose building changed twice before its models finished
-  loading was drawn twice, and only the older drawing was tracked, so the other stayed in the scene for good. A burst
+- Scrubbing hard no longer leaves buildings behind. A lot whose building changed twice in quick succession (the
+  second before the first was drawn) was drawn twice, and only the older drawing was tracked, so the other stayed in the scene for good. A burst
   of 101 swaps on one lot left 100 stray objects; the construction check now runs that burst and wants none.
 
 ### Tools

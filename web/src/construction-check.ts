@@ -16,7 +16,7 @@ declare global {
   interface Window {
     __ready?: boolean;
     __construction?: { active: number; rising: number; falling: number };
-    __churn?: { before: number; after: number; tracked: number; swaps: number };
+    __churn?: { before: number; after: number; trackedBefore: number; tracked: number; swaps: number };
   }
 }
 
@@ -95,11 +95,18 @@ async function main() {
     const kinds = [building, { kind: NO_BUILDING, rotation: 0 }];
     await setLot(lot.id, kinds[0]!);
     const before = scene.children.length;
+    const trackedBefore = lots.objects(lot.id).length;
     const swaps = 101;
     const done = [];
     for (let i = 0; i < swaps; i++) done.push(setLot(lot.id, kinds[i % 2]!));
     await Promise.all(done);
-    window.__churn = { before, after: scene.children.length, tracked: lots.objects(lot.id).length, swaps };
+    window.__churn = {
+      before,
+      after: scene.children.length,
+      trackedBefore,
+      tracked: lots.objects(lot.id).length,
+      swaps,
+    };
     window.__ready = true;
     return;
   }

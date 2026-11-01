@@ -107,6 +107,7 @@ for (const mode of ['build', 'demolish']) {
   const page = await browser.newPage({ viewport: { width: W, height: H }, deviceScaleFactor: 1 });
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e)));
+  page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
   await page.goto(`${pageUrl}?churn&mode=${mode}`, { waitUntil: 'load', timeout: 120_000 });
   await page.waitForFunction(() => window.__ready === true || document.body.dataset.error, null, {
     polling: 100,
@@ -120,6 +121,10 @@ for (const mode of ['build', 'demolish']) {
     `${mode}: a burst of swaps runs ${failure ?? errors[0] ?? ''}`,
   );
   if (churn) {
+    expect(
+      churn.tracked === churn.trackedBefore,
+      `${mode}: the lot tracks ${churn.tracked} objects after the burst, as after one swap (${churn.trackedBefore})`,
+    );
     expect(
       churn.after === churn.before,
       `${mode}: ${churn.swaps} swaps leave ${churn.after} objects in the scene, as one swap does (${churn.before})`,
