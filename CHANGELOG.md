@@ -6,6 +6,12 @@
 
 - Built on Felix 0.6.2: the sim's `felix-client` and `felix-wire` pins, the dev stack and CI images.
 
+### The page
+
+- Scrubbing hard no longer leaves buildings behind. A lot whose building changed twice before its models finished
+  loading was drawn twice, and only the older drawing was tracked, so the other stayed in the scene for good. A burst
+  of 101 swaps on one lot left 100 stray objects; the construction check now runs that burst and wants none.
+
 ### Tools
 
 - `clip-local.mjs` points the builder bot at the moved gateway port, and runs its stack as its own compose project so
