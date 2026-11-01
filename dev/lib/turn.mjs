@@ -14,12 +14,16 @@ export async function takeTurn({ lot, kind, rebuild, filler, send, mark, orphan 
   let cleared = false;
   if (lot.kind < filler) {
     if (!rebuild) return false;
+    // Marked before the command goes out: a hard exit while it is in flight must still report the lot.
+    mark(lot);
     const result = await send("demolish", lot, demolish(lot.id), lot.kind);
     // Nothing to demolish (an earlier run did it) is as good as done. A demolish with no answer may have been applied
     // with the answer lost, so the lot counts as bare until a build or a restore says otherwise.
-    if (result !== APPLIED && result !== EMPTY && result !== null) return false;
-    cleared = result !== EMPTY;
-    if (cleared) mark(lot);
+    cleared = result === APPLIED || result === null;
+    if (!cleared) {
+      mark(null);
+      if (result !== EMPTY) return false;
+    }
   }
   const placed = (await send("build", lot, build(lot.id, kind, lot.facing), kind)) === APPLIED;
   if (placed) {

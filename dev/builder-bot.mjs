@@ -194,7 +194,8 @@ let bare = null;
 function finish(reason, code) {
   if (finished) return;
   finished = true;
-  if (bare) emit({ type: "orphan", lot: bare.id, kind: bare.kind, restored: false });
+  // Cut off mid-turn, nothing says whether the old building stands.
+  if (bare) emit({ type: "orphan", lot: bare.id, kind: bare.kind, restored: null });
   const xs = built.map((b) => b.x);
   const zs = built.map((b) => b.z);
   const mean = (a) => a.reduce((s, v) => s + v, 0) / a.length;

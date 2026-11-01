@@ -46,6 +46,7 @@ test("ends the turn at a demolish the sim refuses", async () => {
   assert.equal(r.built, false);
   assert.deepEqual(r.sent, ["demolish:grow"]);
   assert.deepEqual(r.orphans, []);
+  assert.deepEqual(r.marks, [7, null]);
 });
 
 test("builds on a lot that was already empty, with nothing to restore", async () => {
@@ -53,6 +54,7 @@ test("builds on a lot that was already empty, with nothing to restore", async ()
   assert.equal(r.built, false);
   assert.deepEqual(r.sent, ["demolish:grow", "build:grow"]);
   assert.deepEqual(r.orphans, []);
+  assert.deepEqual(r.marks, [7, null]);
 });
 
 test("builds the old kind back when the build is refused after a demolish", async () => {
@@ -74,6 +76,7 @@ test("treats a demolish with no answer as possibly applied", async () => {
   assert.equal(r.built, false);
   assert.deepEqual(r.sent, ["demolish:grow", "build:grow", "build:restore"]);
   assert.deepEqual(r.orphans, [{ lot: 7, restored: null }]);
+  assert.deepEqual(r.marks, [7, null]);
 });
 
 test("a demolish with no answer that was applied lets the build take", async () => {
