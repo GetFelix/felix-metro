@@ -8,6 +8,13 @@
 
 ### The page
 
+- Camera controls. Left-drag turns and tilts, right-drag or Shift-drag slides, the wheel and a pinch zoom toward the
+  point under the pointer, one finger turns and two fingers slide on a touch screen, and `W` `A` `S` `D`, `Q` `E`,
+  `+` `-` and `0` do the same from the keyboard (`0` goes back to the opening view). The point the camera looks at
+  cannot leave the city, at any zoom, on a 2 by 2 or a 4 by 4 map. Moves are damped and the camera never bounces.
+  The camera is one object with `moveTo`, `state` and `setState` for the features that move it, and a move the app
+  makes jumps for a person who asked for reduced motion. `web/src/camera.ts` replaces Three.js's `OrbitControls`,
+  with the maths in `web/src/camera-math.ts`.
 - Timeline: a drag no longer seeks to a moment retention has just dropped. The drag keeps the bar it began on, so a move
   at the left end could land before the oldest tick the city still holds; it now stops at the oldest one held.
 

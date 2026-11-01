@@ -63,6 +63,60 @@ The app (`web/`) draws the city generated from the seed in the URL hash (`/#harb
 The screenshots above are `?t=12&still`, `?t=17.8&still` and `?t=21&still` at
 1600 × 900.
 
+## Camera
+
+You move around the city by moving the point the camera looks at, standing nearer or farther from it, or walking the camera round it. These controls work the same on a generated city and on the style frame.
+
+| Input | What it does |
+|---|---|
+| Mouse: drag with the left button | Turn and tilt the view around the point it looks at |
+| Mouse: drag with the right button, or hold Shift and drag | Slide the view across the city |
+| Mouse wheel | Zoom toward the point under the pointer |
+| Trackpad: click and drag | Turn and tilt, as with a mouse |
+| Trackpad: hold Shift and drag | Slide the view (a trackpad has no right button) |
+| Trackpad: pinch or two-finger scroll | Zoom toward the point under the pointer |
+| Touch: drag with one finger | Turn and tilt |
+| Touch: drag with two fingers | Slide the view |
+| Touch: pinch | Zoom toward the point between the fingers |
+| Keyboard: `W` `A` `S` `D` | Slide the view forward, left, back and right (hold to keep going) |
+| Keyboard: `Q` `E` | Turn the view left and right |
+| Keyboard: `+` `-` | Zoom in and out |
+| Keyboard: `0` | Return to the view the page opened on, which is the style frame's |
+
+The keys are ignored while you type in a text field or hold Ctrl, Cmd or Alt, so browser shortcuts still work. The arrow keys step the timeline and Space plays, so the camera leaves them alone. The table of keys is data (`CAMERA_KEYS` in `web/src/camera-keys.ts`), so the key list in the UI shows the same rows.
+
+Three limits keep the view in the city:
+
+- **Tilt** stays between 0.5 and 1.15 radians from straight down, so the camera never goes edge-on or under the ground.
+- **Distance** stays between 8 and 40 tiles on the style frame's map, and the far limit grows with the size of a bigger city.
+- **The point it looks at stays inside the map.** Zooming out and sliding as far as you like stops at the city's edge, for a 2 by 2 city and a 4 by 4 one alike. The bounds come from the generated city's size (`cityBounds` in `web/src/camera-math.ts`).
+
+### How it works
+
+The view is five numbers: the ground point (x, z) it looks at, the distance, and two angles (`azimuth` round the point, `polar` down from straight above). Everything you do changes a goal view, and the camera chases the goal on a critically damped spring, which arrives without bouncing. Dragging uses a quick spring. A move made by the app (`moveTo`, `setState`, `reset`) uses a slower one that takes about half a second. If the person has asked their system for reduced motion, those moves jump instead.
+
+```mermaid
+flowchart LR
+  input["Mouse, touch, keys"] --> goal["Goal view"]
+  app["moveTo, setState, reset"] --> goal
+  goal --> spring["Spring"]
+  spring --> camera["Camera"]
+```
+
+Zoom toward the pointer works on the ground under the pointer. The camera moves along that point's line of sight, so the point stays under the pointer while the distance changes, and the look-at point slides to match. Dragging with the right button grabs the ground in the same way, so the ground follows the pointer exactly, and a slide covers more ground the farther out the camera is. The maths is in `web/src/camera-math.ts` with no DOM in it, and `web/src/camera.test.ts` and `web/src/camera-math.test.ts` check it, including that the ground under the pointer stays put.
+
+The rest of the app drives the camera through three calls on the object `createCamera` returns (`controls`):
+
+```ts
+controls.moveTo({ x: 6, z: -4 }, 12, Math.PI / 4, 0.9); // ease to look at (6, -4) from 12 tiles away
+const saved = JSON.stringify(controls.state()); // {"x":6,"z":-4,"distance":12,"azimuth":0.785,"polar":0.9}
+controls.setState(JSON.parse(saved), { ease: false }); // jump straight back to it
+```
+
+`moveTo(target, distance, azimuth, polar, { ease })` holds every number inside the limits and turns the short way round. `state()` is where the camera is heading, rounded to three places, so a link can carry it. `setState` takes the same object back and returns false for anything else. In a dev build, or under `?trace`, the camera is on the page as `window.__camera` for trying these in the console.
+
+The opening drift (`startIntro`) places the camera through the same object and ends when the person touches any control. Under `?capture&trace` the controls are off and the clip script positions the camera itself, as before.
+
 ## Construction
 
 A building takes 8 ticks (two seconds at the default speed) to go up or come down, from the tick of its `built` or

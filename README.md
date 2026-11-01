@@ -17,6 +17,7 @@ and play forward from there.
 
 ## What you will be able to do
 
+- Look around the city: turn, tilt, slide and zoom with a mouse, trackpad, touch or the keyboard (see [Camera controls](#camera-controls))
 - Watch a generated city go about its day in 3D: residents commute, shop and go home, and the sun rises and sets. Rush hour at 08:00 and 17:15 puts about 23 to 29 cars and 24 to 36 walkers on the streets of the busiest district, and about 70 cars and 70 walkers across the harbor city at 2 by 2 (522 residents; `cargo run --release -p felix-metro-core --example density -- harbor 2` prints the counts). The log is estimated at about 8 KB/s averaged over a day at 20,000 residents (`design.md` has the arithmetic); the measured harbor city of 522 residents in 4 districts averages 656 B/s, and scaled to 20,000 residents in 16 districts the busiest minute of the rush peaks near 17 KB/s, from the hourly snapshots of each district landing together, which #95 tracks (`cargo test -p felix-metro-sim --release report_load -- --ignored --nocapture` measures it).
 - Drag the timeline back to any moment the log holds and see the city exactly as it was
 - Let go and watch it play forward and catch up to live
@@ -54,7 +55,7 @@ there. [docs/design.md](docs/design.md) has the details.
 
 | M   | Milestone           | State                                                                                                                                                                                                                                                                         |
 | --- | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 0   | The look, locked    | In progress: style frame, assets, daylight, post-processing and quality tiers done; instanced traffic, the UI shell and camera controls open                                                                                                                                  |
+| 0   | The look, locked    | In progress: style frame, assets, daylight, post-processing and quality tiers and camera controls done; instanced traffic and the UI shell open                                                                                                                                  |
 | 1   | A live city         | Done                                                                                                                                                                                                                                                                          |
 | 2   | Time travel         | In progress: keyframes, seeking, the timeline scrubber and rewind then follow done                                                                                                                                                                                            |
 | 3   | Follow a life       | Planned                                                                                                                                                                                                                                                                       |
@@ -73,6 +74,25 @@ A city the gateway refuses (a misspelled name, or no access) shows a message ins
 retrying. The city name in the top left opens a list of every city. Following a resident and the page's own
 building tools are not built yet; a command published to the city's command stream by any client with a
 builder's token is applied by the sim and shows up in the page, rising over 8 ticks of city time inside a scaffold (a demolished building scales down in a puff of dust). Rewind through it and it comes down again; the low quality tier skips the scaffold and the dust.
+
+## Camera controls
+
+Drag to turn the view, scroll to zoom toward the pointer, and slide with the right button or Shift. The view stays inside the city.
+
+| Input | What it does |
+| ----- | ------------ |
+| Mouse: left-drag | Turn and tilt the view |
+| Mouse: right-drag, or Shift and drag | Slide the view across the city |
+| Mouse wheel, trackpad pinch or two-finger scroll | Zoom toward the point under the pointer |
+| Touch: one finger | Turn and tilt |
+| Touch: two fingers | Slide, and pinch to zoom |
+| Keyboard: `W` `A` `S` `D` | Slide forward, left, back and right |
+| Keyboard: `Q` `E` | Turn left and right |
+| Keyboard: `+` `-` | Zoom in and out |
+| Keyboard: `0` | Back to the view the page opened on |
+
+The arrow keys and Space belong to the timeline, and keys typed into a text field are left alone.
+[docs/art.md](docs/art.md#camera) explains how the camera works and the calls the rest of the page uses to move it.
 
 ## Recording the clip
 
