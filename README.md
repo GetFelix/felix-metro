@@ -222,14 +222,13 @@ builds a new one in its place. Between the two the lot is bare, so the bot keeps
 ```mermaid
 flowchart TD
   A[demolish the old building] --> B{answer?}
-  B -- applied --> C[build the new kind]
-  B -- already empty --> C
   B -- refused --> Z[skip the lot]
-  B -- no answer --> C
+  B -- already empty --> F[build the new kind]
+  F -- any result --> Z
+  B -- applied, or no answer --> C[build the new kind]
   C -- applied --> Y[done: the lot has a new building]
-  C -- refused or no answer --> D[build the old kind back]
+  C -- refused, or no answer --> D[build the old kind back]
   D --> E[log an orphan line: restored true, false or null]
-  C -- refused on a lot that was already empty --> Z
 ```
 
 A demolish with no answer is treated as applied, because the sim may have applied it and the answer been lost. If
