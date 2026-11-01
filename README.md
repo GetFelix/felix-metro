@@ -213,7 +213,7 @@ The bot asks the core crate's `city_json` example for it (it needs `cargo`), gro
 and puts homes on it. It never demolishes by default: a lot that holds a building is skipped.
 `--rebuild` demolishes and then builds on such lots. If the build is then refused the bot builds the
 old kind back and logs an `orphan` line saying whether that worked (`restored` is `null` when the restore got
-no answer either). A demolish that gets no answer is taken as applied, since the sim may have applied it and the
+no answer, or the bot was stopped mid-turn). A demolish that gets no answer is taken as applied, since the sim may have applied it and the
 answer been lost; `dev/check-builder-bot.mjs` fails on an orphan that is not `true`. Every command's result is
 read: a refusal (in use, occupied, busy, unsupported) moves on to the next lot, and no lot is sent
 twice.
