@@ -141,7 +141,7 @@ flowchart TD
 
 **Rebuilding the world.** A keyframe says where each resident is and what they are doing. It does not say when a
 trip left or which block of the day a resident is in, and the sim needs both to carry on. The restart reads them from
-two places: the `trip` event of everyone on the road, found in the four city hours before the keyframe (a trip takes minutes of city time), and the resident's schedule, where the lot, the activity and the tick they leave at name the block. It checks
+two places: the `trip` event of everyone on the road, found in the four city hours before the keyframe (a trip takes minutes of city time, so that is nearly always enough; if a trip began earlier, the restart reads four times further back and tries again, up to the start of the log), and the resident's schedule, where the lot, the activity and the tick they leave at name the block. It checks
 each trip against the keyframe's vehicle and refuses to start if they disagree, rather than guess. The cars on each
 road, which new routes are planned around, are counted again from the trips under way.
 
@@ -162,7 +162,7 @@ stopped reading.
 
 **When it refuses.** The restart stops the sim with a message when a district holds a record
 but no keyframe (another sim's data), when a district's ticks are not consecutive, or when a resident on the road in
-the keyframe has no `trip` event or one that disagrees with the keyframe. Fix or remove the log; the sim does not
+the keyframe has no `trip` event anywhere in the log or one that disagrees with the keyframe. Fix or remove the log; the sim does not
 guess.
 
 ## Records

@@ -8,15 +8,19 @@ use std::ops::RangeInclusive;
 use anyhow::{Context, Result, bail, ensure};
 use felix_metro_core::City;
 use felix_metro_core::TICKS_PER_HOUR;
-use felix_metro_core::record::{Event, TickRecord};
+use felix_metro_core::record::{Doing, Event, TickRecord};
 use tracing::warn;
 
 use crate::runner::{Log, Retry};
 use crate::world::{Departure, World};
 
-/// Records before the keyframe a restart reads, so that a trip that left
-/// before it is found. A trip takes minutes of city time.
-const LOOKBACK: u64 = 4 * TICKS_PER_HOUR as u64;
+/// Records before the keyframe a restart first reads, so that a trip that
+/// left before it is found. A trip takes minutes of city time; a longer one
+/// makes [`read_history`] read further back.
+pub(crate) const LOOKBACK: u64 = 4 * TICKS_PER_HOUR as u64;
+
+/// How much further back each read after the first goes.
+const LOOKBACK_GROWTH: u64 = 4;
 
 /// Records asked for at a time.
 const PAGE: u32 = 1000;
@@ -59,6 +63,7 @@ pub(crate) async fn read_history<L: Log>(
     log: &L,
     districts: usize,
     retry: Retry,
+    lookback: u64,
 ) -> Result<Option<History>> {
     let mut newest = Vec::with_capacity(districts);
     for district in 0..districts {
@@ -109,6 +114,35 @@ pub(crate) async fn read_history<L: Log>(
         None
     };
 
+    // A resident on the road at the keyframe is rebuilt from the `trip` event of their departure. If it lies before
+    // the lookback, read further back rather than refuse: the city has to come back whatever its trips were.
+    let mut lookback = lookback;
+    loop {
+        let (history, from_start) =
+            collect(log, districts, retry, &newest, &at, base, lookback).await?;
+        if from_start || history.travellers_without_departure() == 0 {
+            return Ok(Some(history));
+        }
+        warn!(
+            lookback,
+            "a trip began before the records read, reading further back"
+        );
+        lookback = lookback.saturating_mul(LOOKBACK_GROWTH).max(LOOKBACK);
+    }
+}
+
+/// Reads every district from `lookback` records before the keyframe at `base`
+/// to its end. The flag is true when that reached the start of every log.
+async fn collect<L: Log>(
+    log: &L,
+    districts: usize,
+    retry: Retry,
+    newest: &[Option<u64>],
+    at: &[Option<u32>],
+    base: Option<u32>,
+    lookback: u64,
+) -> Result<(History, bool)> {
+    let mut from_start = true;
     let mut ticks: BTreeMap<u32, Vec<Option<TickRecord>>> = BTreeMap::new();
     let mut tails = Vec::with_capacity(districts);
     for district in 0..districts {
@@ -125,10 +159,11 @@ pub(crate) async fn read_history<L: Log>(
                 keyframe
                     .checked_sub(behind)
                     .with_context(|| format!("district {district}: fewer records than ticks since the keyframe at {base}"))?
-                    .saturating_sub(LOOKBACK)
+                    .saturating_sub(lookback)
             }
             None => 0,
         };
+        from_start &= start == 0;
         let mut next = start;
         let mut last: Option<u32> = None;
         loop {
@@ -231,7 +266,7 @@ pub(crate) async fn read_history<L: Log>(
             }
         }
     }
-    Ok(Some(History {
+    let history = History {
         epoch,
         speed,
         tails,
@@ -241,7 +276,8 @@ pub(crate) async fn read_history<L: Log>(
         ticks,
         departures,
         cursors,
-    }))
+    };
+    Ok((history, from_start))
 }
 
 fn decode(district: usize, bytes: &[u8]) -> Result<TickRecord> {
@@ -294,6 +330,18 @@ impl History {
     /// The speed the newest record ran at.
     pub(crate) fn speed(&self) -> u8 {
         self.speed
+    }
+
+    /// Residents on the road in the base keyframes whose `trip` event was not read.
+    fn travellers_without_departure(&self) -> usize {
+        let Some(base) = self.base else { return 0 };
+        self.ticks[&base]
+            .iter()
+            .flatten()
+            .filter_map(|r| r.keyframe.as_ref())
+            .flat_map(|k| &k.residents)
+            .filter(|r| matches!(r.doing, Doing::Trip(_)) && !self.departures.contains_key(&r.id))
+            .count()
     }
 
     pub(crate) fn tails(&self) -> &[Tail] {

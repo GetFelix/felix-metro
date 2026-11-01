@@ -102,6 +102,25 @@ async fn a_restart_gives_the_log_a_straight_run_would_have() {
     }
 }
 
+/// A trip that left before the records a restart first reads must not stop the city coming back.
+#[tokio::test(start_paused = true)]
+async fn a_trip_that_began_before_the_lookback_is_found_by_reading_further_back() {
+    const TOTAL: u32 = 2100;
+    let whole = records(&straight(quick(TOTAL)).await);
+    // Stopped in the morning rush, with the 08:00 keyframe full of residents who left earlier.
+    let log = Memory::healthy();
+    run_city("harbor", harbor(), quick(1960), log.clone())
+        .await
+        .unwrap();
+    let retry = Retry::of(&quick(TOTAL));
+    // No lookback at all reads nothing of the trips under way.
+    let history = read_history(&log, 4, retry, 0).await.unwrap();
+    run_with_history("harbor", harbor(), quick(TOTAL), log.clone(), None, history)
+        .await
+        .unwrap();
+    assert!(records(&log) == whole);
+}
+
 #[tokio::test(start_paused = true)]
 async fn a_restart_does_not_change_the_epoch_or_the_speed() {
     let mut first = quick(300);

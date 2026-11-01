@@ -16,7 +16,7 @@ use tracing::{info, warn};
 use crate::commands::{Incoming, MAX_HELD, MAX_PER_TICK, MAX_REFUSED, apply_all, refuse_busy};
 use crate::control::check_speed;
 use crate::latency::Window;
-use crate::resume::{History, read_history, retrying};
+use crate::resume::{History, LOOKBACK, read_history, retrying};
 use crate::world::World;
 
 const REPORT_EVERY: Duration = Duration::from_secs(5);
@@ -184,7 +184,7 @@ pub async fn load_history<L: Log>(
     districts: usize,
     settings: &Settings,
 ) -> Result<Option<History>> {
-    read_history(log, districts, Retry::of(settings)).await
+    read_history(log, districts, Retry::of(settings), LOOKBACK).await
 }
 
 /// Like [`run_city_with`], over a history already read.
