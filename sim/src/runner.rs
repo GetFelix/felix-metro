@@ -16,6 +16,7 @@ use tracing::{info, warn};
 use crate::commands::{Incoming, MAX_HELD, MAX_PER_TICK, MAX_REFUSED, apply_all, refuse_busy};
 use crate::control::check_speed;
 use crate::latency::Window;
+use crate::resume::{History, read_history};
 use crate::world::World;
 
 const REPORT_EVERY: Duration = Duration::from_secs(5);
@@ -49,6 +50,24 @@ pub trait Log: Clone + Send + Sync + 'static {
         district: u16,
         offset: u64,
     ) -> impl Future<Output = Result<Option<Vec<u8>>>> + Send;
+
+    /// The offset of the newest keyframe `district` committed, or `None` before
+    /// its first.
+    fn keyframe(&self, district: u16) -> impl Future<Output = Result<Option<u64>>> + Send;
+
+    /// Up to `max` records of `district` from `offset` on, each with its
+    /// offset. Empty at the tail.
+    fn read_from(
+        &self,
+        district: u16,
+        offset: u64,
+        max: u32,
+    ) -> impl Future<Output = Result<Vec<(u64, Vec<u8>)>>> + Send;
+
+    /// The commands at offsets `from..until` of the city's command stream, less
+    /// any that carry no sender stamp.
+    fn commands(&self, from: u64, until: u64)
+    -> impl Future<Output = Result<Vec<Incoming>>> + Send;
 }
 
 #[derive(Clone, Debug)]
@@ -127,10 +146,11 @@ struct Shard {
     keyframe: u64,
 }
 
-/// Runs `city` from tick 0, committing to `log`, until `settings.stop_at`. A
-/// tick is never skipped: when a commit is slow the clock runs late. Fails if
-/// the log has a record this run did not write, which means another sim is
-/// live (or this one is restarting over its own history).
+/// Runs `city`, committing to `log`, until `settings.stop_at`. A new city
+/// starts at tick 0; one whose log holds records carries on from the next tick
+/// (see [`run_with_history`]). A tick is never skipped: when a commit is slow
+/// the clock runs late. Fails if the log has a record this run did not write,
+/// which means another sim is live.
 ///
 /// A speed change is applied before the next tick is stepped: that tick's
 /// header carries the new speed and each district's record a `speed` event.
@@ -150,39 +170,135 @@ pub async fn run_city_with<L: Log>(
     city: City,
     settings: Settings,
     log: L,
-    mut inbox: Option<mpsc::Receiver<Incoming>>,
+    inbox: Option<mpsc::Receiver<Incoming>>,
 ) -> Result<Done> {
-    let mut speed = check_speed(settings.ticks_per_second)?;
+    let history = load_history(&log, city.districts.len(), &settings).await?;
+    run_with_history(name, city, settings, log, inbox, history).await
+}
+
+/// Reads what the log holds of a city with `districts` districts, or `None`
+/// for a city that has not started. The caller opens the command stream at
+/// [`History::commands_from`] before running.
+pub async fn load_history<L: Log>(
+    log: &L,
+    districts: usize,
+    settings: &Settings,
+) -> Result<Option<History>> {
+    read_history(log, districts, Retry::of(settings)).await
+}
+
+/// Like [`run_city_with`], over a history already read.
+///
+/// With a history, the city carries on from the tick after the newest one the
+/// log holds: the world is rebuilt from the newest keyframe and the records
+/// after it, a tick some districts committed and others did not is finished
+/// (what the commands of that tick did is re-derived from the command stream),
+/// and the city runs at the speed it last had. The epoch stays the same, since
+/// the ticks continue.
+pub async fn run_with_history<L: Log>(
+    name: &str,
+    city: City,
+    mut settings: Settings,
+    log: L,
+    mut inbox: Option<mpsc::Receiver<Incoming>>,
+    history: Option<History>,
+) -> Result<Done> {
     let mut control = settings.speed.clone();
+    let mut shards = vec![Shard::default(); city.districts.len()];
+    let mut retries = 0u64;
+    let mut report = Report::new(Instant::now());
+    // The command stream offset the commands applied so far reach. A run with
+    // no inbox reads no commands and keeps none.
+    let mut cursor = inbox.is_some().then_some(0);
+    let retry = Retry::of(&settings);
+    let (mut world, mut speed) = match &history {
+        None => (World::new(city), check_speed(settings.ticks_per_second)?),
+        Some(history) => {
+            settings.epoch = history.epoch();
+            cursor = history.commands_from();
+            for (shard, tail) in shards.iter_mut().zip(history.tails()) {
+                *shard = Shard {
+                    next: tail.next,
+                    keyframe: tail.keyframe,
+                };
+            }
+            let speed = check_speed(history.speed())?;
+            (history.world(city)?, speed)
+        }
+    };
     if speed == 0 && control.is_none() && inbox.is_none() {
         bail!("the city starts paused and nothing can resume it");
     }
-    let mut world = World::new(city);
     info!(
         city = name,
         districts = world.districts(),
         residents = world.residents(),
-        ticks_per_second = settings.ticks_per_second,
+        ticks_per_second = speed,
+        resumed_at = history.as_ref().map(|_| world.next_tick()),
         "city starts"
     );
+    if history.is_some() {
+        // A restarted city runs at the speed it was left at, whatever the operator started the sim with.
+        if let Some(out) = &settings.speed_out {
+            out.send_replace(speed);
+            if let Some(control) = control.as_mut() {
+                control.borrow_and_update();
+            }
+        }
+    }
     let mut period = tick_period(speed);
     let mut timer = new_timer(period, true);
     // Set once the tick that carried speed 0 is committed.
     let mut parked = speed == 0;
-    let mut shards = vec![Shard::default(); world.districts()];
-    let mut retries = 0u64;
-    let mut report = Report::new(Instant::now());
     let mut queue: VecDeque<Incoming> = VecDeque::new();
     let mut refused: VecDeque<Incoming> = VecDeque::new();
-    let warm = settings
-        .warmup_ticks
-        .min(settings.stop_at.unwrap_or(u32::MAX));
-    if warm > 0 && speed != 0 {
-        let retry = Retry::of(&settings);
-        if has_history(&log, world.districts(), retry).await? {
-            info!(city = name, "the city has history, starting live");
-        } else {
-            retries += warm_up(name, &mut world, &mut shards, warm, speed, &log, &settings).await?;
+    if let Some(history) = &history {
+        for tick in history.unfinished() {
+            let (at, changed) = history.speed_at(tick);
+            let incoming = match history.commands_in(tick) {
+                Some((from, to)) => log.commands(from, to).await?,
+                None => Vec::new(),
+            };
+            let said = history.cursor_event(tick);
+            cursor = said.or(cursor);
+            let mut wanted = at;
+            let commanded = apply_all(&mut world, incoming, &mut wanted);
+            let step = world.step();
+            let tick_retries = commit_tick(
+                &log,
+                retry,
+                Tick {
+                    epoch: settings.epoch,
+                    number: tick,
+                    speed: at,
+                    changed: changed.then_some(at),
+                    cursor: said,
+                    wall_us: unix_micros(),
+                },
+                step,
+                commanded,
+                &mut shards,
+                |district| !history.lacks(district, tick),
+            )
+            .await?;
+            retries += tick_retries;
+        }
+        info!(
+            city = name,
+            tick = world.next_tick(),
+            "city resumed from its log"
+        );
+    } else {
+        let warm = settings
+            .warmup_ticks
+            .min(settings.stop_at.unwrap_or(u32::MAX));
+        if warm > 0 && speed != 0 {
+            let plan = WarmUp {
+                ticks: warm,
+                speed,
+                cursor,
+            };
+            retries += warm_up(name, &mut world, &mut shards, plan, &log, &settings).await?;
             timer = new_timer(period, true);
             report = Report::new(Instant::now());
         }
@@ -192,7 +308,7 @@ pub async fn run_city_with<L: Log>(
     }
     loop {
         let tick = world.next_tick();
-        if settings.stop_at == Some(tick) {
+        if settings.stop_at.is_some_and(|stop| tick >= stop) {
             return Ok(Done {
                 ticks: tick,
                 retries,
@@ -268,10 +384,13 @@ pub async fn run_city_with<L: Log>(
         }
         let taken: Vec<Incoming> = queue.drain(..queue.len().min(MAX_PER_TICK)).collect();
         let room = MAX_PER_TICK - taken.len();
+        let mut moved = advance(&mut cursor, &taken);
         let mut commanded = apply_all(&mut world, taken, &mut wanted);
         // Commands the paused city had no room for are refused once its queue is clear.
         if queue.is_empty() {
-            commanded[0].extend(refused.drain(..refused.len().min(room)).map(refuse_busy));
+            let busy: Vec<Incoming> = refused.drain(..refused.len().min(room)).collect();
+            moved |= advance(&mut cursor, &busy);
+            commanded[0].extend(busy.into_iter().map(refuse_busy));
         }
         let mut changed = None;
         if wanted != speed {
@@ -294,53 +413,27 @@ pub async fn run_city_with<L: Log>(
             timer.tick().await;
         }
         let started = Instant::now();
-        let wall_us = unix_micros();
-        let mut commits = JoinSet::new();
-        for (district, step) in world.step().into_iter().enumerate() {
-            let commanded = std::mem::take(&mut commanded[district]);
-            let shard = shards[district];
-            let keyframe = step.keyframe.is_some();
-            // A keyframe names itself, which the expected offset makes possible.
-            let keyframe_offset = if keyframe { shard.next } else { shard.keyframe };
-            let record = TickRecord {
-                header: Header {
-                    epoch: settings.epoch,
-                    district: district as u16,
-                    tick,
-                    speed,
-                    keyframe_offset,
-                    wall_us,
-                },
-                keyframe: step.keyframe,
-                events: changed
-                    .map(|ticks_per_second| Event::Speed { ticks_per_second })
-                    .into_iter()
-                    .chain(commanded)
-                    .chain(step.events)
-                    .collect(),
-            };
-            let bytes = record
-                .encode()
-                .with_context(|| format!("encode district {district} tick {tick}"))?;
-            let log = log.clone();
-            let retry = Retry::of(&settings);
-            commits.spawn(async move {
-                let attempts =
-                    commit_until_written(&log, district as u16, shard.next, bytes, keyframe, retry)
-                        .await?;
-                Ok::<_, anyhow::Error>((district, keyframe, attempts))
-            });
-        }
-        while let Some(done) = commits.join_next().await {
-            let (district, keyframe, attempts) = done.context("a commit task stopped")??;
-            let shard = &mut shards[district];
-            if keyframe {
-                shard.keyframe = shard.next;
-            }
-            shard.next += 1;
-            retries += u64::from(attempts - 1);
-            report.retried += u64::from(attempts - 1);
-        }
+        let step = world.step();
+        let keyframe = step[0].keyframe.is_some();
+        let attempts = commit_tick(
+            &log,
+            retry,
+            Tick {
+                epoch: settings.epoch,
+                number: tick,
+                speed,
+                changed,
+                cursor: cursor.filter(|_| moved || keyframe),
+                wall_us: unix_micros(),
+            },
+            step,
+            commanded,
+            &mut shards,
+            |_| false,
+        )
+        .await?;
+        retries += attempts;
+        report.retried += attempts;
         parked = speed == 0;
         let took = started.elapsed();
         report.latency.record(took);
@@ -356,6 +449,96 @@ pub async fn run_city_with<L: Log>(
             report.log(name, now);
         }
     }
+}
+
+/// Moves `cursor` past the commands in `taken`; true if it moved.
+fn advance(cursor: &mut Option<u64>, taken: &[Incoming]) -> bool {
+    let reached = taken.iter().filter_map(|c| c.offset).map(|o| o + 1).max();
+    match reached {
+        Some(reached) if cursor.is_none_or(|c| reached > c) => {
+            *cursor = Some(reached);
+            true
+        }
+        _ => false,
+    }
+}
+
+/// What a tick's records have in common.
+struct Tick {
+    epoch: u32,
+    number: u32,
+    speed: u8,
+    /// Set on the tick the speed changed, and goes in a `speed` event.
+    changed: Option<u8>,
+    /// The command stream position to record, on the ticks that record one.
+    cursor: Option<u64>,
+    wall_us: u64,
+}
+
+/// Encodes the tick's record for each district and commits them, except the
+/// districts `has` says already hold the tick. Waits for every answer, then
+/// moves the districts' offsets on. Returns the commits that had to be sent
+/// again.
+async fn commit_tick<L: Log>(
+    log: &L,
+    retry: Retry,
+    tick: Tick,
+    step: Vec<crate::world::DistrictTick>,
+    mut commanded: Vec<Vec<Event>>,
+    shards: &mut [Shard],
+    has: impl Fn(usize) -> bool,
+) -> Result<u64> {
+    let mut commits = JoinSet::new();
+    for (district, step) in step.into_iter().enumerate() {
+        if has(district) {
+            continue;
+        }
+        let commanded = std::mem::take(&mut commanded[district]);
+        let shard = shards[district];
+        let keyframe = step.keyframe.is_some();
+        // A keyframe names itself, which the expected offset makes possible.
+        let keyframe_offset = if keyframe { shard.next } else { shard.keyframe };
+        let record = TickRecord {
+            header: Header {
+                epoch: tick.epoch,
+                district: district as u16,
+                tick: tick.number,
+                speed: tick.speed,
+                keyframe_offset,
+                wall_us: tick.wall_us,
+            },
+            keyframe: step.keyframe,
+            events: tick
+                .changed
+                .map(|ticks_per_second| Event::Speed { ticks_per_second })
+                .into_iter()
+                .chain(commanded)
+                .chain(step.events)
+                .chain(tick.cursor.map(|next| Event::CommandCursor { next }))
+                .collect(),
+        };
+        let bytes = record
+            .encode()
+            .with_context(|| format!("encode district {district} tick {}", tick.number))?;
+        let log = log.clone();
+        commits.spawn(async move {
+            let attempts =
+                commit_until_written(&log, district as u16, shard.next, bytes, keyframe, retry)
+                    .await?;
+            Ok::<_, anyhow::Error>((district, keyframe, attempts))
+        });
+    }
+    let mut retries = 0;
+    while let Some(done) = commits.join_next().await {
+        let (district, keyframe, attempts) = done.context("a commit task stopped")??;
+        let shard = &mut shards[district];
+        if keyframe {
+            shard.keyframe = shard.next;
+        }
+        shard.next += 1;
+        retries += u64::from(attempts - 1);
+    }
+    Ok(retries)
 }
 
 /// Reports a commanded `speed` on the operator's watch, unless the operator
@@ -433,16 +616,16 @@ fn new_timer(period: Duration, immediate: bool) -> tokio::time::Interval {
 
 /// How a commit is sent again.
 #[derive(Clone, Copy)]
-struct Retry {
-    timeout: Duration,
-    backoff: Duration,
-    max_backoff: Duration,
-    max_failures: u32,
-    max_permanent: u32,
+pub(crate) struct Retry {
+    pub(crate) timeout: Duration,
+    pub(crate) backoff: Duration,
+    pub(crate) max_backoff: Duration,
+    pub(crate) max_failures: u32,
+    pub(crate) max_permanent: u32,
 }
 
 impl Retry {
-    fn of(settings: &Settings) -> Self {
+    pub(crate) fn of(settings: &Settings) -> Self {
         Retry {
             timeout: settings.commit_timeout,
             backoff: settings.backoff,
@@ -457,35 +640,14 @@ impl Retry {
 /// holds the stepping back instead of piling records up in memory.
 const WARMUP_AHEAD: usize = 256;
 
-/// True when any district already has a record. A read that fails is tried
-/// again, since a shard may still be electing a leader at startup.
-async fn has_history<L: Log>(log: &L, districts: usize, retry: Retry) -> Result<bool> {
-    let mut wait = retry.backoff;
-    for district in 0..districts {
-        let mut failures = 0u32;
-        loop {
-            match tokio::time::timeout(retry.timeout, log.read(district as u16, 0)).await {
-                Ok(Ok(Some(_))) => return Ok(true),
-                Ok(Ok(None)) => break,
-                Ok(Err(err)) => {
-                    failures += 1;
-                    if failures >= retry.max_failures {
-                        return Err(err.context(format!("district {district}: read for history")));
-                    }
-                    warn!(district, error = %format!("{err:#}"), "could not look for history, trying again");
-                }
-                Err(_) => {
-                    failures += 1;
-                    if failures >= retry.max_failures {
-                        bail!("district {district}: no answer looking for history");
-                    }
-                }
-            }
-            tokio::time::sleep(wait).await;
-            wait = (wait * 2).min(retry.max_backoff);
-        }
-    }
-    Ok(false)
+/// What a warm-up commits.
+#[derive(Clone, Copy)]
+struct WarmUp {
+    ticks: u32,
+    /// The speed the ticks are stamped as if they had run at.
+    speed: u8,
+    /// The command stream position the keyframes record.
+    cursor: Option<u64>,
 }
 
 /// Commits ticks `0..ticks` of a new city without waiting out their periods.
@@ -499,11 +661,15 @@ async fn warm_up<L: Log>(
     name: &str,
     world: &mut World,
     shards: &mut [Shard],
-    ticks: u32,
-    speed: u8,
+    plan: WarmUp,
     log: &L,
     settings: &Settings,
 ) -> Result<u64> {
+    let WarmUp {
+        ticks,
+        speed,
+        cursor,
+    } = plan;
     info!(city = name, ticks, "warming up");
     let began = Instant::now();
     let period_us = 1_000_000 / u64::from(speed);
@@ -545,7 +711,15 @@ async fn warm_up<L: Log>(
                     wall_us,
                 },
                 keyframe: step.keyframe,
-                events: step.events,
+                events: step
+                    .events
+                    .into_iter()
+                    .chain(
+                        cursor
+                            .filter(|_| keyframe)
+                            .map(|next| Event::CommandCursor { next }),
+                    )
+                    .collect(),
             };
             let bytes = record
                 .encode()

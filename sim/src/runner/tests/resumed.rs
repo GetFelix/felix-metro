@@ -1,0 +1,344 @@
+//! A city started over a log that already holds its history.
+
+use felix_metro_core::record::{
+    BuildingDiff, Command, CommandRecord, RESULT_APPLIED, principal_hash,
+};
+
+use super::*;
+use crate::commands::tests::{city as harbor, free_lot};
+
+/// Runs as fast as the log answers.
+fn quick(stop: u32) -> Settings {
+    Settings {
+        paced: false,
+        ..settings(stop)
+    }
+}
+
+/// Every district's records, with the wall clock zeroed: the one thing a
+/// restart is allowed to change.
+fn records(log: &Memory) -> Vec<Vec<TickRecord>> {
+    (0..4)
+        .map(|district| {
+            log.records(district)
+                .into_iter()
+                .map(|mut r| {
+                    r.header.wall_us = 0;
+                    r
+                })
+                .collect()
+        })
+        .collect()
+}
+
+async fn straight(settings: Settings) -> Memory {
+    let log = Memory::healthy();
+    run_city("harbor", harbor(), settings, log.clone())
+        .await
+        .unwrap();
+    log
+}
+
+impl Memory {
+    /// Appends a stamped command to the command stream and returns it as the
+    /// follower would deliver it.
+    fn publish(&self, principal: &str, id: u32, command: Command) -> Incoming {
+        let record = CommandRecord {
+            id,
+            name: principal.to_owned(),
+            command,
+        };
+        let mut payload = (principal.len() as u16).to_be_bytes().to_vec();
+        payload.extend_from_slice(principal.as_bytes());
+        payload.extend_from_slice(&record.encode().unwrap());
+        let mut commands = self.commands.lock().unwrap();
+        commands.push(payload);
+        Incoming {
+            principal: principal_hash(principal),
+            command: Some(record),
+            offset: Some(commands.len() as u64 - 1),
+        }
+    }
+}
+
+fn command_events(log: &Memory) -> Vec<(u32, u32, u8)> {
+    let mut out = Vec::new();
+    for district in 0..4 {
+        for r in log.records(district) {
+            for e in &r.events {
+                if let Event::Command { id, result, .. } = e {
+                    out.push((r.header.tick, *id, *result));
+                }
+            }
+        }
+    }
+    out.sort();
+    out
+}
+
+/// Cuts a run off after `wait`, as a killed process is.
+async fn killed(wait: Duration, run: impl Future<Output = Result<Done>>) {
+    tokio::time::timeout(wait, run)
+        .await
+        .expect_err("the run was meant to hang");
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_restart_gives_the_log_a_straight_run_would_have() {
+    // Past the 08:00 rush, when most of the city is on the road, and through a keyframe or two.
+    const TOTAL: u32 = 2100;
+    let whole = records(&straight(quick(TOTAL)).await);
+    for stop in [1, 239, 240, 241, 700, 1925] {
+        let log = Memory::healthy();
+        run_city("harbor", harbor(), quick(stop), log.clone())
+            .await
+            .unwrap();
+        let done = run_city("harbor", harbor(), quick(TOTAL), log.clone())
+            .await
+            .unwrap();
+        assert_eq!(done.ticks, TOTAL);
+        assert!(records(&log) == whole, "stopped at tick {stop}");
+        assert_whole(&log, TOTAL);
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_restart_does_not_change_the_epoch_or_the_speed() {
+    let mut first = quick(300);
+    first.epoch = 7;
+    first.ticks_per_second = 8;
+    let log = Memory::healthy();
+    run_city("harbor", harbor(), first, log.clone())
+        .await
+        .unwrap();
+    // What the sim is started with now does not matter: the city keeps its own.
+    run_city("harbor", harbor(), quick(500), log.clone())
+        .await
+        .unwrap();
+    assert_whole(&log, 500);
+    for r in log.records(2) {
+        assert_eq!(
+            (r.header.epoch, r.header.speed),
+            (7, 8),
+            "tick {}",
+            r.header.tick
+        );
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_tick_only_some_districts_committed_is_finished_by_the_restart() {
+    let whole = records(&straight(quick(1000)).await);
+    for hung in 0..4u16 {
+        let log = Memory::new(move |district, offset, attempt| {
+            (district == hung && offset == 700 && attempt == 1).then_some(Fault::Hang)
+        });
+        killed(
+            Duration::from_secs(3),
+            run_city("harbor", harbor(), quick(2000), log.clone()),
+        )
+        .await;
+        let held: Vec<usize> = (0..4).map(|d| log.records(d).len()).collect();
+        let want: Vec<usize> = (0..4).map(|d| 701 - usize::from(d == hung)).collect();
+        assert_eq!(held, want, "district {hung} left behind");
+
+        run_city("harbor", harbor(), quick(1000), log.clone())
+            .await
+            .unwrap();
+        assert!(records(&log) == whole, "district {hung} left behind");
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_killed_warmup_carries_on_from_where_every_district_got_to() {
+    let whole = records(&straight(quick(1500)).await);
+    let log = Memory::new(|district, offset, attempt| {
+        (district == 1 && offset == 300 && attempt == 1).then_some(Fault::Hang)
+    });
+    let mut first = quick(1500);
+    first.warmup_ticks = 1500;
+    killed(
+        Duration::from_secs(3),
+        run_city("harbor", harbor(), first, log.clone()),
+    )
+    .await;
+    // The other districts ran ahead of the one that stopped.
+    assert_eq!(log.records(1).len(), 300);
+    assert!((0..4).any(|d| log.records(d).len() > 400));
+
+    run_city("harbor", harbor(), quick(1500), log.clone())
+        .await
+        .unwrap();
+    assert!(records(&log) == whole);
+}
+
+#[tokio::test(start_paused = true)]
+async fn what_builders_built_is_still_there_after_a_restart() {
+    let world = World::new(harbor());
+    let lot = free_lot(&world);
+    let district = world.city.lots[lot as usize].district;
+    let (send, inbox) = mpsc::channel(8);
+    let log = Memory::healthy();
+    let incoming = log.publish(
+        "mayor",
+        1,
+        Command::Build {
+            lot,
+            kind: 4,
+            rotation: 1,
+        },
+    );
+    send.try_send(incoming).unwrap();
+    run_city_with("harbor", harbor(), quick(300), log.clone(), Some(inbox))
+        .await
+        .unwrap();
+
+    let (_send, inbox) = mpsc::channel(8);
+    run_city_with("harbor", harbor(), quick(1000), log.clone(), Some(inbox))
+        .await
+        .unwrap();
+    assert_whole(&log, 1000);
+    let built = BuildingDiff {
+        lot,
+        kind: 4,
+        rotation: 1,
+    };
+    for tick in [240, 480, 720, 960] {
+        let frame = log.records(district)[tick].keyframe.clone().unwrap();
+        assert_eq!(frame.buildings, vec![built], "keyframe at {tick}");
+    }
+    // Applied once, at the first tick, and not again.
+    assert_eq!(command_events(&log), vec![(0, 1, RESULT_APPLIED)]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_command_stream_resumes_where_the_sim_stopped_reading() {
+    let world = World::new(harbor());
+    let lot = free_lot(&world);
+    let build = |kind| Command::Build {
+        lot,
+        kind,
+        rotation: 0,
+    };
+    let (send, inbox) = mpsc::channel(8);
+    let log = Memory::healthy();
+    send.try_send(log.publish("mayor", 1, build(4))).unwrap();
+    send.try_send(log.publish("mayor", 2, Command::Demolish { lot }))
+        .unwrap();
+    run_city_with("harbor", harbor(), quick(300), log.clone(), Some(inbox))
+        .await
+        .unwrap();
+
+    let history = load_history(&log, 4, &quick(0)).await.unwrap().unwrap();
+    assert_eq!(history.commands_from(), Some(2));
+
+    // Sent while the sim was down: the follower starts at the position and finds it.
+    log.publish("mayor", 3, build(6));
+    let (send, inbox) = mpsc::channel(8);
+    for missed in log.commands(2, u64::MAX).await.unwrap() {
+        send.try_send(missed).unwrap();
+    }
+    run_with_history(
+        "harbor",
+        harbor(),
+        quick(400),
+        log.clone(),
+        Some(inbox),
+        Some(history),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        command_events(&log),
+        vec![
+            (0, 1, RESULT_APPLIED),
+            (0, 2, RESULT_APPLIED),
+            (300, 3, RESULT_APPLIED)
+        ]
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_command_in_a_tick_some_districts_missed_is_applied_for_all_of_them_once() {
+    let world = World::new(harbor());
+    let lot = free_lot(&world);
+    let district = world.city.lots[lot as usize].district;
+    // Sent after tick 49 is committed in district 0, so it is applied for tick 50.
+    let with_command = |hang: bool| {
+        let (send, inbox) = mpsc::channel(8);
+        let mut log = Memory::new(move |d, offset, attempt| {
+            (hang && d == district && offset == 50 && attempt == 1).then_some(Fault::Hang)
+        });
+        let published = log.clone();
+        log.hook = Arc::new(move |d, offset| {
+            if d == 0 && offset == 49 {
+                let build = Command::Build {
+                    lot,
+                    kind: 4,
+                    rotation: 0,
+                };
+                send.try_send(published.publish("mayor", 9, build)).unwrap();
+            }
+        });
+        (log, inbox)
+    };
+    let (whole, inbox) = with_command(false);
+    run_city_with("harbor", harbor(), quick(500), whole.clone(), Some(inbox))
+        .await
+        .unwrap();
+    assert_eq!(command_events(&whole), vec![(50, 9, RESULT_APPLIED)]);
+
+    let (log, inbox) = with_command(true);
+    killed(
+        Duration::from_secs(3),
+        run_city_with("harbor", harbor(), quick(500), log.clone(), Some(inbox)),
+    )
+    .await;
+    assert_eq!(log.records(district).len(), 50);
+    // The district that missed the tick is the one the command was for: nothing else records it.
+    assert!(command_events(&log).is_empty());
+
+    // The follower is not asked for the command again: the restart reads it back from the stream.
+    let (_send, inbox) = mpsc::channel(8);
+    run_city_with("harbor", harbor(), quick(500), log.clone(), Some(inbox))
+        .await
+        .unwrap();
+    assert_eq!(command_events(&log), vec![(50, 9, RESULT_APPLIED)]);
+    assert!(records(&log) == records(&whole));
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_city_left_paused_stays_paused_until_it_is_resumed() {
+    let (tx, rx) = watch::channel(4u8);
+    let log = Memory::steered(&[(10, 0)], tx.clone());
+    let mut first = quick(12);
+    first.speed = Some(rx);
+    first.speed_out = Some(tx);
+    run_city("harbor", harbor(), first, log.clone())
+        .await
+        .unwrap();
+    assert_eq!(log.records(0).last().unwrap().header.speed, 0);
+
+    let (control, speed) = watch::channel(4u8);
+    let mut again = quick(20);
+    again.speed = Some(speed);
+    again.speed_out = Some(control.clone());
+    let task = tokio::spawn(run_city("harbor", harbor(), again, log.clone()));
+    tokio::time::sleep(Duration::from_secs(5)).await;
+    assert_eq!(log.records(0).len(), 12);
+    assert_eq!(*control.borrow(), 0);
+    control.send_replace(8);
+    task.await.unwrap().unwrap();
+    assert_whole(&log, 20);
+    assert_eq!(log.records(0)[12].header.speed, 8);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_log_with_a_record_that_is_not_a_keyframe_is_not_resumed() {
+    let log = Memory::healthy();
+    log.append(2, 0, vec![1, 2, 3], false);
+    let err = run_city("harbor", harbor(), quick(10), log.clone())
+        .await
+        .unwrap_err();
+    assert!(format!("{err:#}").contains("no keyframe"), "{err:#}");
+}

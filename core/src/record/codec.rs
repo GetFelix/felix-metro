@@ -22,6 +22,7 @@ const EV_DEMOLISHED: u8 = 8;
 const EV_ROAD: u8 = 9;
 const EV_COMMAND: u8 = 10;
 const EV_SPEED: u8 = 11;
+const EV_COMMAND_CURSOR: u8 = 12;
 
 const CMD_PLACE_ROAD: u8 = 1;
 const CMD_ZONE: u8 = 2;
@@ -272,6 +273,10 @@ fn put_event(w: &mut Writer, e: &Event) -> Result<(), EncodeError> {
             b.u8(*ticks_per_second);
             Ok(())
         }),
+        Event::CommandCursor { next } => w.framed(EV_COMMAND_CURSOR, |b| {
+            b.varint(*next);
+            Ok(())
+        }),
     }
 }
 
@@ -333,6 +338,7 @@ fn get_event(r: &mut Reader) -> Result<Option<Event>, DecodeError> {
         EV_SPEED => Event::Speed {
             ticks_per_second: r.u8()?,
         },
+        EV_COMMAND_CURSOR => Event::CommandCursor { next: r.varint()? },
         _ => return Ok(None),
     }))
 }

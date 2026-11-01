@@ -33,6 +33,8 @@ type Script = Arc<dyn Fn(u16, u64, u32) -> Option<Fault> + Send + Sync>;
 struct Memory {
     shards: Arc<Mutex<HashMap<u16, Vec<Vec<u8>>>>>,
     keyframes: Arc<Mutex<HashMap<u16, u64>>>,
+    /// The command stream: stamped payloads, by offset.
+    commands: Arc<Mutex<Vec<Vec<u8>>>>,
     sends: Arc<Mutex<HashMap<(u16, u64), u32>>>,
     /// `(district, offset)` of every append, in the order they happened.
     order: Arc<Mutex<Vec<(u16, u64)>>>,
@@ -46,6 +48,7 @@ impl Memory {
         Memory {
             shards: Arc::default(),
             keyframes: Arc::default(),
+            commands: Arc::default(),
             sends: Arc::default(),
             order: Arc::default(),
             script: Arc::new(script),
@@ -141,6 +144,34 @@ impl Log for Memory {
         Ok(shards
             .get(&district)
             .and_then(|shard| shard.get(offset as usize).cloned()))
+    }
+
+    async fn keyframe(&self, district: u16) -> Result<Option<u64>> {
+        Ok(self.keyframes.lock().unwrap().get(&district).copied())
+    }
+
+    async fn read_from(&self, district: u16, offset: u64, max: u32) -> Result<Vec<(u64, Vec<u8>)>> {
+        let shards = self.shards.lock().unwrap();
+        Ok(shards.get(&district).map_or_else(Vec::new, |shard| {
+            shard
+                .iter()
+                .enumerate()
+                .skip(offset as usize)
+                .take(max as usize)
+                .map(|(at, bytes)| (at as u64, bytes.clone()))
+                .collect()
+        }))
+    }
+
+    async fn commands(&self, from: u64, until: u64) -> Result<Vec<Incoming>> {
+        let commands = self.commands.lock().unwrap();
+        Ok(commands
+            .iter()
+            .enumerate()
+            .skip(from as usize)
+            .take(until.saturating_sub(from) as usize)
+            .filter_map(|(at, payload)| Incoming::from_payload(payload, Some(at as u64)))
+            .collect())
     }
 }
 
@@ -791,6 +822,8 @@ async fn a_city_that_starts_paused_skips_the_warmup() {
     task.await.unwrap().unwrap();
     assert_whole(&log, 10);
 }
+
+mod resumed;
 
 mod builders {
     use felix_metro_core::record::{
