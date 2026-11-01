@@ -6,6 +6,11 @@
 
 - Built on Felix 0.6.2: the sim's `felix-client` and `felix-wire` pins, the dev stack and CI images.
 
+### The page
+
+- Timeline: a drag no longer seeks to a moment retention has just dropped. The drag keeps the bar it began on, so a move
+  at the left end could land before the oldest tick the city still holds; it now stops at the oldest one held.
+
 ### Tools
 
 - `clip-local.mjs` points the builder bot at the moved gateway port, and runs its stack as its own compose project so

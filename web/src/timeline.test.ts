@@ -13,6 +13,7 @@ import {
   clampTick,
   dayBands,
   hourMarks,
+  moveRange,
   momentText,
   stepTick,
   tickAtFraction,
@@ -98,6 +99,23 @@ describe('a steady bar', () => {
     expect(tickAtPointer(held, 1)).toBe(3 * TICKS_PER_DAY);
     // The caller's snap: the tip it tests against is the held one, so this is "live", not the near past.
     expect(tickAtPointer(held, 1) >= held.live).toBe(true);
+  });
+
+  it('stops a held drag at the oldest tick retention still holds', () => {
+    const hold = createSpanHold();
+    hold.set(barSpan(1000, 1000 + 2 * TICKS_PER_DAY));
+    hold.hold();
+    const tip = 1000 + 2 * TICKS_PER_DAY + 300;
+    // Retention moved on while the pointer was down.
+    const retained = { oldest: 1600, newest: tip };
+    const bounds = moveRange(hold.held, retained, tip);
+    expect(clampTick(bounds, tickAtPointer(hold.held!, 0))).toBe(1600);
+    // The right end is still the head the drag began with.
+    expect(bounds.newest).toBe(hold.held!.live);
+  });
+
+  it('judges a move against the retained range when nothing is held', () => {
+    expect(moveRange(null, { oldest: 1600, newest: 5000 }, 5200)).toEqual({ oldest: 1600, newest: 5200 });
   });
 
   it('spans at least a day, with the live head short of the right end', () => {

@@ -16,7 +16,7 @@ import { Gateway, GatewayError } from './gateway';
 import { Playback, handOver } from './playback';
 import { IDLE_MS, SeekError, Seeker, fold, tryFoldMore, type SeekResult } from './seek';
 import { Latest } from './scrub';
-import { agoText, createGuess, createTimeline, stepTick, clampTick, type Range } from './timeline';
+import { agoText, createGuess, createTimeline, moveRange, stepTick, clampTick, type Range } from './timeline';
 import { createLoader, type Loader } from './loader';
 import { createPicker } from './picker';
 import { displayName } from './registry';
@@ -790,9 +790,9 @@ async function main() {
     const go = (tick: number, moving: boolean) => {
       if (!range) return;
       // A drag is judged against the bar it began on, so releasing at its right end goes live however far the tip moved.
-      const held = bar.held;
-      const tip = held?.live ?? tipTick();
-      const to = clampTick({ oldest: held?.oldest ?? range.oldest, newest: tip }, tick);
+      const bounds = moveRange(bar.held, range, tipTick());
+      const tip = bounds.newest;
+      const to = clampTick(bounds, tick);
       // The tip is the live city: a step or a release within a city minute of it is going back to it.
       if (hasLive && !moving && to >= tip - LIVE_SNAP_TICKS) return goLive();
       stopPlayback();
