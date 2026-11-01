@@ -86,6 +86,10 @@ and `web/scripts/check-construction.mjs` compares it with `web/references/constr
 `construction-fall.png` in CI, and with the same lot a quarter of the way in (`-early`, tick 102) so the length of the window is pinned as well as its middle. A window of 9 ticks instead of 8 differs from the four references by 6.4%, 4.2%, 1.3% and 0.9%; the check allows 1%. They are renders of the page on software GL, so rewrite them with
 `UPDATE_REFERENCES=1 node scripts/check-construction.mjs <url> <out>` after a change to the look.
 
+The same page with `?churn` instead swaps one lot between two buildings 101 times without waiting for the models to
+load, as a run of fast timeline drags does, and reports how many objects the scene holds. The check wants the count
+after the burst to equal the count after a single swap: a lot is drawn once, whatever happened to it on the way.
+
 ## Quality tiers
 
 Each tier drops effects in the order that costs the least in looks, so the
