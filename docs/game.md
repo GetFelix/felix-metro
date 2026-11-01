@@ -156,6 +156,9 @@ The numbers are placeholders until the economy is in the sim and measured.
 
 ## What this needs from the sim and the log
 
+- **Money.** Done: the account, the `ledger` and `balance` events and the refusal when the city cannot pay are in the
+  sim and shown on the page (see Money in design.md). Services such as parks and transit as a paid-for extra, and fares,
+  are not built.
 - **Persistence across a restart.** Done: a restarted sim resumes from the newest keyframe
   and the records after it (see Restart in design.md). The new state below has to be
   rebuilt the same way, so each new keyframe field is restored in `sim/src/world/restore.rs`.
@@ -173,7 +176,7 @@ The numbers are placeholders until the economy is in the sim and measured.
 ## Order
 
 1. Persistence across a restart (done).
-2. Money and the `ledger` event, shown as one number on the page and on the timeline.
+2. Money and the `ledger` event, shown as one number on the page and on the timeline (done).
 3. Factions: three satisfaction numbers from the log, their demands, and the recall
    warning with its countdown.
 4. Policy commands, two of them, with a cooldown.

@@ -29,6 +29,11 @@ impl Writer {
         self.0.push(v as u8);
     }
 
+    /// A signed value as a zigzag varint.
+    pub(super) fn svarint(&mut self, v: i64) {
+        self.varint(((v << 1) ^ (v >> 63)) as u64);
+    }
+
     /// `cur` as a zigzag varint of its difference from `prev`.
     pub(super) fn delta(&mut self, prev: u32, cur: u32) {
         let d = i64::from(cur) - i64::from(prev);
@@ -143,6 +148,11 @@ impl<'a> Reader<'a> {
             }
         }
         Err(DecodeError::Invalid("varint too long"))
+    }
+
+    pub(super) fn svarint(&mut self) -> Result<i64, DecodeError> {
+        let z = self.varint()?;
+        Ok(((z >> 1) as i64) ^ -((z & 1) as i64))
     }
 
     pub(super) fn varint_u32(&mut self) -> Result<u32, DecodeError> {

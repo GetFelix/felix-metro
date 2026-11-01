@@ -68,6 +68,16 @@ pub const REFUSED_IN_USE: u8 = 8;
 /// Sent while the city was paused with more commands waiting than the sim
 /// holds. Not carried out; send it again.
 pub const REFUSED_BUSY: u8 = 9;
+/// `build` or `demolish` that the city's account cannot pay for.
+pub const REFUSED_NO_FUNDS: u8 = 10;
+
+/// `ledger` event reasons.
+/// A city day's taxes in, and road and building upkeep out.
+pub const LEDGER_DAY: u8 = 0;
+/// The price of a `build` that was applied.
+pub const LEDGER_BUILD: u8 = 1;
+/// The price of a `demolish` that was applied.
+pub const LEDGER_DEMOLISH: u8 = 2;
 
 /// Why a record could not be read.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -253,6 +263,20 @@ pub enum Event {
     /// restarts picks the stream up exactly there.
     CommandCursor {
         next: u64,
+    },
+    /// Money moved in or out of the city's account in this district: a day's
+    /// taxes and upkeep, or the price of a build or demolition. `earned` and
+    /// `spent` are whole units, never negative; `reason` is a `LEDGER_*`.
+    Ledger {
+        reason: u8,
+        earned: u64,
+        spent: u64,
+    },
+    /// This district's share of the account at the end of the tick, written
+    /// on every keyframe tick. The city's balance is the sum over districts,
+    /// so each district can be followed on its own.
+    Balance {
+        amount: i64,
     },
 }
 

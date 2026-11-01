@@ -3,15 +3,17 @@
 use std::collections::{BTreeMap, HashSet};
 
 use felix_metro_core::record::{
-    BuildingDiff, Command, Counts, Doing, Event, Keyframe, Leg, NO_BUILDING, REFUSED_BAD_KIND,
-    REFUSED_EMPTY, REFUSED_IN_USE, REFUSED_OCCUPIED, REFUSED_UNKNOWN, REFUSED_UNSUPPORTED,
-    RESULT_APPLIED, ResidentState, Vehicle,
+    BuildingDiff, Command, Counts, Doing, Event, Keyframe, LEDGER_BUILD, LEDGER_DAY,
+    LEDGER_DEMOLISH, Leg, NO_BUILDING, REFUSED_BAD_KIND, REFUSED_EMPTY, REFUSED_IN_USE,
+    REFUSED_NO_FUNDS, REFUSED_OCCUPIED, REFUSED_UNKNOWN, REFUSED_UNSUPPORTED, RESULT_APPLIED,
+    ResidentState, Vehicle,
 };
 use felix_metro_core::{
     Activity, BuildingKind, City, Congestion, Mode, Places, Resident, TICKS_PER_DAY,
     TICKS_PER_HOUR, Trip,
 };
 
+pub(crate) use economy::opening_share;
 pub(crate) use restore::Departure;
 
 /// Ticks between keyframes: one city hour.
@@ -68,6 +70,10 @@ pub(crate) struct World {
     /// Lots a resident's schedule sends them to. Demolishing one would strand
     /// the people who go there.
     pub(crate) in_use: HashSet<u32>,
+    /// Each district's share of the city's account.
+    accounts: Vec<i64>,
+    /// Road and park upkeep a day, by district.
+    upkeep: Vec<u64>,
 }
 
 /// What a command did: the district it touched and the events to record there.
@@ -112,7 +118,12 @@ impl World {
             .iter()
             .flat_map(|p| p.resident.schedule.blocks.iter().map(|b| b.lot))
             .collect();
+        let districts = city.districts.len();
         World {
+            accounts: (0..districts)
+                .map(|d| economy::opening_share(districts, d))
+                .collect(),
+            upkeep: economy::upkeep_base(&city),
             city,
             people,
             tick: 0,
@@ -155,6 +166,10 @@ impl World {
                 if self.in_use.contains(&lot) {
                     return Applied::refused(district, REFUSED_IN_USE);
                 }
+                let cost = economy::build_cost(kind);
+                if self.funds() < cost as i64 {
+                    return Applied::refused(district, REFUSED_NO_FUNDS);
+                }
                 self.built.insert(
                     lot,
                     BuildingDiff {
@@ -163,14 +178,22 @@ impl World {
                         rotation,
                     },
                 );
+                self.accounts[usize::from(district)] -= cost as i64;
                 Applied {
                     district,
                     result: RESULT_APPLIED,
-                    events: vec![Event::Built {
-                        lot,
-                        kind,
-                        rotation,
-                    }],
+                    events: vec![
+                        Event::Built {
+                            lot,
+                            kind,
+                            rotation,
+                        },
+                        Event::Ledger {
+                            reason: LEDGER_BUILD,
+                            earned: 0,
+                            spent: cost,
+                        },
+                    ],
                 }
             }
             Command::Demolish { lot } => {
@@ -184,6 +207,9 @@ impl World {
                 if self.in_use.contains(&lot) {
                     return Applied::refused(district, REFUSED_IN_USE);
                 }
+                if self.funds() < economy::DEMOLISH_COST as i64 {
+                    return Applied::refused(district, REFUSED_NO_FUNDS);
+                }
                 self.built.insert(
                     lot,
                     BuildingDiff {
@@ -192,14 +218,22 @@ impl World {
                         rotation: 0,
                     },
                 );
+                self.accounts[usize::from(district)] -= economy::DEMOLISH_COST as i64;
                 Applied {
                     district,
                     result: RESULT_APPLIED,
-                    events: vec![Event::Demolished {
-                        lot,
-                        kind,
-                        rotation,
-                    }],
+                    events: vec![
+                        Event::Demolished {
+                            lot,
+                            kind,
+                            rotation,
+                        },
+                        Event::Ledger {
+                            reason: LEDGER_DEMOLISH,
+                            earned: 0,
+                            spent: economy::DEMOLISH_COST,
+                        },
+                    ],
                 }
             }
             // A road changes the graph every route and the page's own copy of
@@ -337,7 +371,21 @@ impl World {
             }
         }
         self.cars = cars;
+        if World::day_ends(tick) {
+            for (district, (earned, spent)) in self.close_day().into_iter().enumerate() {
+                out[district].events.push(Event::Ledger {
+                    reason: LEDGER_DAY,
+                    earned,
+                    spent,
+                });
+            }
+        }
         if tick.is_multiple_of(KEYFRAME_EVERY) {
+            for (district, amount) in self.accounts.iter().enumerate() {
+                out[district]
+                    .events
+                    .push(Event::Balance { amount: *amount });
+            }
             for (district, keyframe) in self.keyframes(tick).into_iter().enumerate() {
                 out[district].keyframe = Some(keyframe);
             }
@@ -456,6 +504,7 @@ fn count_car(city: &City, cars: &mut [u16], trip: &Trip, tick: u32) {
     }
 }
 
+mod economy;
 mod restore;
 #[cfg(test)]
 mod tests;

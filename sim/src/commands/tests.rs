@@ -1,6 +1,6 @@
 use felix_metro_core::City;
 use felix_metro_core::record::{
-    NO_BUILDING, REFUSED_BAD_KIND, REFUSED_BAD_SPEED, REFUSED_EMPTY, REFUSED_IN_USE,
+    LEDGER_BUILD, NO_BUILDING, REFUSED_BAD_KIND, REFUSED_BAD_SPEED, REFUSED_EMPTY, REFUSED_IN_USE,
     REFUSED_MALFORMED, REFUSED_OCCUPIED, REFUSED_UNKNOWN, REFUSED_UNSUPPORTED,
 };
 use felix_metro_core::{BuildingKind, KINDS};
@@ -148,6 +148,11 @@ fn a_build_lands_in_the_lots_district_with_the_command_that_asked_for_it() {
                 lot,
                 kind: 3,
                 rotation: 2
+            },
+            Event::Ledger {
+                reason: LEDGER_BUILD,
+                earned: 0,
+                spent: 500,
             },
         ]
     );

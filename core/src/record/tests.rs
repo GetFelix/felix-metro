@@ -26,7 +26,7 @@ fn name(rng: &mut Rng) -> String {
 
 fn event(rng: &mut Rng) -> Event {
     let resident = rng.next_u64() as u32;
-    match rng.below(12) {
+    match rng.below(14) {
         0 => Event::Trip {
             resident,
             vehicle: rng.below(6) as u8,
@@ -86,8 +86,16 @@ fn event(rng: &mut Rng) -> Event {
         10 => Event::Speed {
             ticks_per_second: rng.below(33) as u8,
         },
-        _ => Event::CommandCursor {
+        11 => Event::CommandCursor {
             next: rng.next_u64() >> rng.below(64),
+        },
+        12 => Event::Ledger {
+            reason: rng.below(3) as u8,
+            earned: rng.next_u64() >> rng.below(64),
+            spent: rng.next_u64() >> rng.below(64),
+        },
+        _ => Event::Balance {
+            amount: (rng.next_u64() as i64) >> rng.below(64),
         },
     }
 }

@@ -183,6 +183,8 @@ writes decisions instead, and the client works out positions:
 | `road`                 | segment, change (closed, opened, added, removed)                           | A road changed                             |
 | `command`              | principal hash, builder name, command id, result                           | A builder's command was applied or refused |
 | `speed`                | ticks per second                                                           | The city's speed changed; 0 is paused      |
+| `ledger`               | reason (day, build, demolish), earned, spent                               | Money moved in or out of the city's funds  |
+| `balance`              | amount                                                                     | A district's share of the funds, each keyframe tick |
 
 A route is its segment ids from the road graph (`u32`) and one speed byte per
 segment, a percentage of the segment class's speed. A trip of 12 segments is 36
@@ -250,6 +252,8 @@ is a `u32`. `events` counts every event, including ones a reader skips.
 | 10  | `command`    | principal `u64`, name, id `u32`, result `u8` |
 | 11  | `speed`      | ticks per second `u8`                        |
 | 12  | `command_cursor` | next command stream offset (varint) |
+| 13  | `ledger`     | reason `u8` (0 day, 1 build, 2 demolish), earned varint, spent varint |
+| 14  | `balance`    | amount, a zigzag varint (may be negative)    |
 
 A route is a varint leg count, the segment ids (first as a delta from 0, then
 each from the one before), then one speed byte per leg. A vehicle state is kind
@@ -288,6 +292,41 @@ the residents.
 The mean hides the rush. Trips cluster around 08:00 and 17:15, and the hourly keyframe of every district lands on the same tick (08:00 and 17:00 are both on the hour). Measured on a harbor city with 1,260 residents in each of four districts, the same load as 20,000 residents in 16, the busiest minute of the morning rush writes 3.7 KB/s and of the evening rush 4.2 KB/s, which is 14.6 and 16.5 KB/s at 20,000 residents, and one district's busiest minute is 1.5 KB/s. The worst single tick is a district's keyframe, about 20 KB, against under 600 B for a tick without one. `report_load` in `sim/src/world/tests.rs` prints these. Bringing the peak back to the 10 KB/s goal is tracked in #95.
 The counts are what the stats sparkline plots.
 
+### Money
+
+The city has one account, its funds. It starts at $100,000. Every change to it is an event in the district that
+caused it, so the budget can be read back, and scrubbed, like everything else.
+
+| In                                                   | Out                                                            |
+| ---------------------------------------------------- | -------------------------------------------------------------- |
+| $4 per resident per city day, to their home district | $1 per tile of road per city day                               |
+| $30 per shop, office and factory per city day        | $20 per park per city day                                      |
+|                                                      | A build or demolition, once: $300 a house, $500 a shop, $1,500 a skyscraper, $800 a factory, $100 to demolish |
+
+These numbers are placeholders until the economy has been played. A shop, office or factory pays tax for as long as
+the building stands; opening hours arrive with policies.
+
+- **A day's ledger.** When a city day ends (the first tick of the next day), every district writes one `ledger` event
+  with reason 0: what its residents and businesses paid, and what its roads and parks cost. A command that builds or
+  demolishes writes one with reason 1 or 2, spent only, next to its `built` or `demolished` event.
+- **Shares.** The account is kept as one share per district, because a district's records must be followable on their
+  own. A district's share starts at its part of the opening funds, and its `ledger` events move it. The city's funds are
+  the sum of the shares, and a share can be negative while the sum is not. Only the sum decides what the city can afford.
+- **Balance.** Every keyframe tick, each district also writes a `balance` event with its share at the end of the tick.
+  That is what a keyframe carries of the account; it is an event rather than a keyframe field so the keyframe layout
+  does not change. A page that starts from a keyframe sets the share from it and adds the `ledger` events after.
+- **No funds.** A `build` or `demolish` the funds cannot pay for is refused with result 10 and changes nothing.
+  The city does not lose; it cannot build until the days refill the account.
+- **Restart.** The restart takes each district's share from its newest keyframe tick and adds the `ledger` events of
+  builds and demolitions after it. A day's `ledger` is not read back; stepping makes it again. A log written before the
+  account existed starts it at the opening funds.
+
+The page shows the funds beside the clock and follows the tick on screen: scrubbing back shows the funds of that
+moment.
+
+Cost to the log: one small event per district per city day, one per build, and a `balance` of a few bytes per district per
+city hour. `report_load` on the harbor city moves the day mean from 656.4 to 656.7 B/s.
+
 ### Commands and the registry
 
 A command record is the kind byte, a command id `u32`, the builder's display
@@ -299,8 +338,8 @@ hash and the log never holds the principal.
 
 The sim reads the stream in order and applies commands before it
 steps the next tick, at most 256 a tick. That tick's records carry the `command`
-event, then what it changed (`built` or `demolished`), in the district of the
-lot, and its keyframe already shows the change. A refused command records only
+event, then what it changed (`built` or `demolished`, and the `ledger` event that
+paid for it), in the district of the lot, and its keyframe already shows the change. A refused command records only
 the `command` event, with a result code, and the city steps as if it had not
 been sent. A command with no district, such as a malformed record or a lot past
 the last, is recorded in district 0.

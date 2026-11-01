@@ -23,6 +23,8 @@ const EV_ROAD: u8 = 9;
 const EV_COMMAND: u8 = 10;
 const EV_SPEED: u8 = 11;
 const EV_COMMAND_CURSOR: u8 = 12;
+const EV_LEDGER: u8 = 13;
+const EV_BALANCE: u8 = 14;
 
 const CMD_PLACE_ROAD: u8 = 1;
 const CMD_ZONE: u8 = 2;
@@ -277,6 +279,20 @@ fn put_event(w: &mut Writer, e: &Event) -> Result<(), EncodeError> {
             b.varint(*next);
             Ok(())
         }),
+        Event::Ledger {
+            reason,
+            earned,
+            spent,
+        } => w.framed(EV_LEDGER, |b| {
+            b.u8(*reason);
+            b.varint(*earned);
+            b.varint(*spent);
+            Ok(())
+        }),
+        Event::Balance { amount } => w.framed(EV_BALANCE, |b| {
+            b.svarint(*amount);
+            Ok(())
+        }),
     }
 }
 
@@ -339,6 +355,14 @@ fn get_event(r: &mut Reader) -> Result<Option<Event>, DecodeError> {
             ticks_per_second: r.u8()?,
         },
         EV_COMMAND_CURSOR => Event::CommandCursor { next: r.varint()? },
+        EV_LEDGER => Event::Ledger {
+            reason: r.u8()?,
+            earned: r.varint()?,
+            spent: r.varint()?,
+        },
+        EV_BALANCE => Event::Balance {
+            amount: r.svarint()?,
+        },
         _ => return Ok(None),
     }))
 }

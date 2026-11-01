@@ -449,11 +449,26 @@ fn step_time_at_rush() {
     assert!(worst.as_millis() < 50, "worst step {worst:?}");
 }
 
+/// Each district's share of the account that a keyframe tick wrote.
+fn balances(step: &[DistrictTick]) -> Vec<i64> {
+    step.iter()
+        .map(|d| {
+            d.events
+                .iter()
+                .find_map(|e| match e {
+                    Event::Balance { amount } => Some(*amount),
+                    _ => None,
+                })
+                .expect("a keyframe tick writes the balance")
+        })
+        .collect()
+}
+
 #[test]
 fn a_world_restored_from_a_keyframe_steps_as_the_original_does() {
     // From an hour of the night, the rush hours and the middle of the day, in cities of 4 and 9 districts.
     for (seed, side, hours) in [
-        ("harbor", 2, &[0, 3, 8, 12, 17, 22, 24][..]),
+        ("harbor", 2, &[0, 3, 8, 12, 17, 22, 23, 24][..]),
         ("pinecrest", 3, &[8, 17, 24][..]),
     ] {
         let city = City::generate(seed, side).unwrap();
@@ -486,7 +501,9 @@ fn a_world_restored_from_a_keyframe_steps_as_the_original_does() {
                     }
                 }
             }
-            let mut restored = World::restore(city.clone(), at, &frames, &departures).unwrap();
+            let balances = balances(&ticks[at as usize]);
+            let mut restored =
+                World::restore(city.clone(), at, &frames, &balances, &departures).unwrap();
             assert_eq!(restored.next_tick(), at + 1);
             for tick in at + 1..at + 400 {
                 assert!(
@@ -508,7 +525,8 @@ fn a_keyframe_with_nobody_on_the_road_to_say_where_from_is_refused() {
         .iter()
         .map(|d| d.keyframe.clone().unwrap())
         .collect();
-    let Err(err) = World::restore(city, at, &frames, &HashMap::new()) else {
+    let balances = balances(&ticks[at as usize]);
+    let Err(err) = World::restore(city, at, &frames, &balances, &HashMap::new()) else {
         panic!("restored with no trip events");
     };
     assert!(format!("{err:#}").contains("no trip event"), "{err:#}");
