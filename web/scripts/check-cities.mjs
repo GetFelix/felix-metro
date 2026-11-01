@@ -92,6 +92,8 @@ console.log(`Lakeside is open and its clock runs (tick ${t0} -> ${await page.eva
 
 // 4. A city the gateway refuses leaves the picker working: it still lists the cities there are, read through the
 // lobby city.
+// A blank page first: a hash-only change from Lakeside would reload later and the old list would count.
+await page.goto('about:blank');
 await page.goto(`${appUrl}#nowhere`, { waitUntil: 'load', timeout: 5 * MINUTE });
 await page
   .waitForFunction(() => document.querySelectorAll('#cities li').length >= 3, null, { polling: 250, timeout: MINUTE })

@@ -292,12 +292,15 @@ describe('a city the gateway refuses', () => {
     });
     const oidc = {} as Parameters<typeof connectLive>[0]['oidc'];
     const state = new CityState(city, trips, 1);
-    const live = await connectLive({ url: 'ws://gateway', oidc, city: 'nowhere', state });
-    await settle();
-    live.close();
-    connect.mockRestore();
-    expect(live.refused).toBe(true);
-    expect(asked).toEqual(['nowhere', 'lobby']);
-    expect(subscribed).toEqual(['cities']);
+    try {
+      const live = await connectLive({ url: 'ws://gateway', oidc, city: 'nowhere', state });
+      await settle();
+      live.close();
+      expect(live.refused).toBe(true);
+      expect(asked).toEqual(['nowhere', 'lobby']);
+      expect(subscribed).toEqual(['cities']);
+    } finally {
+      connect.mockRestore();
+    }
   });
 });

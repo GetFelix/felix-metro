@@ -154,13 +154,16 @@ connections close with the old page. The list comes from the registry, which the
 writes to as each city starts, so a city that starts while the page is open appears in the
 list without a reload (a city started again at another size is listed at the latest one).
 If a city cannot open its streams when you start it, `dev/city.sh` fails with the reason
-and the sim keeps running. A page opened at a city the gateway refuses (`/#nowhere`) still shows the list: it reads it
-through `lobby`, a city the stack seeds for that and nothing else (no sim, no builders, never listed). The stack seeds a third city, `lakeside`, and the sim keeps it idle
+and the sim keeps running. The stack seeds a third city, `lakeside`, and the sim keeps it idle
 and unlisted until you start it:
 
 ```sh
 dev/city.sh lakeside
 ```
+
+A page opened at a city the gateway refuses (`/#nowhere`) still shows the list. It reads
+it through `lobby`, a city the stack seeds for that and nothing else: no sim, no
+builders, never listed. Everyone who signs in may join it.
 
 To see the page ride out a dropped connection, stop the gateway for a few seconds and
 start it again (the page shows `Reconnecting…` and carries on):
@@ -244,7 +247,7 @@ dev/speed.sh harbor 16   # 0 pauses, 4, 8 or 16
 dev/speed.sh harbor      # show it
 ```
 
-`dev/seed.mjs` sets up the tenant and each city's streams, and the roles that
+`dev/seed.mjs` sets up the tenant, each city's streams and `lobby`, and the roles that
 `viewer` (watch) and `mayor` (watch and build) sign in with. `sim/ci/` runs the same
 seed against a broker for the sim's integration test.
 
