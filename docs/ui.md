@@ -176,15 +176,28 @@ in the overlay's files or in this page.
 
 ## Checking a change
 
+Run the unit tests for the data-driven parts: the key list, the hint's memory and the quality choice.
+
 ```sh
 cd web
-npx vitest run src/ui                      # the data-driven parts: key list, hint memory, quality choice
-npx vite --port 5173 &                     # serve the page; stop it with `kill %1` when done
-node scripts/check-ui.mjs http://localhost:5173/ frames/ui
+npx vitest run src/ui src/quality.test.ts
+```
+
+Then check the page itself. Install the test browser once with `npx playwright install chromium`. Serve the page in
+one terminal and run the check from another:
+
+```sh
+cd web
+npx vite --port 5173
+```
+
+```sh
+cd web
+node scripts/check-ui.mjs http://localhost:5173/ /tmp/ui
 ```
 
 `check-ui.mjs` drives the page with the keyboard (open the sheet, pick a quality, read the key list, `Esc`),
 checks that the hint is shown once and never under `?ui=0` or `?capture`, that the clock rolls and holds still
-with reduced motion, and that nothing overflows at 360px. It writes screenshots of the shell, the sheet, the
-key list and the hint, by day and night, at 1280px and 360px wide, into the folder you name. Look at them: the
-checks do not know whether the page looks right.
+with reduced motion, and that nothing overflows or collides at 360px. It writes screenshots of the shell, the
+sheet, the key list and the hint, by day and night, at 1280px and 360px wide, into the folder you name. Look at
+them: the checks do not know whether the page looks right.
