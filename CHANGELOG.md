@@ -21,6 +21,11 @@
 - The hour slider shows a focus ring when it is reached with the keyboard.
 - Short messages, such as "That moment is no longer kept.", now sit above the timeline in the page's glass style.
 
+### The page
+
+- Timeline: a drag no longer seeks to a moment retention has just dropped. The drag keeps the bar it began on, so a move
+  at the left end could land before the oldest tick the city still holds; it now stops at the oldest one held.
+
 ### Tools
 
 - `web/scripts/check-ui.mjs` drives the overlay with the keyboard and takes day and night screenshots at 1280 and 360
