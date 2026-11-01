@@ -35,6 +35,15 @@ export function barSpan(oldest: number, tip: number): Span {
 }
 
 /**
+ * What a handle move is clamped to. A drag keeps the bar it began on so the pointer maps to stable ticks, but retention
+ * keeps dropping the oldest end meanwhile, so a move at the left end must not seek to a tick that is gone.
+ */
+export const moveRange = (held: Span | null, retained: Range, tip: number): Range => ({
+  oldest: Math.max(held?.oldest ?? retained.oldest, retained.oldest),
+  newest: held?.live ?? tip,
+});
+
+/**
  * Where the bar starts before the retained range has been read: a day behind the tip, so the live head sits at the
  * right end and the bands carry the tip's day, instead of the head at the left edge of a one-tick bar.
  */
