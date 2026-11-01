@@ -22,16 +22,18 @@ the ones already there.
   back in time". It goes away on your first click, key press or scroll, or after a few seconds, and it is not
   shown again in that browser.
 - **Reach everything with the keyboard.** Every control can be focused with `Tab` and used with `Enter`,
-  `Space` or the arrow keys. The focused control gets a cyan ring.
+  `Space` or the arrow keys. The focused control gets a cyan ring. With an earlier moment on screen, `Space` plays
+  or pauses it, unless a button or field has focus, in which case it does that control's own job.
 
 These page parameters change the overlay:
 
-| Parameter        | Effect                                                                          |
-| ---------------- | ------------------------------------------------------------------------------- |
-| `?ui=0`          | Hides the overlay: no chips, no settings button, no `?` key and no hint         |
-| `?capture&trace` | The same as `?ui=0` for the controls and the hint, since a clip must draw as is |
-| `?live=0`        | Draws the city with no gateway; the timeline never appears, so there is no hint |
-| `?hud`           | Shows frame times under the Felix Metro chip, for tuning                        |
+| Parameter        | Effect                                                                                     |
+| ---------------- | ------------------------------------------------------------------------------------------ |
+| `?tier=low`      | Forces a quality for this visit (`low`, `medium` or `high`). It overrides the saved choice |
+| `?ui=0`          | Hides the overlay: no chips, no settings button, no `?` key and no hint                    |
+| `?capture&trace` | The same as `?ui=0` for the controls and the hint, since a clip must draw as is            |
+| `?live=0`        | Draws the city with no gateway; the timeline never appears, so there is no hint            |
+| `?hud`           | Shows frame times under the Felix Metro chip, for tuning                                   |
 
 ## How it is built
 
@@ -102,15 +104,16 @@ from the element's `data-old` attribute, which is not text.
 
 ### The hint
 
-`hint.ts` decides whether to show the tip. It remembers in local storage that it was shown, and treats blocked
+`hint.ts` decides whether to show the tip (`hintDue` says when, and is unit tested). It remembers in local storage that it was shown, and treats blocked
 storage as "not seen" so it never throws. The tip is offered when the timeline first becomes usable and the
 page is not already showing the past. With no gateway there is no timeline, so no tip.
 
 ## The kit
 
 New controls use these, so that they look like part of the page. All colours come from the palette: the CSS custom
-properties in `web/src/ui/kit.css` for the overlay, and `web/src/palette.ts` for the city. Do not write a colour
-into a rule; add a token if one is missing.
+properties in `web/src/ui/kit.css` for the overlay, and `web/src/palette.ts` for the city. Do not write a brand
+colour or a tint of one into a rule; add a token if one is missing. The only colours written in a rule are white at a
+low opacity, for the faint fills and hairlines of the timeline and the loader.
 
 | Token                            | Value                           | Used for                                         |
 | -------------------------------- | ------------------------------- | ------------------------------------------------ |
@@ -122,6 +125,9 @@ into a rule; add a token if one is missing.
 | `--cyan-wash`                    | `--cyan` at 16%                 | The fill behind a chosen option                  |
 | `--amber`, `--coral`, `--violet` | `#ffbe3c`, `#ff6038`, `#965ce6` | Time: the past, live, and what is still to come  |
 | `--hover`                        | `rgba(255, 255, 255, 0.08)`     | A control under the pointer                      |
+| `--coral-wash`, `--amber-wash`   | `--coral` at 18%, `--amber` 16% | The fill behind the LIVE and Reconnecting pills  |
+| `--coral-wash-strong`            | `--coral` at 30%                | That fill under the pointer                      |
+| `--violet-glow`, `--cyan-glow`   | `--violet` at 35%, `--cyan` 55% | The glow of the timeline's future and the loader |
 
 **Glass panel.** Every panel is a translucent dark fill with a blurred backdrop, a hairline border and a
 14px corner. Give an element the `chip` class, or copy its recipe:
@@ -142,8 +148,9 @@ capitals with a little letter spacing, and the clock 20px (16px on a phone).
 
 **Spacing and shape.** Spacing steps are `--space-1` to `--space-4` (4, 8, 12 and 16px). Corners are `--radius-s`,
 `--radius-m` and `--radius-l` (8, 10 and 14px). The page keeps a 16px gutter at its edges. The layout holds
-down to a 360px wide screen. At 600px and below, the sheet becomes a panel at the bottom of the screen and the
-past row moves under the Felix Metro chip.
+down to a 360px wide screen. At 600px and below, the sheet becomes a panel at the bottom of the screen. The clock
+moves under the Felix Metro chip when it gets wider than the space beside it: while the past row is showing, and
+while the pill says Reconnecting.
 
 **Focus.** Every control shows a 2px cyan ring when it is focused with the keyboard. Use
 `outline: 2px solid var(--cyan); outline-offset: 2px` on `:focus-visible`, and never remove an outline
@@ -198,6 +205,7 @@ node scripts/check-ui.mjs http://localhost:5173/ /tmp/ui
 
 `check-ui.mjs` drives the page with the keyboard (open the sheet, pick a quality, read the key list, `Esc`),
 checks that the hint is shown once and never under `?ui=0` or `?capture`, that the clock rolls and holds still
-with reduced motion, and that nothing overflows or collides at 360px. It writes screenshots of the shell, the
+with reduced motion, and that nothing overflows or collides at 360px, even with the city picker's arrow showing
+and the Reconnecting pill. It writes screenshots of the shell, the
 sheet, the key list and the hint, by day and night, at 1280px and 360px wide, into the folder you name. Look at
 them: the checks do not know whether the page looks right.

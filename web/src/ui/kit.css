@@ -9,6 +9,11 @@
   --coral: #ff6038;
   --violet: #965ce6;
   --hover: rgba(255, 255, 255, 0.08);
+  --coral-wash: color-mix(in srgb, var(--coral) 18%, transparent);
+  --coral-wash-strong: color-mix(in srgb, var(--coral) 30%, transparent);
+  --amber-wash: color-mix(in srgb, var(--amber) 16%, transparent);
+  --violet-glow: color-mix(in srgb, var(--violet) 35%, transparent);
+  --cyan-glow: color-mix(in srgb, var(--cyan) 55%, transparent);
   --cyan-wash: color-mix(in srgb, var(--cyan) 16%, transparent);
   --radius-s: 8px;
   --radius-m: 10px;

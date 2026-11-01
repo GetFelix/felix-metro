@@ -19,17 +19,17 @@
 - The clock's digits roll when they change, and hold still with `prefers-reduced-motion`.
 - On a phone, the past row (Play, how long ago, Back to live) moves under the Felix Metro chip instead of covering it.
 - The hour slider shows a focus ring when it is reached with the keyboard.
+- The clock moves under the Felix Metro chip on a phone while the pill says Reconnecting, since the two overlapped at 360px.
+- Space plays or pauses an earlier moment from the timeline too, and does nothing while the settings sheet is open.
+- Brand tints in the overlay's CSS are tokens in `kit.css` (`--coral-wash`, `--amber-wash`, `--violet-glow`, `--cyan-glow`).
 - Short messages, such as "That moment is no longer kept.", now sit above the timeline in the page's glass style.
-
-### The page
-
 - Timeline: a drag no longer seeks to a moment retention has just dropped. The drag keeps the bar it began on, so a move
   at the left end could land before the oldest tick the city still holds; it now stops at the oldest one held.
 
 ### Tools
 
 - `web/scripts/check-ui.mjs` drives the overlay with the keyboard and takes day and night screenshots at 1280 and 360
-  pixels wide.
+  pixels wide. CI runs it as its own job, `overlay controls`.
 - `clip-local.mjs` points the builder bot at the moved gateway port, and runs its stack as its own compose project so
   its cleanup cannot remove a felix-metro stack started by hand.
 

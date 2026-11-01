@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { createCamera, startIntro } from './camera';
 import { createHud } from './ui/hud';
+import { hintDue } from './ui/hint';
+import { isPlayKey } from './ui/keys';
 import { parseParams, type Tier } from './params';
 import { createPost, passesFor } from './post';
 import { createQuality, settingsFor } from './quality';
@@ -821,8 +823,7 @@ async function main() {
     status.onPlay(() => void togglePlay());
     addEventListener('keydown', (e) => {
       const target = e.target as HTMLElement | null;
-      if (e.key !== ' ' || e.repeat || target?.closest('button, input, [role="slider"]')) return;
-      if (!canToggle()) return;
+      if (!isPlayKey(e, target, shell?.isOpen ?? false) || !canToggle()) return;
       e.preventDefault();
       void togglePlay();
     });
@@ -837,7 +838,7 @@ async function main() {
         bar.show(usable);
         timelineEl.toggleAttribute('data-scrub', usable);
         // A first visit gets one tip, once there is a timeline to drag.
-        if (usable && pastTick === null && scrubTarget === null) shell?.offerHint();
+        if (hintDue(usable, pastTick !== null || scrubTarget !== null)) shell?.offerHint();
       }
       const inPast = pastTick !== null || scrubTarget !== null;
       syncRefresh(bar.dragging || inPast);

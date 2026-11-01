@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { SHORTCUTS, isHelpKey, isTypingTarget } from './keys';
+import { SHORTCUTS, isHelpKey, isPlayKey, isTypingTarget } from './keys';
 
 const flat = SHORTCUTS.flatMap((g) => g.rows.flatMap((r) => r.keys.flat()));
 
@@ -87,5 +87,44 @@ describe('isTypingTarget', () => {
     expect(isTypingTarget({ tagName: 'INPUT', type: 'radio' })).toBe(false);
     expect(isTypingTarget({ tagName: 'BODY' })).toBe(false);
     expect(isTypingTarget(null)).toBe(false);
+  });
+});
+
+describe('isPlayKey', () => {
+  const press = (key = ' ', mods: Partial<Record<'repeat' | 'ctrlKey' | 'metaKey' | 'altKey', boolean>> = {}) => ({
+    key,
+    repeat: false,
+    ctrlKey: false,
+    metaKey: false,
+    altKey: false,
+    ...mods,
+  });
+  // A target whose closest() finds only the tags it is given, like a control inside the page.
+  const inside = (...tags: string[]) => ({ closest: (selector: string) => tags.find((t) => selector.includes(t)) });
+
+  it('is Space on the page or on the timeline', () => {
+    expect(isPlayKey(press(), null, false)).toBe(true);
+    expect(isPlayKey(press(), inside('div'), false)).toBe(true);
+  });
+
+  it('leaves Space to a button, a field or a list', () => {
+    for (const tag of ['button', 'input', 'select', 'textarea'])
+      expect(isPlayKey(press(), inside(tag), false)).toBe(false);
+  });
+
+  it('is not Space held down, with a modifier, or under an open sheet', () => {
+    expect(isPlayKey(press(' ', { repeat: true }), null, false)).toBe(false);
+    expect(isPlayKey(press(' ', { ctrlKey: true }), null, false)).toBe(false);
+    expect(isPlayKey(press(' ', { metaKey: true }), null, false)).toBe(false);
+    expect(isPlayKey(press(' ', { altKey: true }), null, false)).toBe(false);
+    expect(isPlayKey(press(), null, true)).toBe(false);
+    expect(isPlayKey(press('a'), null, false)).toBe(false);
+  });
+});
+
+describe('isTypingTarget for date and time fields', () => {
+  it('is true for every kind a person types into', () => {
+    for (const type of ['datetime-local', 'month', 'week'])
+      expect(isTypingTarget({ tagName: 'INPUT', type })).toBe(true);
   });
 });

@@ -7,7 +7,21 @@ A 3D city simulator that runs in the browser, built on
 is stored in durable Felix streams, so you can scrub back to any earlier moment
 and play forward from there.
 
-> **Status:** a live city runs end to end. The sim steps it, the browser draws it live, and a city picker switches between cities. Opening the city at an earlier moment works (`/?at=<tick>#harbor` draws it there, paused); the timeline bar scrubs the city back through the hours it still holds (it spans at least one city day, with the part after the live head dimmed; drag the handle, or step with `←` and `→`, `Shift` for an hour); a settings button under the clock chooses the quality (Automatic, High, Medium or Low), `?` lists every key and a hint on a first visit points at the timeline ([docs/ui.md](docs/ui.md)); Space plays forward from there at the city's speed and Back to live races to the live city and joins it with no gap and no reload. Builders change the city through its command stream: the sim applies `build` and `demolish`, each building rises in a scaffold or falls in dust, and `dev/builder-bot.mjs` grows a neighbourhood on each city's development area. Following a resident and the page's own building tools are not built yet. The [style frame](prototype/style-frame.html) shows the look. The plan is in
+> **Status:** a live city runs end to end.
+>
+> - The sim steps the city, the browser draws it live, and a city picker switches between cities.
+> - Opening the city at an earlier moment works: `/?at=<tick>#harbor` draws it there, paused.
+> - The timeline bar scrubs the city back through the hours it still holds. It spans at least one city day, with the
+>   part after the live head dimmed. Drag the handle, or step with `←` and `→` (`Shift` for an hour).
+> - A settings button under the clock chooses the quality (Automatic, High, Medium or Low), `?` lists every key and a
+>   hint on a first visit points at the timeline ([docs/ui.md](docs/ui.md)).
+> - Space plays forward from an earlier moment at the city's speed. Back to live races to the live city and joins it
+>   with no gap and no reload.
+> - Builders change the city through its command stream: the sim applies `build` and `demolish`, each building rises
+>   in a scaffold or falls in dust, and `dev/builder-bot.mjs` grows a neighbourhood on each city's development area.
+> - Not built yet: following a resident, and the page's own building tools.
+>
+> The [style frame](prototype/style-frame.html) shows the look. The plan is in
 > [docs/design.md](docs/design.md) and the work is tracked in
 > [milestones](https://github.com/GetFelix/felix-metro/milestones).
 

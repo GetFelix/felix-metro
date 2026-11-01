@@ -39,6 +39,11 @@ export interface HintDeps {
   onInteraction(cb: () => void): () => void;
 }
 
+/** Whether the timeline just became usable with the live city on screen, which is when a first visit gets the tip. */
+export function hintDue(timelineJustShown: boolean, showingPast: boolean): boolean {
+  return timelineJustShown && !showingPast;
+}
+
 /** The pointer, the keyboard and the wheel are all ways of using the page. */
 export function listenForInteraction(cb: () => void): () => void {
   const events = ['pointerdown', 'keydown', 'wheel'] as const;

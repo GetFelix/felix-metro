@@ -45,7 +45,7 @@
 }
 .loader-grid i.on {
   background: var(--cyan);
-  box-shadow: 0 0 14px hsla(192, 90%, 46%, 0.55);
+  box-shadow: 0 0 14px var(--cyan-glow);
 }
 @media (prefers-reduced-motion: reduce) {
   .loader,

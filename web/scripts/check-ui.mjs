@@ -128,6 +128,8 @@ const PHONE = { width: 360, height: 740 };
 // 3. The first-visit tip: shown once, gone on the first touch, remembered, and never with ?ui=0 or ?capture.
 {
   const { context, page } = await open('tier=low&still&t=12', DESKTOP);
+  // With no gateway the timeline never appears, so nothing may offer the tip by itself. When it is due is a unit test.
+  check((await page.locator('.toast.hint').count()) === 0, 'the tip does not show before the timeline does');
   check(await page.evaluate(() => window.__ui.offerHint()), 'the tip is offered on a first visit');
   check((await page.locator('.toast.hint').innerText()).includes('timeline'), 'the tip speaks of the timeline');
   await page.screenshot({ path: join(out, 'hint-day-1280.png') });
@@ -146,6 +148,13 @@ for (const [query, what] of [
   const { context, page } = await open(query, DESKTOP);
   check(await page.evaluate(() => window.__ui === undefined), `no controls and no tip under ${what}`);
   check((await page.locator('#settings-button').count()) === 0, `no settings button under ${what}`);
+  if (query.includes('ui=0'))
+    for (const [selector, name] of [
+      ['.brand', 'the Felix Metro chip'],
+      ['.clock', 'the clock'],
+      ['#timeline', 'the timeline'],
+    ])
+      check(!(await visible(page, selector)), `${name} is hidden under ${what}`);
   await context.close();
 }
 
@@ -191,12 +200,38 @@ for (const [size, tag] of [
       document.getElementById('pill').classList.remove('hidden');
     });
     await settle(page);
-    const apart = await page.evaluate(() => {
-      const [a, b] = ['.brand', '.clock'].map((s) => document.querySelector(s).getBoundingClientRect());
-      return b.left - a.right;
-    });
-    check(apart >= 8, `the brand chip and the clock do not touch at ${tag}px (${time}, ${Math.round(apart)}px apart)`);
     await page.screenshot({ path: join(out, `shell-${time}-${tag}.png`) });
+    // The widest the two chips get: the picker's chevron once cities arrive, and the reconnecting pill.
+    await page.evaluate(() => {
+      document.getElementById('chevron').classList.remove('hidden');
+      const pill = document.getElementById('pill');
+      pill.textContent = 'Reconnecting…';
+      pill.classList.add('late');
+    });
+    await settle(page, 100);
+    const [brand, clock] = await page.evaluate(() =>
+      ['.brand', '.clock'].map((s) => {
+        const { left, right, top, bottom } = document.querySelector(s).getBoundingClientRect();
+        return { left, right, top, bottom };
+      }),
+    );
+    const apart = clock.left - brand.right;
+    const stacked = clock.top >= brand.bottom;
+    check(
+      apart >= 8 || stacked,
+      `the brand chip and the clock do not touch at ${tag}px with the chevron and Reconnecting (${time}, ${Math.round(apart)}px apart)`,
+    );
+    check(
+      clock.left >= 0 && clock.right <= size.width,
+      `the clock stays on screen with Reconnecting at ${tag}px (${time})`,
+    );
+    await page.screenshot({ path: join(out, `reconnecting-${time}-${tag}.png`) });
+    await page.evaluate(() => {
+      document.getElementById('chevron').classList.add('hidden');
+      const pill = document.getElementById('pill');
+      pill.textContent = 'LIVE';
+      pill.classList.remove('late');
+    });
     await page.evaluate(() => {
       document.getElementById('pill').classList.add('hidden');
       document.getElementById('past').classList.remove('hidden');

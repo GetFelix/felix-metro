@@ -32,7 +32,7 @@
   height: 4px;
   border-radius: 2px;
   background: linear-gradient(90deg, var(--coral) var(--p), var(--violet) var(--p));
-  box-shadow: 0 0 12px rgba(150, 92, 230, 0.35);
+  box-shadow: 0 0 12px var(--violet-glow);
 }
 .knob {
   position: absolute;

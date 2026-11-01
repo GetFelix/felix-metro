@@ -17,7 +17,7 @@
   margin-left: 12px;
   padding: 3px 8px;
   border-radius: 999px;
-  background: rgba(255, 96, 56, 0.18);
+  background: var(--coral-wash);
   color: var(--coral);
   font:
     600 11px/1 Inter,
@@ -26,7 +26,7 @@
   animation: breathe 2s ease-in-out infinite;
 }
 .pill.late {
-  background: rgba(255, 190, 60, 0.16);
+  background: var(--amber-wash);
   color: var(--amber);
   letter-spacing: 0;
 }
@@ -52,7 +52,7 @@
   padding: 3px 8px;
   border: 0;
   border-radius: 999px;
-  background: rgba(255, 96, 56, 0.18);
+  background: var(--coral-wash);
   color: var(--coral);
   font: inherit;
   font-weight: 600;
@@ -62,7 +62,7 @@
   margin-right: 8px;
 }
 .past button:hover {
-  background: rgba(255, 96, 56, 0.3);
+  background: var(--coral-wash-strong);
 }
 .past button:focus-visible {
   outline: 2px solid var(--cyan);
@@ -84,7 +84,7 @@
     margin-left: 6px;
     padding-inline: 6px;
   }
-  /* The past row is wider than the space beside the brand chip, so the clock moves under it, with the row on its own line. */
+  /* The past row and the Reconnecting pill make the clock wider than the space beside the brand chip, so it moves under it. */
   .past {
     flex-basis: 100%;
     margin-left: 0;
@@ -92,7 +92,8 @@
   .corner {
     max-width: calc(100vw - 32px);
   }
-  body:has(.past:not(.hidden)) .corner {
+  body:has(.past:not(.hidden)) .corner,
+  body:has(.pill.late:not(.hidden)) .corner {
     top: 76px;
   }
 }

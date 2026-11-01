@@ -32,6 +32,7 @@ export const SHORTCUTS: readonly ShortcutGroup[] = [
   },
   {
     title: 'Playback',
+    when: 'Looking at an earlier moment, with no button focused.',
     rows: [{ keys: [['Space']], action: 'Play or pause an earlier moment' }],
   },
   {
@@ -49,7 +50,20 @@ export function isHelpKey(e: { key: string; ctrlKey: boolean; metaKey: boolean; 
   return e.key === '?' && !e.ctrlKey && !e.metaKey && !e.altKey;
 }
 
-const TEXT_INPUTS = new Set(['text', 'search', 'email', 'url', 'tel', 'password', 'number', 'date', 'time']);
+const TEXT_INPUTS = new Set([
+  'text',
+  'search',
+  'email',
+  'url',
+  'tel',
+  'password',
+  'number',
+  'date',
+  'time',
+  'datetime-local',
+  'month',
+  'week',
+]);
 
 /** Whether a key pressed at `target` is going into text, so a shortcut must leave it alone. */
 export function isTypingTarget(
@@ -60,6 +74,19 @@ export function isTypingTarget(
   const tag = target.tagName?.toUpperCase();
   if (tag === 'TEXTAREA' || tag === 'SELECT') return true;
   return tag === 'INPUT' && TEXT_INPUTS.has((target.type ?? 'text').toLowerCase());
+}
+
+/**
+ * Whether a key press plays or pauses an earlier moment. Space keeps its own job on a button, a field or a list,
+ * but not on the timeline, which has no use for it, and not under an open sheet.
+ */
+export function isPlayKey(
+  e: { key: string; repeat: boolean; ctrlKey: boolean; metaKey: boolean; altKey: boolean },
+  target: { closest(selector: string): unknown } | null | undefined,
+  sheetOpen: boolean,
+): boolean {
+  if (e.key !== ' ' || e.repeat || e.ctrlKey || e.metaKey || e.altKey || sheetOpen) return false;
+  return !target?.closest('button, input, select, textarea, a[href]');
 }
 
 /** Draw `groups` into `into`: a heading and a table of keys and actions for each. */

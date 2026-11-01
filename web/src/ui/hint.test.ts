@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { HINT_MS, HINT_TEXT, createHint, createMemory, type HintStorage } from './hint';
+import { HINT_MS, HINT_TEXT, createHint, hintDue, createMemory, type HintStorage } from './hint';
 
 const storage = (): HintStorage & { data: Map<string, string> } => {
   const data = new Map<string, string>();
@@ -101,5 +101,16 @@ describe('listenForInteraction', () => {
     vi.unstubAllGlobals();
     expect(added.sort()).toEqual(['keydown', 'pointerdown', 'wheel']);
     expect(removed.sort()).toEqual(['keydown', 'pointerdown', 'wheel']);
+  });
+});
+
+describe('when the tip is due', () => {
+  it('is when the timeline appears over the live city', () => {
+    expect(hintDue(true, false)).toBe(true);
+  });
+
+  it('is not when the timeline is not new, or the page already shows an earlier moment', () => {
+    expect(hintDue(false, false)).toBe(false);
+    expect(hintDue(true, true)).toBe(false);
   });
 });

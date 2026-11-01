@@ -12,6 +12,7 @@
   box-sizing: border-box;
   width: min(400px, calc(100vw - 32px));
   max-height: calc(100vh - 128px);
+  max-height: calc(100dvh - 128px);
   overflow-y: auto;
   padding: var(--space-4);
   background: var(--panel);
@@ -168,5 +169,6 @@ kbd {
     left: var(--space-4);
     width: auto;
     max-height: calc(100vh - 96px);
+    max-height: calc(100dvh - 96px);
   }
 }
