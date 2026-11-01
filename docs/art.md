@@ -42,7 +42,7 @@ Construction has no models of its own; see [Construction](#construction).
 - **Time of day is one function.** Sky, fog, sun, hemisphere light, exposure, window light, lamps and headlights all come from the hour (`web/src/daylight.ts`). Each building starts lighting its windows at its own fixed time between 17:30 and 19:30 and starts to darken between 06:00 and 07:30, each fade taking ten minutes, so the last are done by 19:40 and 07:40. Each street lamp switches on at its own time between 18:27 and 18:47 and fades out at dawn between 06:54 and 07:14, nine minutes either way. Both come from a hash of position, so the same moment always looks the same. The sun sets in the west (+x), on the camera's side, so evening light falls on the faces in view.
 - **Post processing**, in order: ambient occlusion (high tier only, see [Quality tiers](#quality-tiers)), bloom with a threshold of 1 so only lights glow, distance blur, tone mapping, then a small saturation lift and vignette. The blur is by depth and only on the far side: nothing in front of the focus plane through the orbit target is blurred, a sharp band as wide as the camera distance follows it, and a gentle haze grows from there toward the horizon. A tall building in the band stays sharp to its roof.
 - **Buildings fit their lot.** Some Kenney buildings are wider than a tile, so each is scaled down to fit 0.9 of its lot and none overlap.
-- **Brand**: Inter and JetBrains Mono, cyan `hsl(192, 90%, 46%)` for Felix accents, amber for light, and coral to violet for the timeline. The Felix tower downtown carries the mark.
+- **Brand**: Inter and JetBrains Mono, cyan `hsl(192, 90%, 46%)` for Felix accents, amber for light, and coral to violet for the timeline. The Felix tower downtown carries the mark. The overlay's palette tokens, glass panels, type and motion are in [ui.md](ui.md).
 
 ## Using the style frame
 
@@ -111,9 +111,10 @@ scene (`?still`) has no meaningful frame times, so it never chooses on its own
 and ignores a saved tier.
 
 A tier from `?tier=` or from a saved choice is used as it is and turns the
-automatic choice off. The settings sheet, coming with the UI shell, saves a
-choice through `setTier()`. Automatic choices are not saved: a slow first load
-should not pin a device to low for good.
+automatic choice off. The settings sheet (see [ui.md](ui.md)) saves a
+choice through `setTier()`. Choosing Automatic there calls `setAutomatic()`,
+which forgets the saved tier and judges frame times again from high. Automatic
+choices are not saved: a slow first load should not pin a device to low for good.
 
 `?hud` shows the median and 95th percentile frame time over the last 120
 frames, draw calls and triangles for the last frame, and the tier with whether

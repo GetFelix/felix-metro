@@ -5,9 +5,26 @@
 ### Changed
 
 - Built on Felix 0.6.2: the sim's `felix-client` and `felix-wire` pins, the dev stack and CI images.
+- The overlay's styles moved from `web/index.html` into `web/src/ui/*.css`, and the picker, loading screen and frame-time
+  display into `web/src/ui/`. `docs/ui.md` describes the kit, the motion rules and the wording rules.
+
+### The page
+
+- A settings sheet, opened from the button under the clock. Quality is Automatic, High, Medium or Low; Automatic
+  forgets a saved tier and judges frame times again from High (`Quality.setAutomatic()`).
+- A key list, opened with `?` or from the settings sheet. It is data (`SHORTCUTS` in `web/src/ui/keys.ts`), so a new key
+  adds a row, and it is ignored while typing in a text field.
+- A tip on a first visit, "Drag the timeline to go back in time", shown once the timeline is on screen and gone on the first
+  interaction. It is never shown with `?ui=0` or `?capture`.
+- The clock's digits roll when they change, and hold still with `prefers-reduced-motion`.
+- On a phone, the past row (Play, how long ago, Back to live) moves under the Felix Metro chip instead of covering it.
+- The hour slider shows a focus ring when it is reached with the keyboard.
+- Short messages, such as "That moment is no longer kept.", now sit above the timeline in the page's glass style.
 
 ### Tools
 
+- `web/scripts/check-ui.mjs` drives the overlay with the keyboard and takes day and night screenshots at 1280 and 360
+  pixels wide.
 - `clip-local.mjs` points the builder bot at the moved gateway port, and runs its stack as its own compose project so
   its cleanup cannot remove a felix-metro stack started by hand.
 

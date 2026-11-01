@@ -1,0 +1,95 @@
+.brand {
+  top: 16px;
+  left: 16px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+.brand img {
+  width: 34px;
+  height: 34px;
+  object-fit: contain;
+}
+.brand small {
+  display: block;
+  font-weight: 500;
+  color: var(--muted);
+  font-size: 12px;
+}
+.brand-button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.brand-button:disabled {
+  color: inherit;
+  cursor: default;
+}
+.brand-button:focus-visible,
+.cities a:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 3px;
+  border-radius: 6px;
+}
+.chevron {
+  width: 7px;
+  height: 7px;
+  margin: -3px 2px 0 4px;
+  border-right: 2px solid var(--muted);
+  border-bottom: 2px solid var(--muted);
+  transform: rotate(45deg);
+}
+.brand-button[aria-expanded='true'] .chevron {
+  margin-top: 3px;
+  transform: rotate(225deg);
+}
+.cities {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  min-width: 100%;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 6px;
+  list-style: none;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+.cities a {
+  display: block;
+  padding: 8px 12px;
+  border-radius: 8px;
+  color: var(--text);
+  text-decoration: none;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.cities a:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+.cities a[aria-current='page'] {
+  color: var(--cyan);
+}
+@media (max-width: 600px) {
+  .brand {
+    padding-right: var(--space-3);
+  }
+  .brand,
+  .brand-button {
+    gap: var(--space-2);
+  }
+  .brand small {
+    display: none;
+  }
+}
