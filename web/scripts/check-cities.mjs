@@ -1,7 +1,7 @@
 // Opens the page at /#pinecrest against the running dev stack and checks the city picker: it lists the cities the sim
 // has registered, a city started after the page loaded shows up in it without a reload, and choosing it opens that
-// city. Usage: node scripts/check-cities.mjs <page url without a hash> <out dir>, with START_CITY set to the command
-// that starts the held-back city (dev/city.sh lakeside).
+// city. A city the gateway refuses still gets the list. Usage: node scripts/check-cities.mjs <page url without a hash>
+// <out dir>, with START_CITY set to the command that starts the held-back city (dev/city.sh lakeside).
 import { execSync } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -89,5 +89,18 @@ names = await listed();
 if (names.length < 3) await fail(`the picker on Lakeside lists ${names}`);
 await page.screenshot({ path: join(out, 'lakeside.png') });
 console.log(`Lakeside is open and its clock runs (tick ${t0} -> ${await page.evaluate(() => window.__live.tick)})`);
+
+// 4. A city the gateway refuses leaves the picker working: it still lists the cities there are, read through the
+// lobby city.
+await page.goto(`${appUrl}#nowhere`, { waitUntil: 'load', timeout: 5 * MINUTE });
+await page
+  .waitForFunction(() => document.querySelectorAll('#cities li').length >= 3, null, { polling: 250, timeout: MINUTE })
+  .catch(() => fail('the picker of a refused city never listed the cities'));
+names = await listed();
+if (!names.includes('Harbor') || !names.includes('Pinecrest'))
+  await fail(`the picker of a refused city lists ${names}`);
+if (names.includes('Lobby')) await fail('the lobby is listed as a city');
+await page.screenshot({ path: join(out, 'refused-city.png') });
+console.log(`a refused city still lists the cities: ${names}`);
 if (errors.length) await fail(errors.join('\n'));
 await browser.close();

@@ -1,5 +1,6 @@
 # What the gateway lets a browser session reach in one city. dev/seed.mjs
-# creates these streams for cities `harbor`, `pinecrest` and `lakeside`.
+# creates these streams for cities `harbor`, `pinecrest` and `lakeside`, and for `lobby`, which a page joins only to
+# read the list of cities when its own city is refused.
 
 [scope]
 field = "city"

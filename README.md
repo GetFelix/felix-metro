@@ -154,7 +154,8 @@ connections close with the old page. The list comes from the registry, which the
 writes to as each city starts, so a city that starts while the page is open appears in the
 list without a reload (a city started again at another size is listed at the latest one).
 If a city cannot open its streams when you start it, `dev/city.sh` fails with the reason
-and the sim keeps running. The stack seeds a third city, `lakeside`, and the sim keeps it idle
+and the sim keeps running. A page opened at a city the gateway refuses (`/#nowhere`) still shows the list: it reads it
+through `lobby`, a city the stack seeds for that and nothing else (no sim, no builders, never listed). The stack seeds a third city, `lakeside`, and the sim keeps it idle
 and unlisted until you start it:
 
 ```sh

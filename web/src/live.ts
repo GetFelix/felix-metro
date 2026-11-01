@@ -11,8 +11,11 @@ const ROUTINGS = ['modulo', 'jump_hash'];
 
 export type Status = 'live' | 'reconnecting';
 
-/** The city whose session lends the city list when the one asked for is refused. */
-const LIST_CITY = 'harbor';
+/**
+ * The city whose session lends the city list when the one asked for is refused. The gateway opens streams only after a
+ * join, so this is a city that dev/seed.mjs creates for nothing else: no sim, no builders, never listed.
+ */
+const LIST_CITY = 'lobby';
 
 /** The gateway turns a join down for good with `forbidden`: the city is not there or this person may not open it. */
 const refusal = (err: unknown) => err instanceof GatewayError && err.code === 'forbidden';

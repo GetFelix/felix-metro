@@ -2,7 +2,8 @@
 // that trusts idp.mjs, create the city registry and, for each city, an event
 // stream with a shard for every district and a command stream. Gives the sim
 // its rights, gives each city a watch and a build role, and writes the
-// broker's and the sim's tokens to the state directory. Safe to run again:
+// broker's and the sim's tokens to the state directory. Also creates `lobby`, a
+// city with no sim that a page joins only to read the list of cities. Safe to run again:
 // existing objects are kept.
 import { createHash } from "node:crypto";
 import { chmod, mkdir, writeFile } from "node:fs/promises";
@@ -119,11 +120,15 @@ await createStream("metro.cities", 1, null, null);
 await grant("role:sim", "metro.cities", "stream.publish");
 await grant("role:sim", "metro.cities", "stream.subscribe");
 
-for (const city of CITIES) {
-  const [name, districts] = city.split(":");
+// The city list is reached through a city, because the gateway opens streams only after a join. A page whose own
+// city is refused joins this one just to read the list (LIST_CITY in web/src/live.ts). It is never simulated or
+// listed, and nobody may build in it.
+const LOBBY = "lobby";
+
+async function seedCity(name, districts, { builders }) {
   const events = `metro.events.${name}`;
   const commands = `metro.commands.${name}`;
-  await createStream(events, Number(districts), RETENTION_SECONDS, MAX_BYTES);
+  await createStream(events, districts, RETENTION_SECONDS, MAX_BYTES);
   await createStream(commands, 1, RETENTION_SECONDS, MAX_BYTES);
   // A commit needs publish, and reading the log or a state key needs subscribe.
   await grant("role:sim", events, "stream.publish");
@@ -141,7 +146,7 @@ for (const city of CITIES) {
   await grant(build, commands, "stream.publish");
   for (const [role, names] of [
     [watch, WATCHERS],
-    [build, BUILDERS],
+    [build, builders ? BUILDERS : []],
   ]) {
     console.log(`${role} for ${names.join(", ") || "nobody"}`);
     for (const user of names) {
@@ -152,6 +157,12 @@ for (const city of CITIES) {
     }
   }
 }
+
+for (const city of CITIES) {
+  const [name, districts] = city.split(":");
+  await seedCity(name, Number(districts), { builders: true });
+}
+await seedCity(LOBBY, 1, { builders: false });
 
 // The broker runs as uid 65532 and writes its certificate here too.
 await mkdir(STATE, { recursive: true });
