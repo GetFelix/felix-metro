@@ -139,8 +139,9 @@ diagram. What to know when you run it:
 
 `cargo test -p felix-metro-sim` runs the unit tests with no broker. The test in
 `tests/day.rs` runs a city for a simulated day against a broker and reads the log back;
-it is ignored unless asked for. `ci/up.sh` starts the broker it needs (Docker or
-Podman), and the `sim` job in CI does the same:
+it is ignored unless asked for, and so is the restart test in the same file (it needs its
+own empty city, `METRO_TEST_RESTART_CITY`, `phoenix` by default). `ci/up.sh` starts the broker
+they need (Docker or Podman), and the `sim` job in CI does the same:
 
 ```sh
 sim/ci/up.sh

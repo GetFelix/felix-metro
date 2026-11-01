@@ -119,7 +119,7 @@ not needed at the target scale and is left out.
 - **A speed change takes effect between ticks.** The sim reads the requested speed after every district has answered a tick, so the next tick's header carries the new speed and each district's record for it holds a `speed` event; no other tick has one. Changing to 0 commits that tick as the last one (header speed 0), then the clock stops: no records are written while paused and the city clock does not move. A resume continues at the next tick, due at once and at the new rate from then on, with no catch-up burst. Only 0, 4, 8 and 16 are accepted. Seeking goes by tick number and offset, and nothing in `core` reads the speed.
 - **A new city starts with a day behind it.** On its first start, when no district has a record, the sim commits `SIM_WARMUP_HOURS` of ticks (40 by default, so live begins at 16:00 on day 2) as fast as the broker takes them, then runs at its normal speed. Each district has its own committer that sends one record at a time at the offset the stepping already knows, so the expected-offset fence and the per-district order hold, and a district may run up to 256 ticks ahead of another. The warm-up ticks did not happen in real time, so their `wall_us` is spread back from the moment the warm-up began at the speed the city runs at (a tick every 250 ms at 4 Hz), which keeps wall time and tick consistent with the live ticks after them. A restart over a log with records never warms up again, and neither does a city that starts paused. The log-rate goals are about the live rate; the warm-up is one burst of the same records at startup (a city day and a half, well inside the stream's retention) and `report_load` steps the world without the runner, so it is unaffected.
 - **A restart carries on from the log.** A sim started over a city that has records resumes at the next tick, with everything built and everyone where they were. See [Restart](#restart).
-- **The operator sets it** with `SIM_TICKS_PER_SECOND` at start and a loopback-only HTTP endpoint on the sim (`PUT /cities/<name>/speed`). A builder's `speed` command from the command stream does the same, and a nonzero one resumes a paused city.
+- **The operator sets it** with `SIM_TICKS_PER_SECOND` when a new city starts (a restarted city keeps its own speed) and a loopback-only HTTP endpoint on the sim (`PUT /cities/<name>/speed`). A builder's `speed` command from the command stream does the same, and a nonzero one resumes a paused city.
 - **The tick number is the city's clock.** Every record carries it. "The city at 08:15 on day 3" is a tick number, and the city at a tick is every district rewound to that tick.
 - **Offsets are per district.** Districts are aligned by tick, never by offset.
 
@@ -141,8 +141,7 @@ flowchart TD
 
 **Rebuilding the world.** A keyframe says where each resident is and what they are doing. It does not say when a
 trip left or which block of the day a resident is in, and the sim needs both to carry on. The restart reads them from
-two places: the `trip` event of everyone on the road, found in the two city hours before the keyframe (longer than any
-trip), and the resident's schedule, where the lot, the activity and the tick they leave at name the block. It checks
+two places: the `trip` event of everyone on the road, found in the four city hours before the keyframe (a trip takes minutes of city time), and the resident's schedule, where the lot, the activity and the tick they leave at name the block. It checks
 each trip against the keyframe's vehicle and refuses to start if they disagree, rather than guess. The cars on each
 road, which new routes are planned around, are counted again from the trips under way.
 
@@ -161,7 +160,7 @@ live from where they stopped, with less history than a finished warm-up.
 **The command stream position.** See Commands below: the follower opens its subscription where the log says the sim
 stopped reading.
 
-**When it refuses.** The restart stops with a message, and does not start the city, when a district holds a record
+**When it refuses.** The restart stops the sim with a message when a district holds a record
 but no keyframe (another sim's data), when a district's ticks are not consecutive, or when a resident on the road in
 the keyframe has no `trip` event or one that disagrees with the keyframe. Fix or remove the log; the sim does not
 guess.
@@ -250,7 +249,7 @@ is a `u32`. `events` counts every event, including ones a reader skips.
 | 9   | `road`       | segment `u32`, change `u8`                   |
 | 10  | `command`    | principal `u64`, name, id `u32`, result `u8` |
 | 11  | `speed`      | ticks per second `u8`                        |
-| 12  | `command_cursor` | next command stream offset (varint)      |
+| 12  | `command_cursor` | next command stream offset (varint) |
 
 A route is a varint leg count, the segment ids (first as a delta from 0, then
 each from the one before), then one speed byte per leg. A vehicle state is kind
@@ -342,8 +341,10 @@ a second and asks the same subscription again, and if it then reports the stream
 closed the follower logs an error naming the city and stops, and the city runs
 without builders until the sim restarts.
 
-One case is not covered. A paused city that holds more commands than it keeps records the extra ones as busy only
-after it resumes, so a kill before then loses them.
+One case is not covered. A paused city that holds more commands than it keeps (1,024) records the extra ones as
+busy only after it resumes, and the cursor passes them as soon as the resuming command is applied. A kill in the
+middle of a tick after that can apply those commands for real on the restart, or lose them. Exactly once holds
+for every other command.
 
 | Result | Meaning |
 |---|---|
@@ -392,8 +393,8 @@ Every commit is a `commit_if` at the offset the sim expects the district's shard
 to be at, so the sim always knows the offset a record will have. A keyframe
 puts that offset in its own `keyframe_offset` and in the `keyframe` state key
 in the same commit. A stale sim that comes back after a replacement took over is
-refused at the broker instead of writing a second history, and a sim that
-starts over a city that already has history stops.
+refused at the broker instead of writing a second history. A sim that starts
+over a city that already has history resumes it (see [Restart](#restart)).
 
 A district that gets no answer is sent the same bytes again at the same
 expected offset, after a growing wait. If the shard's tail shows the earlier
@@ -447,8 +448,7 @@ read concurrently over two connections taken in turn (opened by the first seek, 
 is where a live subscription resumes, plus one.
 
 The log is ordered by `(epoch, tick)`, and a tick that landed twice is applied once. A restarted sim keeps the epoch and
-carries on from the next tick, so a page watching it sees one unbroken run of ticks. A newer epoch, which only a log
-that starts a timeline over would have, shows in preference to an older one at the same tick. The estimate starts from the cached keyframe of `T`'s hour, or
+carries on from the next tick, so a page watching it sees one unbroken run of ticks. A newer epoch, which nothing writes today (a future fork or a replacement timeline would), shows in preference to an older one at the same tick. The estimate starts from the cached keyframe of `T`'s hour, or
 else the newest keyframe the state key points at, and a log that is not one record a tick falls back to bisection between the
 offsets known to be below and above `T`. A tick the log skipped shows the nearest earlier tick every district has, and the
 result says it is not exact; a tick past the newest is refused as not yet happened. Retention that has taken the named

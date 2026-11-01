@@ -15,8 +15,8 @@ use crate::runner::{Log, Retry};
 use crate::world::{Departure, World};
 
 /// Records before the keyframe a restart reads, so that a trip that left
-/// before it is found. No trip takes longer than an hour or so.
-const LOOKBACK: u64 = 2 * TICKS_PER_HOUR as u64;
+/// before it is found. A trip takes minutes of city time.
+const LOOKBACK: u64 = 4 * TICKS_PER_HOUR as u64;
 
 /// Records asked for at a time.
 const PAGE: u32 = 1000;
@@ -257,7 +257,7 @@ fn decode(district: usize, bytes: &[u8]) -> Result<TickRecord> {
 
 /// Tries `op` until it answers, a few times over: a shard may still be
 /// electing a leader when the sim starts.
-async fn retrying<T, F, Fut>(retry: Retry, what: &str, mut op: F) -> Result<T>
+pub(crate) async fn retrying<T, F, Fut>(retry: Retry, what: &str, mut op: F) -> Result<T>
 where
     F: FnMut() -> Fut,
     Fut: Future<Output = Result<T>>,

@@ -16,7 +16,7 @@ use tracing::{info, warn};
 use crate::commands::{Incoming, MAX_HELD, MAX_PER_TICK, MAX_REFUSED, apply_all, refuse_busy};
 use crate::control::check_speed;
 use crate::latency::Window;
-use crate::resume::{History, read_history};
+use crate::resume::{History, read_history, retrying};
 use crate::world::World;
 
 const REPORT_EVERY: Duration = Duration::from_secs(5);
@@ -256,7 +256,12 @@ pub async fn run_with_history<L: Log>(
         for tick in history.unfinished() {
             let (at, changed) = history.speed_at(tick);
             let incoming = match history.commands_in(tick) {
-                Some((from, to)) => log.commands(from, to).await?,
+                Some((from, to)) => {
+                    retrying(retry, "read the commands of the unfinished tick", || {
+                        log.commands(from, to)
+                    })
+                    .await?
+                }
                 None => Vec::new(),
             };
             let said = history.cursor_event(tick);
@@ -798,7 +803,7 @@ async fn commit_until_written<L: Log>(
                 }
             }
             Ok(Ok(Write::Refused { tail })) => bail!(
-                "district {district}: the log is at {tail}, not {expected}; another sim is writing it, or this city already has history"
+                "district {district}: the log is at {tail}, not {expected}; another sim is writing it"
             ),
             Ok(Err(err)) if is_permanent(&err) => {
                 permanent += 1;

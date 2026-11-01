@@ -129,9 +129,9 @@ async fn a_restart_does_not_change_the_epoch_or_the_speed() {
 #[tokio::test(start_paused = true)]
 async fn a_tick_only_some_districts_committed_is_finished_by_the_restart() {
     let whole = records(&straight(quick(1000)).await);
-    for hung in 0..4u16 {
+    for (hung, at) in [(0, 700), (1, 700), (2, 700), (3, 700), (2, 720), (0, 720)] {
         let log = Memory::new(move |district, offset, attempt| {
-            (district == hung && offset == 700 && attempt == 1).then_some(Fault::Hang)
+            (district == hung && offset == at && attempt == 1).then_some(Fault::Hang)
         });
         killed(
             Duration::from_secs(3),
@@ -139,7 +139,9 @@ async fn a_tick_only_some_districts_committed_is_finished_by_the_restart() {
         )
         .await;
         let held: Vec<usize> = (0..4).map(|d| log.records(d).len()).collect();
-        let want: Vec<usize> = (0..4).map(|d| 701 - usize::from(d == hung)).collect();
+        let want: Vec<usize> = (0..4)
+            .map(|d| at as usize + 1 - usize::from(d == hung))
+            .collect();
         assert_eq!(held, want, "district {hung} left behind");
 
         run_city("harbor", harbor(), quick(1000), log.clone())

@@ -1,5 +1,5 @@
-// Checks that a sim restarted over its log carries on, from a plain client through the gateway. Three phases, with the
-// sim stopped and started between the second and the third:
+// Checks that a sim restarted over its log carries on, from a plain client through the gateway. Three phases; the sim
+// is stopped before the second and started after it:
 //
 //   node dev/check-restart.mjs before [city]    builds on a few lots and notes where each district's log stands
 //   (stop the sim)
