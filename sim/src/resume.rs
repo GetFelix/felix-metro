@@ -399,7 +399,9 @@ impl History {
 
     /// Each district's share of the account at the keyframe tick `base`. A log
     /// from before the account has none, and the city starts it with its
-    /// opening funds.
+    /// opening funds. A keyframe tick finished by a different sim version can
+    /// leave some districts without a balance; they restart at their opening
+    /// share.
     fn balances(&self, base: u32) -> Vec<i64> {
         let districts = self.ticks[&base].len();
         self.ticks[&base]

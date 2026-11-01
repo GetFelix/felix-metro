@@ -15,7 +15,7 @@
   upkeep, and building or demolishing takes a price when the command applies. A command the city cannot pay for is
   refused with result 10. The sim records a `ledger` event per district per day and per paid command, and a `balance`
   event per district on every keyframe tick; a restart restores the account. The page shows the funds beside the clock,
-  and they follow the tick on screen when you scrub.
+  and show the funds of the moment you scrub to.
 
 ### Changed
 

@@ -20,7 +20,7 @@ const TAX_PER_RESIDENT: u64 = 4;
 const TAX_PER_BUSINESS: u64 = 30;
 /// Upkeep of a tile of road per city day.
 const UPKEEP_PER_ROAD_TILE: u64 = 1;
-/// Upkeep of a park per city day.
+/// Upkeep of a lot of park land per city day.
 const UPKEEP_PER_PARK: u64 = 20;
 /// The price of a demolition.
 pub(crate) const DEMOLISH_COST: u64 = 100;
@@ -49,7 +49,7 @@ fn is_business(kind: u16) -> bool {
             .contains(&kind)
 }
 
-/// What stays the same all game, by district: road tiles and parks to keep up.
+/// What stays the same all game, by district: road tiles to keep up.
 pub(super) fn upkeep_base(city: &City) -> Vec<u64> {
     let side = u32::from(city.districts_per_side);
     let mut base = vec![0u64; city.districts.len()];
@@ -58,11 +58,6 @@ pub(super) fn upkeep_base(city: &City) -> Vec<u64> {
         let column = (u32::from(x) / 12).min(side - 1);
         let row = (u32::from(z) / 12).min(side - 1);
         base[(row * side + column) as usize] += u64::from(segment.length) * UPKEEP_PER_ROAD_TILE;
-    }
-    for lot in &city.lots {
-        if lot.zone == Zone::Park {
-            base[usize::from(lot.district)] += UPKEEP_PER_PARK;
-        }
     }
     base
 }
@@ -90,14 +85,18 @@ impl World {
     pub(super) fn close_day(&mut self) -> Vec<(u64, u64)> {
         let mut day: Vec<(u64, u64)> = self.upkeep.iter().map(|&u| (0, u)).collect();
         for person in &self.people {
-            let home = person.resident.schedule.blocks[0].lot;
+            let home = person.resident.home;
             day[usize::from(self.city.lots[home as usize].district)].0 += TAX_PER_RESIDENT;
         }
         for lot in &self.city.lots {
-            if let Some((kind, _)) = self.building(lot.id)
-                && is_business(kind)
-            {
+            let Some((kind, _)) = self.building(lot.id) else {
+                continue;
+            };
+            if is_business(kind) {
                 day[usize::from(lot.district)].0 += TAX_PER_BUSINESS;
+            } else if lot.zone == Zone::Park && kind >= u16::from(BuildingKind::TREE_FIRST) {
+                // Park land costs upkeep until something is built on it.
+                day[usize::from(lot.district)].1 += UPKEEP_PER_PARK;
             }
         }
         for (account, (earned, spent)) in self.accounts.iter_mut().zip(&day) {

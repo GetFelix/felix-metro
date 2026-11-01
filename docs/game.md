@@ -157,14 +157,15 @@ The numbers are placeholders until the economy is in the sim and measured.
 ## What this needs from the sim and the log
 
 - **Money.** Done: the account, the `ledger` and `balance` events and the refusal when the city cannot pay are in the
-  sim and shown on the page (see Money in design.md). Services such as parks and transit as a paid-for extra, and fares,
-  are not built.
+  sim and shown as a number beside the clock (see Money in design.md); the timeline does not draw it yet. Parks cost
+  upkeep as land; transit, fares and paid services are not built.
 - **Persistence across a restart.** Done: a restarted sim resumes from the newest keyframe
   and the records after it (see Restart in design.md). The new state below has to be
-  rebuilt the same way, so each new keyframe field is restored in `sim/src/world/restore.rs`.
-- **New events:** `ledger` (account changes), `moved` (a resident joining or leaving),
+  rebuilt the same way, so each new piece of state is restored in `sim/src/world/restore.rs`. The account is written as
+  a `balance` event on keyframe ticks, not as a keyframe field, so the keyframe layout stays as it is.
+- **New events:** `moved` (a resident joining or leaving),
   `policy` (a policy's value changed). Each is small and rare next to `trip`.
-- **Keyframes grow by** the account, policy values and the set of residents living in
+- **Keyframe ticks carry** policy values and the set of residents living in
   the city (a bitmap, 2.5 KB at 20,000 residents).
 - **Log budget.** None of this should move the per-second rate measurably; the check is
   `report_load` before and after.
@@ -176,7 +177,7 @@ The numbers are placeholders until the economy is in the sim and measured.
 ## Order
 
 1. Persistence across a restart (done).
-2. Money and the `ledger` event, shown as one number on the page and on the timeline (done).
+2. Money and the `ledger` event, shown as one number on the page (done; the timeline does not draw it yet).
 3. Factions: three satisfaction numbers from the log, their demands, and the recall
    warning with its countdown.
 4. Policy commands, two of them, with a cooldown.

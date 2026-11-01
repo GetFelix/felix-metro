@@ -300,7 +300,7 @@ caused it, so the budget can be read back, and scrubbed, like everything else.
 | In                                                   | Out                                                            |
 | ---------------------------------------------------- | -------------------------------------------------------------- |
 | $4 per resident per city day, to their home district | $1 per tile of road per city day                               |
-| $30 per shop, office and factory per city day        | $20 per park per city day                                      |
+| $30 per shop, office and factory per city day        | $20 per lot of park land per city day                          |
 |                                                      | A build or demolition, once: $300 a house, $500 a shop, $1,500 a skyscraper, $800 a factory, $100 to demolish |
 
 These numbers are placeholders until the economy has been played. A shop, office or factory pays tax for as long as
@@ -314,15 +314,18 @@ the building stands; opening hours arrive with policies.
   the sum of the shares, and a share can be negative while the sum is not. Only the sum decides what the city can afford.
 - **Balance.** Every keyframe tick, each district also writes a `balance` event with its share at the end of the tick.
   That is what a keyframe carries of the account; it is an event rather than a keyframe field so the keyframe layout
-  does not change. A page that starts from a keyframe sets the share from it and adds the `ledger` events after.
+  does not change. A page that starts from a keyframe sets the share from it and adds the `ledger` events after. A
+  keyframe tick written half by an older sim and half by this one would leave some shares unknown; a restart then
+  gives those districts their opening share.
 - **No funds.** A `build` or `demolish` the funds cannot pay for is refused with result 10 and changes nothing.
-  The city does not lose; it cannot build until the days refill the account.
+  The city does not lose; it cannot build until its days bring the account back up. A city can also run at a loss, for
+  instance after demolishing the businesses that paid for it, and then it stays short.
 - **Restart.** The restart takes each district's share from its newest keyframe tick and adds the `ledger` events of
   builds and demolitions after it. A day's `ledger` is not read back; stepping makes it again. A log written before the
   account existed starts it at the opening funds.
 
-The page shows the funds beside the clock and follows the tick on screen: scrubbing back shows the funds of that
-moment.
+The page shows the funds beside the clock. They are the funds as of the newest record the page has applied, which can
+run a few ticks ahead of the tick on screen, and after a scrub they are the funds of the moment scrubbed to.
 
 Cost to the log: one small event per district per city day, one per build, and a `balance` of a few bytes per district per
 city hour. `report_load` on the harbor city moves the day mean from 656.4 to 656.7 B/s.
