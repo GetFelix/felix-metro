@@ -4,6 +4,8 @@
 //! added to it. That makes the list as durable as the tick, a sim killed between the two cannot leave one
 //! without the other, and a tick committed again writes the same list.
 
+use std::collections::BTreeMap;
+
 use anyhow::{Context, Result};
 use felix_metro_core::TICKS_PER_DAY;
 use felix_metro_core::record::{
@@ -60,17 +62,13 @@ pub(crate) fn from_commands(tick: u32, commanded: &[Vec<Event>]) -> Vec<Marker> 
     out
 }
 
-/// The markers of the day the sim last wrote to.
+/// The days' markers the sim holds in memory: the days a run can still write to.
 #[derive(Default)]
-pub(crate) struct Today(Option<(u32, Vec<Marker>)>);
+pub(crate) struct Today(BTreeMap<u32, Vec<Marker>>);
 
 impl Today {
-    pub(crate) fn day(&self) -> Option<u32> {
-        self.0.as_ref().map(|(day, _)| *day)
-    }
-
-    /// Takes the day's list as the log holds it.
-    pub(crate) fn load(day: u32, stored: Option<&[u8]>) -> Result<Self> {
+    /// Takes day `day`'s list as the log holds it, `None` for a day with nothing stored.
+    pub(crate) fn load(&mut self, day: u32, stored: Option<&[u8]>) -> Result<()> {
         let markers = match stored {
             None => Vec::new(),
             Some(bytes) => {
@@ -84,30 +82,38 @@ impl Today {
                 record.markers
             }
         };
-        Ok(Today(Some((day, markers))))
+        self.0.insert(day, markers);
+        Ok(())
     }
 
     /// Records `new`, the markers of `tick`, and returns the list to write. Anything already listed at
     /// `tick` or later is replaced, so a tick run again leaves the list as it was. `None` when there is
-    /// nothing to write.
+    /// nothing new to write: no markers, or a list that came out the same (a full day).
+    ///
+    /// A day that was not loaded has nothing stored: the run loads every day a restart can find a
+    /// value in (see `load_markers` in the runner), and later days are new.
     pub(crate) fn add(&mut self, tick: u32, new: Vec<Marker>) -> Result<Option<Marked>> {
-        let Some((day, markers)) = self.0.as_mut() else {
-            anyhow::bail!("the day's markers were not loaded");
-        };
         if new.is_empty() {
             return Ok(None);
         }
-        debug_assert_eq!(tick / TICKS_PER_DAY, *day);
+        let day = tick / TICKS_PER_DAY;
+        let markers = self.0.entry(day).or_default();
+        let before = markers.clone();
         markers.retain(|m| m.tick < tick);
         let room = MAX_PER_DAY.saturating_sub(markers.len());
         markers.extend(new.into_iter().take(room));
+        if *markers == before {
+            return Ok(None);
+        }
         let bytes = MarkersRecord {
-            day: *day,
+            day,
             markers: markers.clone(),
         }
         .encode()
         .context("encode the day's markers")?;
-        Ok(Some(Marked { day: *day, bytes }))
+        // Older days are never written again.
+        self.0.retain(|d, _| *d + 1 >= day);
+        Ok(Some(Marked { day, bytes }))
     }
 }
 

@@ -1,7 +1,7 @@
 // The row of notable moments above the timeline: one button for each marker, or for each cluster of them where the bar
 // is too short to keep them apart. It sits beside the bar and not inside it, since the bar is a slider and a slider's
 // children are hidden from a screen reader.
-import { clusterMarkers, clusterName, clusterTarget, type Cluster, type Marker } from './markers';
+import { clusterAt, clusterMarkers, clusterName, clusterTarget, type Cluster, type Marker } from './markers';
 
 /** Markers nearer than this many pixels share a button. */
 const GAP_PX = 14;
@@ -95,7 +95,7 @@ export function createMarkerRow(root: HTMLElement, onSeek: (tick: number) => voi
         return b;
       });
       root.replaceChildren(...buttons);
-      const kept = keep === undefined ? -1 : clusters.findIndex((c) => c.tick === keep);
+      const kept = keep === undefined ? -1 : clusterAt(clusters, keep);
       const reach = buttons[kept >= 0 ? kept : 0];
       if (reach) reach.tabIndex = 0;
       if (kept >= 0) reach?.focus({ preventScroll: true });

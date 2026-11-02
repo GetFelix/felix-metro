@@ -726,3 +726,26 @@ describe('seek', () => {
     });
   });
 });
+
+describe('stored timeline markers', () => {
+  const day = (payload: Uint8Array | null, fail?: GatewayError) => ({
+    stateGet: vi.fn(async () => {
+      if (fail) throw fail;
+      return { payload, version: null, asOf: 0 };
+    }),
+    read: vi.fn(),
+  });
+
+  it('answers the bytes the sim stored, and null for a day with none', async () => {
+    const bytes = new Uint8Array([5, 0, 0]);
+    expect(await new Seeker(day(bytes) as never, 1).markerBytes(0)).toBe(bytes);
+    expect(await new Seeker(day(null) as never, 1).markerBytes(0)).toBeNull();
+  });
+
+  it('asks the key of the day on district 0, and fails when the read does', async () => {
+    const h = day(null, new GatewayError('timeout', 'no answer'));
+    const s = new Seeker(h as never, 1);
+    await expect(s.markerBytes(3)).rejects.toThrow('no answer');
+    expect(h.stateGet).toHaveBeenCalledWith('events', 'markers.3', 0);
+  });
+});

@@ -646,8 +646,9 @@ pub(super) fn decode_registry(bytes: &[u8]) -> Result<RegistryRecord, DecodeErro
     Ok(rec)
 }
 
-/// A day's markers: the day, a count, then per marker the tick as a delta from the one before (the first from the
-/// day's start), its kind, subject, detail and builder.
+/// A day's markers: the day, a count, then each marker framed (its length, then the body), so a reader skips a
+/// marker of a type it does not know and keeps the rest. A body is the tick as a delta from the marker before (the
+/// first from the day's start), the type, subject, detail and builder; bytes appended to it are ignored.
 pub(super) fn encode_markers(m: &MarkersRecord) -> Result<Vec<u8>, EncodeError> {
     let mut w = Writer(Vec::with_capacity(8 + m.markers.len() * 16));
     w.u8(KIND_MARKERS);
@@ -655,12 +656,14 @@ pub(super) fn encode_markers(m: &MarkersRecord) -> Result<Vec<u8>, EncodeError> 
     w.varint(m.markers.len() as u64);
     let mut prev = m.day.saturating_mul(TICKS_PER_DAY);
     for mark in &m.markers {
-        w.delta(prev, mark.tick);
+        w.framed(0, 0, |b| {
+            b.delta(prev, mark.tick);
+            b.u8(mark.kind);
+            b.varint(u64::from(mark.subject));
+            b.varint(u64::from(mark.what));
+            b.str(&mark.by)
+        })?;
         prev = mark.tick;
-        w.u8(mark.kind);
-        w.varint(u64::from(mark.subject));
-        w.varint(u64::from(mark.what));
-        w.str(&mark.by)?;
     }
     Ok(w.0)
 }
@@ -673,16 +676,17 @@ pub(super) fn decode_markers(bytes: &[u8]) -> Result<MarkersRecord, DecodeError>
     let mut prev = day.saturating_mul(TICKS_PER_DAY);
     let mut markers = Vec::with_capacity(n);
     for _ in 0..n {
-        let tick = r.delta(prev)?;
+        let (_, mut b) = r.framed(0)?;
+        let tick = b.delta(prev)?;
         prev = tick;
-        let kind = r.u8()?;
+        let kind = b.u8()?;
         if !matches!(kind, MARK_BUILT | MARK_DEMOLISHED | MARK_ROAD) {
-            return Err(DecodeError::Invalid("unknown marker kind"));
+            continue;
         }
-        let subject = r.varint_u32()?;
-        let what = u16::try_from(r.varint()?)
+        let subject = b.varint_u32()?;
+        let what = u16::try_from(b.varint()?)
             .map_err(|_| DecodeError::Invalid("marker detail overflows u16"))?;
-        let by = r.str()?;
+        let by = b.str()?;
         markers.push(Marker {
             tick,
             kind,

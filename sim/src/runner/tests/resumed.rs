@@ -474,7 +474,7 @@ async fn the_markers_of_a_tick_district_0_missed_are_written_by_the_restart() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn each_city_day_keeps_its_own_list() {
+async fn each_city_day_keeps_its_own_list_and_a_restart_reads_the_days_it_writes_to() {
     let log = Memory::healthy();
     let retry = Retry::of(&Settings::default());
     let change = |lot| {
@@ -493,28 +493,89 @@ async fn each_city_day_keeps_its_own_list() {
         ]]
     };
     let mut today = Today::default();
-    let a = mark(&log, retry, &mut today, 10, &change(1)).await.unwrap();
-    assert_eq!(a.as_ref().map(|m| m.day), Some(0));
-    log.markers.lock().unwrap().insert(0, a.unwrap().bytes);
-    let b = mark(&log, retry, &mut today, TICKS_PER_DAY + 3, &change(2))
-        .await
+    let a = mark(&mut today, 10, &change(1)).unwrap().unwrap();
+    assert_eq!(a.day, 0);
+    log.markers.lock().unwrap().insert(0, a.bytes);
+    let b = mark(&mut today, TICKS_PER_DAY + 3, &change(2))
         .unwrap()
         .unwrap();
     assert_eq!(b.day, 1);
-    // A fresh run reads the day it is writing to from the log.
-    let mut fresh = Today::default();
-    let c = mark(&log, retry, &mut fresh, 20, &change(3))
+    // A restart reads the days from its first tick to the one after its last.
+    let mut fresh = load_markers(&log, retry, 20..=TICKS_PER_DAY - 1)
         .await
-        .unwrap()
         .unwrap();
+    let c = mark(&mut fresh, 20, &change(3)).unwrap().unwrap();
     let record = felix_metro_core::record::MarkersRecord::decode(&c.bytes).unwrap();
     let ticks: Vec<_> = record.markers.iter().map(|m| (m.tick, m.subject)).collect();
     assert_eq!(ticks, [(10, 1), (20, 3)]);
-    // A tick with no change reads nothing and writes nothing.
+    // A tick with no change writes nothing.
+    assert_eq!(mark(&mut Today::default(), 5, &[Vec::new()]).unwrap(), None);
+}
+
+/// A log whose reads of the markers fail, as a broker that is briefly unreachable would.
+#[tokio::test(start_paused = true)]
+async fn a_failed_read_of_the_markers_stops_the_start_and_never_a_tick() {
+    #[derive(Clone)]
+    struct Unreadable(Memory);
+    impl Log for Unreadable {
+        async fn commit(
+            &self,
+            d: u16,
+            e: u64,
+            r: Vec<u8>,
+            k: bool,
+            m: Option<&Marked>,
+        ) -> Result<Write> {
+            self.0.commit(d, e, r, k, m).await
+        }
+        async fn markers(&self, _day: u32) -> Result<Option<Vec<u8>>> {
+            anyhow::bail!("unreachable")
+        }
+        async fn read(&self, d: u16, o: u64) -> Result<Option<Vec<u8>>> {
+            self.0.read(d, o).await
+        }
+        async fn keyframe(&self, d: u16) -> Result<Option<u64>> {
+            self.0.keyframe(d).await
+        }
+        async fn read_from(&self, d: u16, o: u64, m: u32) -> Result<Vec<(u64, Vec<u8>)>> {
+            self.0.read_from(d, o, m).await
+        }
+        async fn commands(&self, f: u64, u: u64) -> Result<Vec<Incoming>> {
+            self.0.commands(f, u).await
+        }
+    }
+    let world = World::new(harbor());
+    let lot = free_lot(&world);
+    let inner = Memory::healthy();
+    let (send, inbox) = mpsc::channel(8);
+    let build = Command::Build {
+        lot,
+        kind: 4,
+        rotation: 0,
+    };
+    send.try_send(inner.publish("mayor", 1, build)).unwrap();
+    let mut s = quick(300);
+    s.max_failures = 2;
+    // A new city reads no markers, so a build in it commits whatever the log says about them.
+    run_city_with(
+        "harbor",
+        harbor(),
+        s.clone(),
+        Unreadable(inner.clone()),
+        Some(inbox),
+    )
+    .await
+    .unwrap();
     assert_eq!(
-        mark(&log, retry, &mut Today::default(), 5, &[Vec::new()])
-            .await
-            .unwrap(),
-        None
+        marker_subjects(&inner, 0),
+        vec![(0, lot, "mayor".to_string())]
     );
+    // A restart reads them before its first tick, and stops there when it cannot.
+    let log = Unreadable(inner);
+    let history = load_history(&log, 4, &quick(0)).await.unwrap().unwrap();
+    s.stop_at = Some(310);
+    let err = run_with_history("harbor", harbor(), s, log, None, Some(history))
+        .await
+        .unwrap_err();
+    assert!(format!("{err:#}").contains("markers"), "{err:#}");
 }

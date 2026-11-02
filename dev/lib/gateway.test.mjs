@@ -76,9 +76,13 @@ test("ignores records of another kind", () => {
 });
 
 test("reads a day of timeline markers", () => {
-  const mark = (deltaTicks, type, subject, what, by) => [...zigzag(deltaTicks), type, ...varint(subject), ...varint(what), by.length, ...Buffer.from(by)];
+  const mark = (deltaTicks, type, subject, what, by) => {
+    const body = [...zigzag(deltaTicks), type, ...varint(subject), ...varint(what), by.length, ...Buffer.from(by)];
+    return [...varint(body.length), ...body];
+  };
   // Day 2 starts at tick 11520; the first change is 100 ticks in, the second 40 ticks after it.
-  const bytes = Uint8Array.from([5, 2, 2, ...mark(100, 1, 412, 17, "Mara"), ...mark(40, 2, 9, 0, "")]);
+  // A marker of a type this reader does not know is stepped over, and the ticks after it still add up.
+  const bytes = Uint8Array.from([5, 2, 3, ...mark(100, 1, 412, 17, "Mara"), ...mark(10, 9, 1, 1, "x"), ...mark(30, 2, 9, 0, "")]);
   assert.deepEqual(decodeMarkers(bytes), {
     day: 2,
     markers: [

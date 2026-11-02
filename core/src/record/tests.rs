@@ -924,8 +924,8 @@ fn a_marker_is_a_few_bytes() {
             by: "Mara".into(),
         }],
     };
-    // Kind, day, count, tick delta (2), kind, lot (2), building, name (1 + 4).
-    assert_eq!(m.encode().unwrap().len(), 1 + 1 + 1 + 2 + 1 + 2 + 1 + 5);
+    // Kind, day, count, frame length, tick delta (2), kind, lot (2), building, name (1 + 4).
+    assert_eq!(m.encode().unwrap().len(), 1 + 1 + 1 + 1 + 2 + 1 + 2 + 1 + 5);
 }
 
 #[test]
@@ -946,11 +946,39 @@ fn markers_refuse_what_they_cannot_hold_or_read() {
         .unwrap();
     bytes.push(0);
     assert_eq!(MarkersRecord::decode(&bytes), Err(DecodeError::Trailing));
-    // Kind 5, day 0, one marker at tick 0 (a zero delta), kind 9.
-    assert!(matches!(
-        MarkersRecord::decode(&[KIND_MARKERS, 0, 1, 0, 9, 0, 0, 0]),
-        Err(DecodeError::Invalid("unknown marker kind"))
-    ));
+}
+
+#[test]
+fn a_marker_of_a_type_this_build_does_not_know_is_skipped() {
+    let known = |tick: u32| Marker {
+        tick,
+        kind: MARK_BUILT,
+        subject: 3,
+        what: 1,
+        by: "Mara".into(),
+    };
+    let mut ours = MarkersRecord {
+        day: 0,
+        markers: vec![known(10), known(30)],
+    }
+    .encode()
+    .unwrap();
+    // Day 0, three markers: the known ones with a marker of type 9 (and a longer body) between them. The
+    // frame of each is its length, so the reader steps over what it does not understand.
+    let first = ours[3..3 + 1 + ours[3] as usize].to_vec();
+    let second = ours[3 + first.len()..].to_vec();
+    assert_eq!(first.len() + second.len() + 3, ours.len());
+    ours.truncate(2);
+    ours.push(3);
+    ours.extend(&first);
+    // At the first's tick (delta 0), type 9, five bytes of a future layout.
+    ours.extend([7, 0, 9, 1, 2, 3, 4, 5]);
+    ours.extend(&second);
+    let got = MarkersRecord::decode(&ours).unwrap();
+    assert_eq!(
+        got.markers.iter().map(|m| m.tick).collect::<Vec<_>>(),
+        [10, 30]
+    );
 }
 
 #[test]

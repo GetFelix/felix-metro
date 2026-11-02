@@ -91,19 +91,21 @@ export function mergeMarkers(span: Span, stored: readonly Marker[]): Marker[] {
 
 export interface MarkerFeed {
   /** Read the days `span` touches that are not settled, and report whether the list changed. Never throws. */
-  load(span: Span): Promise<boolean>;
+  load(span: Span, now?: number): Promise<boolean>;
   /** The stored markers of every day held, oldest first. */
   readonly stored: Marker[];
 }
 
 /**
  * The stored markers by day. A day before the tip's is over and its list is read once; the tip's day is read every
- * time, since it still grows. A read that fails leaves the day as it was and is tried again by the next load.
+ * time, since it still grows. A read that fails leaves the day as it was, unsettled, and is tried again by a later load
+ * once a wait that doubles from a second to half a minute has passed.
  */
 export function createMarkerFeed(read: (day: number) => Promise<Uint8Array | null>): MarkerFeed {
   const days = new Map<number, { markers: Marker[]; settled: boolean }>();
+  const failed = new Map<number, { count: number; retryAt: number }>();
   return {
-    async load(span) {
+    async load(span, now = Date.now()) {
       const first = Math.floor(span.oldest / TICKS_PER_DAY);
       const last = Math.floor(span.live / TICKS_PER_DAY);
       let changed = false;
@@ -114,15 +116,20 @@ export function createMarkerFeed(read: (day: number) => Promise<Uint8Array | nul
         }
       }
       const wanted: number[] = [];
-      for (let day = first; day <= last; day++) if (!days.get(day)?.settled) wanted.push(day);
+      for (let day = first; day <= last; day++) {
+        if (!days.get(day)?.settled && (failed.get(day)?.retryAt ?? 0) <= now) wanted.push(day);
+      }
       await Promise.all(
         wanted.map(async (day) => {
           let bytes: Uint8Array | null;
           try {
             bytes = await read(day);
           } catch {
+            const count = (failed.get(day)?.count ?? 0) + 1;
+            failed.set(day, { count, retryAt: now + Math.min(30_000, 1000 * 2 ** (count - 1)) });
             return;
           }
+          failed.delete(day);
           const parsed = bytes && parseMarkers(bytes);
           const markers = parsed && parsed.day === day ? parsed.markers : [];
           const before = days.get(day)?.markers;
@@ -158,6 +165,16 @@ export function clusterMarkers(markers: readonly Marker[], gap: number): Cluster
     else out.push({ tick: m.tick, markers: [m] });
   }
   return out;
+}
+
+/**
+ * The cluster that holds the moment `tick`, for keeping focus on it when clusters regroup: the last one that starts at
+ * or before it, or -1 when it comes before them all.
+ */
+export function clusterAt(clusters: readonly Cluster[], tick: number): number {
+  let found = -1;
+  for (const [i, c] of clusters.entries()) if (c.tick <= tick) found = i;
+  return found;
 }
 
 /**

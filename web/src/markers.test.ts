@@ -6,6 +6,7 @@ vi.mock('./core/felix_metro_core.js', () => ({
 }));
 const {
   clusterMarkers,
+  clusterAt,
   clusterName,
   clusterTarget,
   createMarkerFeed,
@@ -117,6 +118,54 @@ describe('the marker feed', () => {
     expect(read.mock.calls.map(([d]) => d)).toEqual([2]);
   });
 
+  it('leaves a day whose read failed unsettled and reads it again after a wait', async () => {
+    let fail = true;
+    const read = vi.fn(async (d: number) => {
+      if (fail) throw new Error('timeout');
+      return stored(d, [day(d) + 1, 1, 'Mara']);
+    });
+    const feed = createMarkerFeed(read);
+    // Day 0 is over; a failed read of it must not be taken for a day with nothing.
+    const span = { oldest: 0, live: day(1) + 5 };
+    expect(await feed.load(span, 0)).toBe(false);
+    expect(feed.stored).toEqual([]);
+    read.mockClear();
+    // Within the wait nothing is asked; after it, the read is made and the day fills in.
+    await feed.load(span, 500);
+    expect(read).not.toHaveBeenCalled();
+    fail = false;
+    expect(await feed.load(span, 1500)).toBe(true);
+    expect(feed.stored.map((m) => m.tick)).toEqual([1, day(1) + 1]);
+    read.mockClear();
+    await feed.load(span, 1600);
+    expect(read.mock.calls.map(([d]) => d)).toEqual([1]);
+  });
+
+  it('waits longer after each failure, to half a minute', async () => {
+    const read = vi.fn(async () => {
+      throw new Error('timeout');
+    });
+    const feed = createMarkerFeed(read);
+    const span = { oldest: 0, live: 5 };
+    let now = 0;
+    const waits: number[] = [];
+    for (let i = 0; i < 8; i++) {
+      read.mockClear();
+      await feed.load(span, now);
+      let wait = 0;
+      while (wait < 60_000) {
+        read.mockClear();
+        await feed.load(span, now + wait);
+        if (read.mock.calls.length) break;
+        wait += 500;
+      }
+      waits.push(wait);
+      now += wait;
+    }
+    expect(waits.slice(0, 4)).toEqual([1000, 2000, 4000, 8000]);
+    expect(Math.max(...waits)).toBe(30_000);
+  });
+
   it('keeps what it had when a read fails and tries it again', async () => {
     let fail = false;
     const feed = createMarkerFeed(async (d) => {
@@ -172,6 +221,17 @@ describe('clusters', () => {
     expect(clusterTarget(cluster!, 30)).toBe(50);
     expect(clusterTarget(cluster!, 50)).toBe(10);
     expect(clusterTarget(cluster!, 9999)).toBe(10);
+  });
+
+  it('keeps focus on the button that holds a moment when clusters regroup', () => {
+    const before = at(0, 300, 600);
+    expect(before).toHaveLength(3);
+    // The focused one starts at 300. Widened, it joins the first; the button that holds it is that one.
+    const wider = clusterMarkers([0, 300, 600].map(built), 400);
+    expect(clusterAt(wider, 300)).toBe(0);
+    expect(clusterAt(before, 300)).toBe(1);
+    expect(clusterAt(before, 450)).toBe(1);
+    expect(clusterAt(before, -5)).toBe(-1);
   });
 
   it('names a marker and a cluster for a screen reader', () => {

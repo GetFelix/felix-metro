@@ -83,19 +83,34 @@ fn a_refused_command_and_a_speed_change_leave_no_marker() {
     assert!(from_commands(1, &commanded).is_empty());
 }
 
+fn loaded(day: u32, stored: Option<&[u8]>) -> Today {
+    let mut today = Today::default();
+    today.load(day, stored).unwrap();
+    today
+}
+
 #[test]
-fn a_tick_run_again_leaves_the_list_as_it_was() {
-    let mut today = Today::load(0, None).unwrap();
+fn a_tick_run_again_replaces_what_it_listed_and_rewrites_nothing_that_is_the_same() {
+    let mut today = loaded(0, None);
     stored(&mut today, 10, vec![marker(10, 1)]);
     let first = stored(&mut today, 20, vec![marker(20, 2), marker(20, 3)]);
-    let again = stored(&mut today, 20, vec![marker(20, 2), marker(20, 3)]);
-    assert_eq!(first, again);
-    assert_eq!(again.markers.len(), 3);
+    // The same tick again changes nothing, so nothing is written.
+    assert_eq!(
+        today.add(20, vec![marker(20, 2), marker(20, 3)]).unwrap(),
+        None
+    );
+    // A different outcome for the tick replaces the earlier one.
+    let other = stored(&mut today, 20, vec![marker(20, 9)]);
+    assert_eq!(first.markers.len(), 3);
+    assert_eq!(
+        other.markers.iter().map(|m| m.subject).collect::<Vec<_>>(),
+        [1, 9]
+    );
 }
 
 #[test]
 fn a_day_loaded_from_the_log_carries_on() {
-    let mut before = Today::load(2, None).unwrap();
+    let mut before = loaded(2, None);
     let written = before
         .add(
             2 * TICKS_PER_DAY + 5,
@@ -103,7 +118,7 @@ fn a_day_loaded_from_the_log_carries_on() {
         )
         .unwrap()
         .unwrap();
-    let mut after = Today::load(2, Some(&written.bytes)).unwrap();
+    let mut after = loaded(2, Some(&written.bytes));
     let next = stored(
         &mut after,
         2 * TICKS_PER_DAY + 40,
@@ -111,22 +126,37 @@ fn a_day_loaded_from_the_log_carries_on() {
     );
     let subjects: Vec<_> = next.markers.iter().map(|m| m.subject).collect();
     assert_eq!(subjects, [9, 10]);
-    assert!(Today::load(3, Some(&written.bytes)).is_err());
+    assert!(Today::default().load(3, Some(&written.bytes)).is_err());
 }
 
 #[test]
-fn a_day_holds_a_bounded_number() {
-    let mut today = Today::load(0, None).unwrap();
-    for t in 0..MAX_PER_DAY as u32 + 20 {
+fn a_full_day_marks_no_more_and_writes_nothing_for_it() {
+    let mut today = loaded(0, None);
+    for t in 0..MAX_PER_DAY as u32 {
         today.add(t, vec![marker(t, t)]).unwrap();
     }
-    let full = stored(&mut today, 400, vec![marker(400, 1)]);
-    assert_eq!(full.markers.len(), MAX_PER_DAY);
-    assert_eq!(full.markers.last().unwrap().tick, 255);
+    for t in [400, 401, 402] {
+        assert_eq!(today.add(t, vec![marker(t, 1)]).unwrap(), None);
+    }
+    let again = today
+        .add(100, vec![marker(100, 7)])
+        .unwrap()
+        .expect("a rerun that changes the list is written");
+    let record = MarkersRecord::decode(&again.bytes).unwrap();
+    assert!(record.markers.len() <= MAX_PER_DAY);
+    assert_eq!(record.markers.last().unwrap().subject, 7);
+}
+
+#[test]
+fn a_day_not_loaded_is_new() {
+    let mut today = Today::default();
+    let written = today.add(TICKS_PER_DAY + 3, vec![marker(TICKS_PER_DAY + 3, 4)]);
+    let record = MarkersRecord::decode(&written.unwrap().unwrap().bytes).unwrap();
+    assert_eq!((record.day, record.markers.len()), (1, 1));
 }
 
 #[test]
 fn a_tick_without_markers_writes_nothing() {
-    let mut today = Today::load(0, None).unwrap();
+    let mut today = loaded(0, None);
     assert_eq!(today.add(5, Vec::new()).unwrap(), None);
 }

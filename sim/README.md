@@ -80,7 +80,7 @@ until a `speed` command or the operator resumes it.
 An applied `build` or `demolish` also lands in the day's list of markers that the page's timeline shows, with the
 builder's name. The list is the state key `markers.<day>` of the city's events stream (`<day>` counts from 0), kept in
 district 0's shard and written in the same commit as the tick that made the change, so a restart leaves it whole and a
-tick run again writes the same list. A day holds at most 256 markers. Nothing about the tick records changes.
+tick run again writes the same list. A day holds at most 256 markers. Nothing about the tick records changes. A restart reads the days it can write to before its first tick.
 [docs/design.md](../docs/design.md#timeline-markers) has the layout.
 
 ## The registry

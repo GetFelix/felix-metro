@@ -106,7 +106,7 @@ export function decode(bytes) {
   return out;
 }
 
-/** A day's timeline markers (kind 5): the day and the changes builders made in it, in order. */
+/** A day's timeline markers (kind 5): the day and the changes builders made in it, in order. Each is framed by its length. */
 export function decodeMarkers(bytes) {
   if (bytes[0] !== 5) return null;
   const at = { i: 1 };
@@ -114,14 +114,18 @@ export function decodeMarkers(bytes) {
   let tick = day * 5760;
   const markers = [];
   for (let n = varint(bytes, at); n > 0; n--) {
+    const length = varint(bytes, at);
+    const end = at.i + length;
     tick = delta(bytes, at, tick);
     const type = bytes[at.i++];
-    const subject = varint(bytes, at);
-    const what = varint(bytes, at);
-    const length = bytes[at.i++];
-    const by = Buffer.from(bytes.subarray(at.i, at.i + length)).toString("utf8");
-    at.i += length;
-    markers.push({ tick, type, subject, what, by });
+    if (type >= 1 && type <= 3) {
+      const subject = varint(bytes, at);
+      const what = varint(bytes, at);
+      const size = bytes[at.i++];
+      const by = Buffer.from(bytes.subarray(at.i, at.i + size)).toString("utf8");
+      markers.push({ tick, type, subject, what, by });
+    }
+    at.i = end;
   }
   return { day, markers };
 }

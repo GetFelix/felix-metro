@@ -256,7 +256,13 @@ pub async fn run_with_history<L: Log>(
     let mut timer = new_timer(period, true);
     // Set once the tick that carried speed 0 is committed.
     let mut parked = speed == 0;
-    let mut today = Today::default();
+    let mut today = match &history {
+        Some(history) => {
+            let first = world.next_tick();
+            load_markers(&log, retry, first..=first.max(*history.unfinished().end())).await?
+        }
+        None => Today::default(),
+    };
     let mut queue: VecDeque<Incoming> = VecDeque::new();
     let mut refused: VecDeque<Incoming> = VecDeque::new();
     if let Some(history) = &history {
@@ -275,7 +281,7 @@ pub async fn run_with_history<L: Log>(
             cursor = said.or(cursor);
             let mut wanted = at;
             let commanded = apply_all(&mut world, incoming, &mut wanted);
-            let marked = mark(&log, retry, &mut today, tick, &commanded).await?;
+            let marked = mark(&mut today, tick, &commanded)?;
             let step = world.step();
             let tick_retries = commit_tick(
                 &log,
@@ -427,7 +433,7 @@ pub async fn run_with_history<L: Log>(
             timer.tick().await;
         }
         let started = Instant::now();
-        let marked = mark(&log, retry, &mut today, tick, &commanded).await?;
+        let marked = mark(&mut today, tick, &commanded)?;
         let step = world.step();
         let keyframe = step[0].keyframe.is_some();
         let attempts = commit_tick(
@@ -493,25 +499,26 @@ struct Tick {
     marked: Option<Marked>,
 }
 
-/// The markers the tick's applied commands make, with the day's list read first when this run has not
-/// written to that day yet. `None` for a tick that marks nothing, which is nearly every tick.
-async fn mark<L: Log>(
+/// The markers the tick's applied commands make, or `None` for a tick that marks nothing, which is nearly
+/// every tick.
+fn mark(today: &mut Today, tick: u32, commanded: &[Vec<Event>]) -> Result<Option<Marked>> {
+    today.add(tick, markers::from_commands(tick, commanded))
+}
+
+/// The days' markers as the log holds them, for the days a run can write to: from the first tick it
+/// steps (which may be one some districts already committed) to the one after the last it repeats. Read
+/// before the first tick, so a failing read stops the start and never a tick.
+async fn load_markers<L: Log>(
     log: &L,
     retry: Retry,
-    today: &mut Today,
-    tick: u32,
-    commanded: &[Vec<Event>],
-) -> Result<Option<Marked>> {
-    let new = markers::from_commands(tick, commanded);
-    if new.is_empty() {
-        return Ok(None);
-    }
-    let day = tick / TICKS_PER_DAY;
-    if today.day() != Some(day) {
+    ticks: std::ops::RangeInclusive<u32>,
+) -> Result<Today> {
+    let mut today = Today::default();
+    for day in ticks.start() / TICKS_PER_DAY..=ticks.end().saturating_add(1) / TICKS_PER_DAY {
         let stored = retrying(retry, "read the day's markers", || log.markers(day)).await?;
-        *today = Today::load(day, stored.as_deref())?;
+        today.load(day, stored.as_deref())?;
     }
-    today.add(tick, new)
+    Ok(today)
 }
 
 /// Encodes the tick's record for each district and commits them, except the

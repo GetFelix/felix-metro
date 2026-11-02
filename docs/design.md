@@ -468,19 +468,25 @@ The timeline marks notable moments, and clicking one seeks there. Two things are
 The sim keeps each city day's markers as one value of the events stream's state, under the key `markers.<day>` with the
 day counted from 0 (`tick / 5760`), in district 0's shard beside the `keyframe` pointer. The value is a record of kind 5:
 
-| Field   | Size   | Contents                                                                             |
-| ------- | ------ | ------------------------------------------------------------------------------------ |
-| kind    | 1      | 5                                                                                    |
-| `day`   | varint |                                                                                      |
-| markers | varint | the number of markers, then each one                                                 |
-| `tick`  | zigzag | the tick, as a delta from the marker before (the first from the day's start)         |
-| `type`  | 1      | 1 built, 2 demolished, 3 road                                                        |
-| subject | varint | the lot, or for a road the segment                                                   |
-| `what`  | varint | the building kind, or for a road the change (0 closed, 1 opened, 2 added, 3 removed) |
-| name    | string | the builder's display name, empty when there was none                                |
+The value is the kind byte, the `day` (varint) and a count of markers (varint), then each marker as a frame (a varint
+of its length, then the body), so a reader steps over a marker of a type it does not know and keeps the rest, as with
+events. A body is:
 
-A marker is about 10 bytes. A day holds at most 256; a builder who passes that is not marked past it, though the changes
-are all in the tick records.
+| Field     | Size   | Contents                                                                             |
+| --------- | ------ | ------------------------------------------------------------------------------------ |
+| `tick`    | zigzag | the tick, as a delta from the marker before (the first from the day's start)         |
+| `type`    | 1      | 1 built, 2 demolished, 3 road                                                        |
+| `subject` | varint | the lot, or for a road the segment                                                   |
+| `what`    | varint | the building kind, or for a road the change (0 closed, 1 opened, 2 added, 3 removed) |
+| name      | string | the builder's display name, empty when there was none                                |
+
+A marker is about 11 bytes. A day holds at most 256, so a day's value is under 20 KB (a name takes at most 65 bytes). A
+day past the cap marks the first 256 changes and no more, though all of them are in the tick records, and the ticks
+past the cap commit nothing extra. A tick marks only when it applies a `build` or `demolish`, and a day's value is
+rewritten only on such a tick.
+
+Nothing deletes a day's key: one a day for as long as the city runs, each under 20 KB and in practice a few hundred
+bytes, in the stream's state, which retention of the log does not trim.
 
 This is not in the tick records, whose size is bounded in [Log size](#log-size): the headers and events are
 unchanged, and a tick that changes nothing commits exactly the bytes it did. The day's value is written in the commit of
@@ -490,8 +496,9 @@ the district 0 record for the tick that made the change, as one more `put` besid
 Putting the marker in the tick's own commit is what makes it safe to restart. The record and the list land together or
 not at all, so a sim killed between them cannot leave one without the other. A tick run again after a restart (see
 [Restart](#restart)) derives the same markers, because the world steps the same way, and replaces any in the list at or
-after its tick, so the list comes out as it would have. The first change of a day read after a restart loads that day's
-value from the stream's state first. A warm-up commits no commands, so it writes no markers. Past days are never
+after its tick, so the list comes out as it would have. A restart reads the days it can write to from the
+stream's state before its first tick (the days from the first tick it steps to the one after the last it repeats), and
+stops there if it cannot, so a failed read never holds up a tick; every later day is new. A warm-up commits no commands, so it writes no markers. Past days are never
 rewritten, and their values stay after retention has taken their records; the page asks only for the days the retained
 range touches.
 
@@ -499,8 +506,9 @@ The page reads the days the span touches, through the seeker's history sessions,
 the bar is reached for, and every 5 seconds after while the handle is dragged or the past is shown. A day before the
 tip's is read once; the tip's day is read each time, since it still grows. A marker later than the newest tick every
 district has is left out, because district 0 can be a tick ahead of the others and the bar shows only what has happened.
-A day with no value, a value that does not decode, or a read that fails shows no builder markers and leaves the rush
-hours; the next read tries again. Because markers belong to the city's history and not to the view, they are the same
+A day with no value or a value that does not decode shows no builder markers and leaves the rush hours. A read that
+fails is not taken for a day with none: the day is read again after a wait that doubles from a second to half a minute,
+until it answers. Because markers belong to the city's history and not to the view, they are the same
 whatever tick the page is drawing: after a seek, a rewind, a reload or a page opened with `?at`.
 
 The buttons sit in a row above the bar, in a toolbar of their own and not inside the slider (a slider's children are
