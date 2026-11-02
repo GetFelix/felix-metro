@@ -1,0 +1,1 @@
+- The frame-time overlay (`?hud`) shows the frame rate. `web/traffic-load.html` takes `?run=1` to keep drawing with the frame rate on the page, `?districts=4` for the 16 districts of the scale goal and `?cap=tier` to hold the movers drawn to the tier's cap; the CI traffic check runs it.

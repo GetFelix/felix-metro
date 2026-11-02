@@ -27,7 +27,7 @@ export function createHud(renderer: THREE.WebGLRenderer, quality: Quality) {
     const median = sorted[filled >> 1]!;
     const p95 = sorted[Math.min(filled - 1, Math.floor(filled * 0.95))]!;
     el.textContent =
-      `${median.toFixed(1)} ms median  ${p95.toFixed(1)} ms p95\n` +
+      `${(1000 / Math.max(median, 0.1)).toFixed(0)} fps  ${median.toFixed(1)} ms median  ${p95.toFixed(1)} ms p95\n` +
       `${calls} draws  ${triangles} tris\n` +
       `tier ${quality.tier} (${quality.mode})`;
   }

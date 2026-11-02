@@ -5,6 +5,9 @@
 //   ?ambient=0 leaves the ambient life out, to measure what it costs; it runs by default, at the hour ?t=
 //   ?show=1 draws one car and one walker standing outside the city, close up, once, for a picture to compare;
 //   ?walk=0.3 is how many seconds the walkers' clock has run, ?t= the hour
+//   ?districts=4 is the districts a side of the city has (2 by default; 4 is the 16 districts of the scale goal)
+//   ?run=1 keeps drawing and shows the frame rate on the page, for measuring on a real GPU; ?cap=tier then holds the
+//   movers drawn to the tier's cap, as the live page does, instead of drawing every one asked for
 import * as THREE from 'three';
 import init, { generate } from './core/felix_metro_core.js';
 import { parseCity } from './layout';
@@ -65,13 +68,57 @@ function shuttle(x0: number, z0: number, alongX: boolean, reach: number, speed: 
 /** Walkers' resident numbers start here, a multiple of the number of walker models, so they take every model in turn. */
 const WALKER_IDS = 1_200_000;
 
+/** Draws frames until the page is closed and writes the frame rate over the city twice a second. */
+function run(
+  tier: string,
+  districts: number,
+  asked: number,
+  traffic: Traffic,
+  step: () => void,
+  post: ReturnType<typeof createPost>,
+  target: THREE.Vector3,
+  renderer: THREE.WebGLRenderer,
+) {
+  const out = document.createElement('pre');
+  out.style.cssText =
+    'position:fixed;top:12px;left:12px;margin:0;padding:8px 12px;border-radius:8px;background:#000b;color:#fff;font:13px/1.5 monospace';
+  document.body.append(out);
+  renderer.info.autoReset = false;
+  const ring: number[] = [];
+  let last = performance.now();
+  let shown = last;
+  const frame = (now: number) => {
+    ring.push(now - last);
+    if (ring.length > 120) ring.shift();
+    last = now;
+    renderer.info.reset();
+    step();
+    post.render(target);
+    if (now - shown >= 500 && ring.length > 10) {
+      shown = now;
+      const sorted = [...ring].sort((a, b) => a - b);
+      const mid = sorted[sorted.length >> 1]!;
+      const p95 = sorted[Math.floor(sorted.length * 0.95)]!;
+      const { calls, triangles } = renderer.info.render;
+      out.textContent =
+        `${(1000 / mid).toFixed(0)} fps  ${mid.toFixed(1)} ms median  ${p95.toFixed(1)} ms p95\n` +
+        `${calls} draws  ${triangles} tris\n` +
+        `${traffic.drawn} of ${asked} movers drawn  ${districts * districts} districts  tier ${tier}`;
+    }
+    requestAnimationFrame(frame);
+  };
+  requestAnimationFrame(frame);
+  window.__ready = true;
+}
+
 async function main() {
   const params = new URLSearchParams(location.search);
   const n = Number(params.get('n') ?? '100');
   const tier = (['high', 'medium', 'low'] as const).find((t) => t === params.get('tier')) ?? 'high';
   const frames = Number(params.get('frames') ?? '30');
   await init();
-  const city = parseCity(generate('harbor', 2));
+  const districts = Math.min(16, Math.max(1, Math.floor(Number(params.get('districts') ?? '2')) || 2));
+  const city = parseCity(generate('harbor', districts));
   const renderer = createRenderer(tier);
   const span = Math.max(1, city.tiles / 17);
   const { camera, controls } = createCamera(
@@ -96,8 +143,8 @@ async function main() {
   setTime(hour, post.bloom);
   const half = (city.tiles - 1) / 2;
   const traffic = new Traffic(fleet!, half, city.lots);
-  // The tier's cap is what this page measures the cost of, so it does not apply here.
-  traffic.cap = Infinity;
+  // The tier's cap is what this page measures the cost of, so it does not apply unless asked for.
+  traffic.cap = params.get('cap') === 'tier' ? s.movers : Infinity;
   if (ambient) traffic.extras = (f) => ambient.place(f);
 
   // Trips along the roads, a seeded few tiles each way.
@@ -156,6 +203,8 @@ async function main() {
   }
   fleet!.view(camera);
   step();
+
+  if (params.has('run')) return run(tier, districts, n, traffic, step, post, target, renderer);
 
   const gl = renderer.getContext();
   const pixel = new Uint8Array(4);

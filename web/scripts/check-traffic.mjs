@@ -37,6 +37,30 @@ async function measure(n) {
 
 const rows = [];
 for (const n of counts.split(',').map(Number)) rows.push({ n, ...(await measure(n)) });
+
+// TRAFFIC_RUN_CHECK=1: the page's measuring mode over the 16 districts of the scale goal writes a frame rate on the
+// page, and the tier's cap holds the movers drawn to what the live page draws.
+let runProblem = null;
+if (process.env.TRAFFIC_RUN_CHECK) {
+  const page = await browser.newPage({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1 });
+  await page.goto(`${pageUrl}?run=1&districts=4&n=400&tier=medium&cap=tier`, { waitUntil: 'load', timeout: 120_000 });
+  const text = await page
+    .waitForFunction(
+      () => /fps/.test(document.querySelector('pre')?.textContent ?? '') && document.querySelector('pre').textContent,
+      null,
+      {
+        polling: 500,
+        timeout: WAIT_MS,
+      },
+    )
+    .then((h) => h.jsonValue())
+    .catch(() => null);
+  console.log(text ?? 'the page wrote no frame rate');
+  const drawn = Number(text?.match(/(\d+) of 400 movers/)?.[1]);
+  if (!text?.includes('16 districts') || !(drawn > 0 && drawn <= 160))
+    runProblem = `the measuring mode did not show 16 districts with at most 160 of 400 movers drawn: ${text}`;
+  await page.close();
+}
 await browser.close();
 
 console.log(`tier ${tier}, ${FRAMES} frames each (SwiftShader; ms are medians)`);
@@ -49,6 +73,10 @@ for (const r of rows) {
   );
 }
 let failed = rows.some((r) => r.movers !== r.n);
+if (runProblem) {
+  console.error(`FAIL: ${runProblem}`);
+  failed = true;
+}
 if (failed) console.error('FAIL: not every mover was drawn');
 if (MAX_EXTRA !== null) {
   const extra = rows[rows.length - 1].calls - rows[0].calls;
