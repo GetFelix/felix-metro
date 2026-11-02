@@ -232,6 +232,103 @@ async fn what_builders_built_is_still_there_after_a_restart() {
     assert_eq!(command_events(&log), vec![(0, 1, RESULT_APPLIED)]);
 }
 
+/// Every `author` event in the log, as (tick, lot, built tick, name).
+fn authors(log: &Memory) -> Vec<(u32, u32, u32, String)> {
+    let mut out = Vec::new();
+    for district in 0..4 {
+        for r in log.records(district) {
+            for e in &r.events {
+                if let Event::Author {
+                    lot, tick, name, ..
+                } = e
+                {
+                    out.push((r.header.tick, *lot, *tick, name.clone()));
+                }
+            }
+        }
+    }
+    out.sort();
+    out
+}
+
+/// A restart that has only the log to go on keeps saying who built a lot, whether the build was before the
+/// keyframe it restores from or after it, and stops once the building is demolished.
+#[tokio::test(start_paused = true)]
+async fn who_built_a_lot_survives_restarts() {
+    let world = World::new(harbor());
+    let lot = free_lot(&world);
+    let log = Memory::healthy();
+    // Ticks 0..300 with nobody building, so the build lands after the keyframe at 240.
+    run_city("harbor", harbor(), quick(300), log.clone())
+        .await
+        .unwrap();
+    let (send, inbox) = mpsc::channel(8);
+    send.try_send(log.publish(
+        "mayor",
+        1,
+        Command::Build {
+            lot,
+            kind: 4,
+            rotation: 1,
+        },
+    ))
+    .unwrap();
+    run_city_with("harbor", harbor(), quick(350), log.clone(), Some(inbox))
+        .await
+        .unwrap();
+    let built_at = command_events(&log)[0].0;
+    assert!(built_at >= 300, "built at {built_at}");
+
+    // Restarts from the keyframe at 240 and the command and built events after it.
+    let (_send, inbox) = mpsc::channel(8);
+    run_city_with("harbor", harbor(), quick(1000), log.clone(), Some(inbox))
+        .await
+        .unwrap();
+    let want = |tick| (tick, lot, built_at, "mayor".to_string());
+    assert_eq!(authors(&log), vec![want(480), want(720), want(960)]);
+
+    // And from a keyframe that carries the author.
+    let (send, inbox) = mpsc::channel(8);
+    send.try_send(log.publish("viewer", 2, Command::Demolish { lot }))
+        .unwrap();
+    run_city_with("harbor", harbor(), quick(1300), log.clone(), Some(inbox))
+        .await
+        .unwrap();
+    assert_whole(&log, 1300);
+    assert_eq!(authors(&log), vec![want(480), want(720), want(960)]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_restart_from_a_keyframe_keeps_the_author_that_keyframe_tick_wrote() {
+    let world = World::new(harbor());
+    let lot = free_lot(&world);
+    let (send, inbox) = mpsc::channel(8);
+    let log = Memory::healthy();
+    send.try_send(log.publish(
+        "mayor",
+        1,
+        Command::Build {
+            lot,
+            kind: 4,
+            rotation: 1,
+        },
+    ))
+    .unwrap();
+    // Stops after the keyframe at 240, so the restart has no build event to read, only the author event.
+    run_city_with("harbor", harbor(), quick(300), log.clone(), Some(inbox))
+        .await
+        .unwrap();
+    let (_send, inbox) = mpsc::channel(8);
+    run_city_with("harbor", harbor(), quick(800), log.clone(), Some(inbox))
+        .await
+        .unwrap();
+    let want = |tick| (tick, lot, 0, "mayor".to_string());
+    assert_eq!(
+        authors(&log),
+        vec![want(0), want(240), want(480), want(720)]
+    );
+}
+
 #[tokio::test(start_paused = true)]
 async fn the_command_stream_resumes_where_the_sim_stopped_reading() {
     let world = World::new(harbor());

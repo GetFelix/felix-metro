@@ -379,7 +379,9 @@ impl History {
                             })
                     })
                     .collect::<Result<Vec<_>>>()?;
-                World::restore(city, base, &frames, &self.departures)?
+                let mut world = World::restore(city, base, &frames, &self.departures)?;
+                world.restore_authors(self.ticks[&base].iter().flatten().flat_map(|r| &r.events));
+                world
             }
             None => World::new(city),
         };
@@ -387,8 +389,8 @@ impl History {
             return Ok(world);
         };
         for tick in self.base.map_or(0, |base| base + 1)..=level {
-            for event in self.ticks[&tick].iter().flatten().flat_map(|r| &r.events) {
-                world.apply_logged(event);
+            for record in self.ticks[&tick].iter().flatten() {
+                world.apply_logged(tick, &record.events);
             }
             world.step();
         }

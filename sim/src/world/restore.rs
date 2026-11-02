@@ -4,7 +4,9 @@
 use std::collections::HashMap;
 
 use anyhow::{Context, Result, bail, ensure};
-use felix_metro_core::record::{BuildingDiff, Doing, Event, Keyframe, Leg, NO_BUILDING, Vehicle};
+use felix_metro_core::record::{
+    BuildingDiff, Doing, Event, Keyframe, Leg, NO_BUILDING, RESULT_APPLIED, Vehicle,
+};
 use felix_metro_core::{City, Mode, TICKS_PER_DAY};
 
 use super::{Person, State, World, activity_kind, count_car};
@@ -106,27 +108,70 @@ impl World {
         Ok(world)
     }
 
-    /// Carries out what a `built` or `demolished` event in the log says. Other
-    /// events change nothing a restart has to rebuild: stepping makes them.
-    pub(crate) fn apply_logged(&mut self, event: &Event) {
-        let diff = match *event {
-            Event::Built {
+    /// Takes the builders from the `author` events of the keyframe tick the
+    /// world was restored at. A keyframe lists the buildings but not who built
+    /// them, so the log says it alongside.
+    pub(crate) fn restore_authors<'a>(&mut self, events: impl Iterator<Item = &'a Event>) {
+        for event in events {
+            if let Event::Author {
                 lot,
-                kind,
-                rotation,
-            } => BuildingDiff {
-                lot,
-                kind,
-                rotation,
-            },
-            Event::Demolished { lot, .. } => BuildingDiff {
-                lot,
-                kind: NO_BUILDING,
-                rotation: 0,
-            },
-            _ => return,
-        };
-        self.built.insert(diff.lot, diff);
+                tick,
+                principal,
+                name,
+            } = event
+                && (*lot as usize) < self.city.lots.len()
+            {
+                self.set_author(*lot, *tick, *principal, name);
+            }
+        }
+    }
+
+    /// Carries out what the `built` and `demolished` events of one district's
+    /// record for `tick` say, and whose command they were. Other events change
+    /// nothing a restart has to rebuild: stepping makes them.
+    pub(crate) fn apply_logged(&mut self, tick: u32, events: &[Event]) {
+        // A `built` or `demolished` comes right after the `command` that caused it.
+        let mut by: Option<(u64, &str)> = None;
+        for event in events {
+            match event {
+                Event::Command {
+                    principal,
+                    name,
+                    result: RESULT_APPLIED,
+                    ..
+                } => by = Some((*principal, name)),
+                Event::Built {
+                    lot,
+                    kind,
+                    rotation,
+                } => {
+                    self.built.insert(
+                        *lot,
+                        BuildingDiff {
+                            lot: *lot,
+                            kind: *kind,
+                            rotation: *rotation,
+                        },
+                    );
+                    if let Some((principal, name)) = by.take() {
+                        self.set_author(*lot, tick, principal, name);
+                    }
+                }
+                Event::Demolished { lot, .. } => {
+                    self.built.insert(
+                        *lot,
+                        BuildingDiff {
+                            lot: *lot,
+                            kind: NO_BUILDING,
+                            rotation: 0,
+                        },
+                    );
+                    self.authors.remove(lot);
+                    by = None;
+                }
+                _ => {}
+            }
+        }
     }
 }
 

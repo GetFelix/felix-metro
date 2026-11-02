@@ -34,8 +34,34 @@ interface SpeedEvent {
   type: 'speed';
   ticksPerSecond: number;
 }
+/** A builder's command as the sim applied or refused it; `principal` is the sender's hash, 16 hex digits. */
+interface CommandEvent {
+  type: 'command';
+  principal: string;
+  name: string;
+  id: number;
+  result: number;
+}
+/** Who built the building on `lot`, and the tick of its `built` event; every keyframe tick repeats it. */
+interface AuthorEvent {
+  type: 'author';
+  lot: number;
+  tick: number;
+  principal: string;
+  name: string;
+}
 /** The events this page acts on; the rest of what a record carries is ignored. */
-export type TickEvent = TripEvent | BuildingEvent | RoadEvent | SpeedEvent | { type: 'other' };
+export type TickEvent =
+  | TripEvent
+  | BuildingEvent
+  | RoadEvent
+  | SpeedEvent
+  | CommandEvent
+  | AuthorEvent
+  | { type: 'other' };
+
+/** The result of a `command` event that changed the city. */
+const APPLIED = 0;
 
 export interface TickRecord {
   kind: 'tick';
@@ -88,6 +114,15 @@ export interface Falling extends Building {
   from: number;
 }
 
+/** Who built a building and when. */
+export interface Author {
+  /** The tick it went up. */
+  tick: number;
+  /** [`principalHash`](./attribution) of the builder, 16 hex digits. */
+  principal: string;
+  name: string;
+}
+
 export class CityState {
   /**
    * Lots whose building went up within the last few ticks, by the tick of the `built` event. The log has one instant
@@ -100,6 +135,12 @@ export class CityState {
   readonly falling = new Map<number, Falling>();
   /** Lots that differ from the generated city. */
   readonly built = new Map<number, Building>();
+  /**
+   * Who built the buildings a builder put up that still stand. A keyframe lists the buildings but not who built them,
+   * so the sim repeats each lot's author in the records of every keyframe tick, and later builds are told by the
+   * `command` event just before their `built`. A generated building has no entry.
+   */
+  readonly authors = new Map<number, Author>();
   /** Segments closed, added or removed since the city was generated, by segment: a `ROAD_*` change. */
   readonly roads = new Map<number, number>();
   /** The district whose record last said something about a segment, so its keyframe can replace the entry. */
@@ -167,6 +208,8 @@ export class CityState {
     this.ticks[d] = record.tick;
     this.speed = record.speed;
     if (record.keyframe) this.keyframe(d, record.keyframe.buildings, record.keyframe.roads ?? [], fresh);
+    // A `built` or `demolished` comes right after the `command` that caused it, in the same record.
+    let by: { principal: string; name: string } | null = null;
     for (const e of record.events) {
       if (e.type === 'trip') {
         const t = e;
@@ -184,6 +227,13 @@ export class CityState {
           e.lot,
           e.type === 'built' ? { kind: e.kind, rotation: e.rotation } : { kind: NO_BUILDING, rotation: 0 },
         );
+        if (e.type === 'built' && by) this.authors.set(e.lot, { tick: record.tick, ...by });
+        else this.authors.delete(e.lot);
+        by = null;
+      } else if (e.type === 'command') {
+        by = e.result === APPLIED ? { principal: e.principal, name: e.name } : null;
+      } else if (e.type === 'author') {
+        this.authors.set(e.lot, { tick: e.tick, principal: e.principal, name: e.name });
       } else if (e.type === 'road') {
         this.road(d, e.segment, e.change);
       } else if (e.type === 'speed') {
@@ -304,6 +354,10 @@ export class CityState {
     }
     for (const lot of [...this.built.keys()]) {
       if (this.city.lots[lot]?.district === district && !listed.has(lot)) this.set(lot, null);
+    }
+    // The author events in the same record put back the ones whose building still stands.
+    for (const lot of [...this.authors.keys()]) {
+      if (this.city.lots[lot]?.district === district) this.authors.delete(lot);
     }
     for (const [lot, kind, rotation] of diffs) this.set(lot, { kind, rotation });
     for (const segment of [...this.roads.keys()]) {

@@ -56,6 +56,13 @@ test("reads the header and the events whatever size the varints are", () => {
   }
 });
 
+test("reads an author event: the lot, the tick it went up, who built it", () => {
+  const name = [...Buffer.from("Ana")];
+  const author = event(14, [...varint(300), ...varint(70_000), ...u64(99), name.length, ...name]);
+  const out = decode(tick({ district: 1, tick: 240, events: [author, event(11, [8])] }));
+  assert.deepEqual(out.events, [{ type: "author", lot: 300, tick: 70_000, principal: 99n, name: "Ana" }]);
+});
+
 test("reads a keyframe's building diff and steps over the rest of it", () => {
   const keyframe = [
     ...varint(2), ...zigzag(10), ...u16(21), 0, ...zigzag(-4), ...u16(65535), 1, // buildings

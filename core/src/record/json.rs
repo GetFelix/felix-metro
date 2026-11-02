@@ -155,6 +155,18 @@ fn event(out: &mut String, e: &Event) {
         Event::CommandCursor { next } => {
             let _ = write!(out, "{{\"type\":\"commandCursor\",\"next\":{next}");
         }
+        Event::Author {
+            lot,
+            tick,
+            principal,
+            name,
+        } => {
+            let _ = write!(
+                out,
+                "{{\"type\":\"author\",\"lot\":{lot},\"tick\":{tick},\"principal\":\"{principal:016x}\",\"name\":"
+            );
+            text(out, name);
+        }
     }
     out.push('}');
 }

@@ -186,6 +186,7 @@ pub(crate) fn apply_all(
                 Command::Fork { .. } => (0, REFUSED_UNSUPPORTED, Vec::new(), name, id),
                 other => {
                     let applied = world.apply(&other);
+                    world.attribute(&applied.events, item.principal, &name);
                     (applied.district, applied.result, applied.events, name, id)
                 }
             },

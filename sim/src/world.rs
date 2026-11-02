@@ -36,6 +36,15 @@ pub(crate) struct DistrictTick {
     pub(crate) keyframe: Option<Keyframe>,
 }
 
+/// Who built the building on a lot and when, from the `command` that caused it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Author {
+    /// The tick of the `built` event.
+    pub(crate) tick: u32,
+    pub(crate) principal: u64,
+    pub(crate) name: String,
+}
+
 struct Person {
     resident: Resident,
     /// The block they are in, or just left.
@@ -65,6 +74,8 @@ pub(crate) struct World {
     cars: Vec<u16>,
     /// The lots whose building was changed after generation, by lot.
     built: BTreeMap<u32, BuildingDiff>,
+    /// Who built the buildings a builder put up and still stand. A generated building has no entry.
+    pub(crate) authors: BTreeMap<u32, Author>,
     /// Lots a resident's schedule sends them to. Demolishing one would strand
     /// the people who go there.
     pub(crate) in_use: HashSet<u32>,
@@ -118,6 +129,7 @@ impl World {
             tick: 0,
             cars,
             built: BTreeMap::new(),
+            authors: BTreeMap::new(),
             in_use,
         }
     }
@@ -211,6 +223,32 @@ impl World {
                 Applied::refused(0, REFUSED_UNSUPPORTED)
             }
         }
+    }
+
+    /// Notes who is behind the `built` or `demolished` event in `events`, which
+    /// belongs to the tick about to be stepped. A `built` makes `principal` the
+    /// lot's author; a `demolished` leaves it with none.
+    pub(crate) fn attribute(&mut self, events: &[Event], principal: u64, name: &str) {
+        for event in events {
+            match event {
+                Event::Built { lot, .. } => self.set_author(*lot, self.tick, principal, name),
+                Event::Demolished { lot, .. } => {
+                    self.authors.remove(lot);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn set_author(&mut self, lot: u32, tick: u32, principal: u64, name: &str) {
+        self.authors.insert(
+            lot,
+            Author {
+                tick,
+                principal,
+                name: name.to_owned(),
+            },
+        );
     }
 
     /// Change a lot's building, as a `built` or `demolished` event will.
@@ -339,6 +377,16 @@ impl World {
         if tick.is_multiple_of(KEYFRAME_EVERY) {
             for (district, keyframe) in self.keyframes(tick).into_iter().enumerate() {
                 out[district].keyframe = Some(keyframe);
+            }
+            // The keyframe lists no builders, so each keyframe tick says who built what.
+            for (&lot, author) in &self.authors {
+                let district = usize::from(self.city.lots[lot as usize].district);
+                out[district].events.push(Event::Author {
+                    lot,
+                    tick: author.tick,
+                    principal: author.principal,
+                    name: author.name.clone(),
+                });
             }
         }
         self.tick += 1;

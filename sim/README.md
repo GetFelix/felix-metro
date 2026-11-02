@@ -61,7 +61,9 @@ principal itself.
 Commands are read in stream order and applied before the next tick is stepped, up to 256
 a tick, so that tick's records carry them and its keyframe shows the result. Each is
 recorded as a `command` event (hash, builder name, id, result) in the district it touched,
-followed by `built` or `demolished`. A refusal has a result code and nothing else, and the
+followed by `built` or `demolished`. The sim remembers who built each lot, and every keyframe
+tick it writes an `author` event for each such lot (the lot, the tick it was built, and the builder's hash and name), because a
+keyframe lists buildings but not who built them. A refusal has a result code and nothing else, and the
 city steps exactly as if it had not been sent. A command with no district, such as a
 malformed record or an unknown lot, is recorded in district 0.
 
@@ -127,6 +129,9 @@ diagram. What to know when you run it:
   `command_cursor` event: the offset on `metro.commands.<city>` the sim reads next. The command follower opens its
   subscription there, so a command sent while the sim was down runs when it comes back, and none runs twice. A new city
   reads the command stream from the start. A log written before the cursor existed follows the stream's tail.
+- **Who built what is restored.** The builders come from the `author` events of the keyframe tick the restart starts from
+  and the `command` and `built` events after it. A log written before `author` existed has none, so a restart starts
+  with none.
 - **A tick killed halfway is finished.** Districts commit a tick one by one, so a kill can leave some districts a tick
   ahead. The restart commits that tick to the districts that lack it.
 - **A killed warm-up carries on live** from where its districts stopped, with less history than a finished one.

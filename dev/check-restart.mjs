@@ -8,7 +8,7 @@
 //   node dev/check-restart.mjs after [city]     the ticks from the noted offsets run on one after another, with
 //                                               none repeated or missing; the command sent while the sim was
 //                                               down ran once; the keyframes after the restart still list the
-//                                               builds. Then it takes them down.
+//                                               builds and say who built each, and when. Then it takes them down.
 //
 // The notes between phases are in CHECK_RESTART_FILE (default: the temp directory).
 import { readFile, writeFile } from "node:fs/promises";
@@ -41,7 +41,7 @@ if (phase === "before") {
     const seen = await mayor.send(lots.map((lot) => [1000 + lot, build(lot)]));
     for (const lot of lots) {
       const command = seen.get(1000 + lot);
-      if (command.result === APPLIED) taken.push({ lot, district: command.record.district });
+      if (command.result === APPLIED) taken.push({ lot, district: command.record.district, tick: command.record.tick });
     }
   }
   if (taken.length < 2) fail(`only ${taken.length} lots took a build`);
@@ -108,6 +108,18 @@ for (const { lot: l, district } of state.taken) {
   if (standing === (l === lot)) fail(`the keyframe at tick ${frame.tick} has lot ${l} as ${kind}`);
 }
 console.log(`${city}: the keyframes after the restart list the builds`);
+
+// The same keyframe ticks say who built each lot and at which tick, and say nothing of the one that came down.
+for (const { lot: l, district, tick } of state.taken) {
+  const frame = byDistrict(district).find((r) => r.keyframe && r.tick > noted);
+  const author = frame.events.find((e) => e.type === "author" && e.lot === l);
+  if (l === lot) {
+    if (author) fail(`the keyframe at tick ${frame.tick} still names ${author.name} as the author of lot ${l}, which came down`);
+  } else if (!author || author.name !== NAME || author.tick !== tick) {
+    fail(`the keyframe at tick ${frame.tick} has ${JSON.stringify(author)} for lot ${l}, built by ${NAME} at tick ${tick}`);
+  }
+}
+console.log(`${city}: the keyframes after the restart say who built each lot`);
 
 // Leave the city as the next check expects.
 const rest = state.taken.filter((t) => t.lot !== lot);

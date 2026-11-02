@@ -11,6 +11,13 @@
   applied commands), so a command sent while the sim was down runs when it comes back and none runs twice. A new city now
   reads its command stream from the start. The epoch in the tick header stays the same across a restart.
 
+- The sim records who built each building. On every keyframe tick each district writes an `author` event (event tag
+  14: the lot, the tick it was built, and the builder's hash and name) for every lot a builder built that still stands,
+  so a page that starts from a keyframe can say who built what. A restart restores them from the newest keyframe tick
+  and the `command` and `built` events after it. An `author` is 22 bytes with a six-letter name, about 0.37 B/s for
+  each such lot at 4 ticks a second; a city nobody has built in writes none, so the log-size figures below are
+  unchanged.
+
 ### Changed
 
 - Built on Felix 0.6.2: the sim's `felix-client` and `felix-wire` pins, the dev stack and CI images.
@@ -32,6 +39,11 @@
 
 ### The page
 
+- Point at a building (tap it on a phone) and a card says who built it and when: "Built by Ana · Day 2, 09:12 · See
+  it go up". Your own read "Built by you", and buildings the city began with read "Here since the start". "See it go
+  up" takes the city to 30 city seconds before the building was built through the timeline's own seek, and plays it
+  forward. The page asks the gateway for the `principal` feature to know which buildings are yours; a gateway without
+  it (before 0.8.0) shows names only. The card is left out with `?ui=0`.
 - A settings sheet, opened from the button under the clock. Quality is Automatic, High, Medium or Low; Automatic
   forgets a saved tier and judges frame times again from High (`Quality.setAutomatic()`).
 - A key list, opened with `?` or from the settings sheet. It is data (`SHORTCUTS` in `web/src/ui/keys.ts`), so a new key
@@ -85,6 +97,9 @@
 
 ### Tools
 
+- `dev/check-restart.mjs` also checks that the keyframes after a restart still say who built each lot, and when.
+- `web/scripts/check-attribution.mjs` hovers a building someone built and a generated one in the live page, reads the
+  card, and follows "See it go up". CI runs it in the dev-stack job.
 - `web/scripts/check-ui.mjs` drives the overlay with the keyboard and takes day and night screenshots at 1280 and 360
   pixels wide. CI runs it as its own job, `overlay controls`.
 - The builder bot with `--rebuild` handles a demolish that gets no answer. The sim may have applied it, so the bot

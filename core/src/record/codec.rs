@@ -26,6 +26,8 @@ const EV_SPEED: u8 = 11;
 const EV_COMMAND_CURSOR: u8 = 12;
 /// An `arrived` and the same resident's `activity` that follows it, which is every arrival the sim makes.
 const EV_ARRIVAL: u8 = 13;
+/// Tag 14 was the last one free when this was added; events after it need a wider tag.
+const EV_AUTHOR: u8 = 14;
 
 const CMD_PLACE_ROAD: u8 = 1;
 const CMD_ZONE: u8 = 2;
@@ -336,6 +338,18 @@ fn put_event(w: &mut Writer, e: &Event, tick: u32) -> Result<(), EncodeError> {
             b.varint(*next);
             Ok(())
         }),
+        Event::Author {
+            lot,
+            tick: built,
+            principal,
+            name,
+        } => w.framed(EV_AUTHOR, EVENT_TAG_BITS, |b| {
+            b.varint(u64::from(*lot));
+            b.varint(u64::from(*built));
+            b.u64(*principal);
+            b.str(name)?;
+            Ok(())
+        }),
     }
 }
 
@@ -409,6 +423,12 @@ fn get_entry(r: &mut Reader, tick: u32, out: &mut Vec<Event>) -> Result<(), Deco
             ticks_per_second: r.u8()?,
         },
         EV_COMMAND_CURSOR => Event::CommandCursor { next: r.varint()? },
+        EV_AUTHOR => Event::Author {
+            lot: r.varint_u32()?,
+            tick: r.varint_u32()?,
+            principal: r.u64()?,
+            name: r.str()?,
+        },
         _ => return Ok(()),
     };
     out.push(event);

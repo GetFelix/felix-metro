@@ -93,7 +93,7 @@ connection, so a page opened with `?at` cannot play or rewind.
 | 1   | A live city         | Done                                                                                                                                                                                                                                                                          |
 | 2   | Time travel         | In progress: keyframes, seeking, the timeline scrubber, rewind then follow, and backward playback with speeds built, smoothness not yet measured                                                                                                                              |
 | 3   | Follow a life       | Planned                                                                                                                                                                                                                                                                       |
-| 4   | Build               | In progress: the sim applies build, demolish and speed commands and records who sent them, and the page animates a building going up (scaffold) or coming down (dust) over 8 ticks, backwards when you rewind; placement tools in the page, roads and zones are not built yet |
+| 4   | Build               | In progress: the sim applies build, demolish and speed commands and records who sent them and who built what, and the page animates a building going up (scaffold) or coming down (dust) over 8 ticks, backwards when you rewind, and says who built a building when you point at it; placement tools in the page, roads and zones are not built yet |
 | 5   | Branching timelines | Planned                                                                                                                                                                                                                                                                       |
 | 6   | Scale and failover  | In progress: a restarted sim resumes from its log; 20,000 residents, 16 districts and broker loss are open                                                                                                                                                                    |
 | 7   | Self-hosting        | Planned                                                                                                                                                                                                                                                                       |
@@ -110,6 +110,20 @@ A city the gateway refuses (a misspelled name, or no access) shows a message ins
 retrying. The city name in the top left opens a list of every city. The clock's digits roll as time moves, the button under it opens the settings sheet, and the `?` key opens the key list. Following a resident and the page's own
 building tools are not built yet; a command published to the city's command stream by any client with a
 builder's token is applied by the sim and shows up in the page, rising over 8 ticks of city time inside a scaffold (a demolished building scales down in a puff of dust). Rewind through it and it comes down again; the low quality tier skips the scaffold and the dust.
+
+## Who built what
+
+Point at a building and a small card says who built it and when: "Built by Ana · Day 2, 09:12 · See it go up". Your
+own buildings read "Built by you". A building that was in the city from the start reads "Here since the start". On a
+phone, tap the building instead. The card does not show with `?ui=0`.
+
+"See it go up" takes the city back to 30 city seconds before the building was built and plays it forward, so you
+watch it rise in its scaffold. It uses the timeline, so it needs the live connection to play; a page opened at a moment with
+`?at` goes to that moment and stays paused. If the building is older than the log keeps, a note says so.
+
+The sim records who built each building as an `author` event on every keyframe tick, so the card works for a page that
+joined the city live or jumped back in time. [docs/design.md](docs/design.md#who-built-what) has the details and
+[docs/ui.md](docs/ui.md) the card.
 
 ## Camera controls
 

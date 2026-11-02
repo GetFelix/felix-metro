@@ -113,6 +113,12 @@ fn records() -> Vec<(&'static str, Vec<u8>)> {
             Event::Speed {
                 ticks_per_second: 8,
             },
+            Event::Author {
+                lot: 17,
+                tick: 31_000,
+                principal: 0xdead_beef_0123_4567,
+                name: "Ana \"the\" Builder".into(),
+            },
         ],
     };
     let key = TickRecord {

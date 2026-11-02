@@ -145,6 +145,9 @@ two places: the `trip` event of everyone on the road, found in the four city hou
 each trip against the keyframe's vehicle and refuses to start if they disagree, rather than guess. The cars on each
 road, which new routes are planned around, are counted again from the trips under way.
 
+**Who built what.** The same keyframe tick's `author` events give the builder of each lot, and the `command` event
+before each `built` in the later records gives the rest (see "Who built what" under Records).
+
 The city is deterministic, so stepping the rebuilt world gives the records a run that never stopped would have
 given. The sim's tests check that: a log that was stopped and started again is the same as one that was not, apart
 from the wall clock.
@@ -183,6 +186,7 @@ writes decisions instead, and the client works out positions:
 | `road`                 | segment, change (closed, opened, added, removed)                               | A road changed                             |
 | `command`              | principal hash, builder name, command id, result                               | A builder's command was applied or refused |
 | `speed`                | ticks per second                                                               | The city's speed changed; 0 is paused      |
+| `author`               | lot, tick it was built, principal hash, builder name                           | Who built the building on a lot            |
 
 A route is its segment ids from the road graph and one speed byte per segment,
 a percentage of the segment class's speed. A trip of 12 segments is under 40
@@ -265,9 +269,13 @@ skips.
 | 11  | `speed`          | ticks per second `u8`                                            |
 | 12  | `command_cursor` | next command stream offset, varint                               |
 | 13  | `arrival`        | resident, lot, kind `u8`, until: an `arrived` and its `activity` |
+| 14  | `author`         | lot, built tick, principal `u64`, name                           |
 
-The tag is four bits, so only tags 14 and 15 remain free for new event kinds.
-Past those, a wider tag would be a new record kind.
+`author` is a lot varint, the tick its building was built as a varint, then the
+builder's hash and name laid out like those of `command`.
+
+The tag is four bits, so only tag 15 remains free for a new event kind. Past
+that, a wider tag would be a new record kind.
 
 Every arrival the sim makes is an `arrived` followed by the same resident's
 `activity`, so the encoder writes the pair as one `arrival` entry and the decoder
@@ -305,6 +313,38 @@ commit also writes the stream state key `keyframe`, so the newest one is one
 Because buildings and roads are diffs against the city the seed generates, the
 keyframe of a city nobody has built in carries none of them, and the cost is
 the residents. The counts are what the stats sparkline plots.
+
+### Who built what
+
+A keyframe lists the buildings that differ from the generated city, not who built
+them or when. A page that joins the live city or seeks to a past tick starts from
+a keyframe, so it could not say who built a lot. The sim writes that as events
+instead of changing the keyframe layout:
+
+- **`author`.** Every district writes one `author` event for each lot in it that a
+  builder built and that still stands, in the record of every keyframe tick. The
+  event holds the lot, the tick of its `built` event, and the hash and display name
+  of the builder from the `command` event that caused it.
+- **Between keyframes** nothing new is written. The `command` event just before a
+  `built` already says who built it, and the tick of the record is when.
+- **Demolishing** a lot ends its entry: the next keyframe tick does not list it. A
+  lot that is built on again is credited to the new builder.
+- **Generated buildings** have no entry. A page reads "no entry, and not built
+  since the city was generated" as "here since the start".
+- **Restart.** The sim rebuilds the entries from the `author` events of the newest
+  keyframe tick it restores from, then from the `command` and `built` events of the
+  records after it, the same way it rebuilds the buildings. A log written before
+  `author` existed has no entries, so a restart starts with none.
+
+The page keeps the same table. It takes the `author` events of a keyframe tick when
+it folds one, whether it joined live or seeked there, and the `command` and `built`
+pairs in the records after. A building the table has no builder for reads "Built
+earlier"; with a sim that writes `author` that should not happen.
+
+An `author` event is 22 bytes with a six-letter name, written once a city hour (a minute
+at 4 ticks a second) for each lot a builder put up and that still stands. That is about 0.37 B/s per
+such lot: a city with a thousand built lots adds about 370 B/s. The figures in "Log size"
+are for a city nobody has built in, which writes none.
 
 ### Log size
 

@@ -6,8 +6,10 @@ import {
   districtKey,
   hash as cityHash,
   initSync,
+  principalHash as wasmPrincipalHash,
   residentDayHash,
 } from './core/felix_metro_core.js';
+import { principalHash } from './attribution';
 
 const built = (name: string) => readFileSync(new URL(`./core/${name}`, import.meta.url));
 
@@ -118,6 +120,28 @@ describe('records in WebAssembly', () => {
     expect(key).toMatchObject({ kind: 'tick', tick: 240, keyframeOffset: 8192 });
     expect(key.keyframe.buildings).toHaveLength(2);
     expect(key.keyframe.counts).toEqual({ home: 120, atWork: 80, onRoad: 14, asleep: 6 });
+  });
+
+  it('reads an author event with the lot, the tick it went up and who built it', () => {
+    const events = fixture.records.flatMap((r) => JSON.parse(decodeRecord(bytes(r.record))).events ?? []) as {
+      type: string;
+    }[];
+    expect(events.find((e) => e.type === 'author')).toEqual({
+      type: 'author',
+      lot: 17,
+      tick: 31000,
+      principal: 'deadbeef01234567',
+      name: 'Ana "the" Builder',
+    });
+  });
+
+  it('hashes a principal to the same digits as the page’s own copy of the hash', () => {
+    for (const principal of ['', 'a', 'mayor', 'viewer', 'é', 'a principal with spaces and 雪']) {
+      expect(principalHash(principal), principal).toBe(wasmPrincipalHash(principal));
+    }
+    // The vectors core/src/record/tests.rs pins.
+    expect(wasmPrincipalHash('')).toBe('cbf29ce484222325');
+    expect(wasmPrincipalHash('a')).toBe('af63dc4c8601ec8c');
   });
 
   it('refuses truncated bytes and unknown kinds', () => {

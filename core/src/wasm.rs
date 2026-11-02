@@ -50,6 +50,13 @@ pub fn decode_record(bytes: &[u8]) -> Result<String, JsError> {
     crate::record::decode_json(bytes).map_err(|e| JsError::new(&e.to_string()))
 }
 
+/// [`crate::record::principal_hash`] as 16 hex digits, the form a `command` or
+/// `author` event carries it in.
+#[wasm_bindgen(js_name = principalHash)]
+pub fn principal_hash(principal: &str) -> String {
+    format!("{:016x}", crate::record::principal_hash(principal))
+}
+
 /// [`crate::district_key`]: the entity key that puts a district on its own
 /// shard. `routing` is Felix's name for the stream's mapping, `modulo` or
 /// `jump_hash`. Throws when the stream has no shard for the district.

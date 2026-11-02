@@ -1,0 +1,45 @@
+/* The card that says who built the building under the pointer. */
+.attribution {
+  position: fixed;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 0;
+  max-width: min(360px, calc(100vw - 16px));
+  padding: var(--space-2) var(--space-3);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-l);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  white-space: nowrap;
+  animation: lift var(--quick) var(--ease);
+}
+.attribution[hidden] {
+  display: none;
+}
+.attribution-link {
+  padding: 0;
+  background: none;
+  border: 0;
+  color: var(--cyan);
+  font: inherit;
+  cursor: pointer;
+}
+.attribution-link:hover {
+  text-decoration: underline;
+}
+.attribution-link:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
+  border-radius: var(--radius-s);
+}
+/* Photo mode shows the city and nothing on top of it. */
+body.photo .attribution {
+  display: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .attribution {
+    animation: none;
+  }
+}

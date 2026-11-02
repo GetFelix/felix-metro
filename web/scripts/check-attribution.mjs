@@ -1,0 +1,180 @@
+// Hovers buildings in the live page against the dev stack and checks the card that says who built them. A building a
+// builder put up reads "Built by <name> · Day N, HH:MM · See it go up", with the day and time of its `built` event; a
+// generated one reads "Here since the start". The link then takes the page back to just before the building went up and
+// plays it forward, so the lot is bare at first and has its building after. The card is left out under ?ui=0 and in photo
+// mode, and a drag still moves the camera. The city must have buildings someone built (the builder bot and the restart
+// check leave them in pinecrest). Usage: node scripts/check-attribution.mjs <page url> <out dir> where the page url has
+// no hash.
+import { mkdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { chromium } from 'playwright';
+import { withTrace } from './url.mjs';
+
+const [pageUrl, out] = process.argv.slice(2);
+if (!out) throw new Error('usage: check-attribution.mjs <page url> <out dir>');
+const appUrl = withTrace(pageUrl);
+const city = process.env.CHECK_CITY ?? 'pinecrest';
+mkdirSync(out, { recursive: true });
+const MINUTE = 60_000;
+const TICKS_PER_DAY = 5760;
+
+const browser = await chromium.launch({
+  args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'],
+});
+const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+const errors = [];
+page.on('pageerror', (e) => errors.push(String(e)));
+page.on('console', (m) => {
+  if (m.type() === 'error') errors.push(`console.error: ${m.text()}`);
+});
+const fail = async (message) => {
+  console.error(message);
+  await page.screenshot({ path: join(out, 'failure.png') }).catch(() => {});
+  await browser.close();
+  process.exit(1);
+};
+
+/** The line the card should read for a building built at `tick`, as a person reads the city clock. */
+function expectedWhen(tick) {
+  const minutes = Math.floor(((tick % TICKS_PER_DAY) * 1440) / TICKS_PER_DAY);
+  const hh = String(Math.floor(minutes / 60)).padStart(2, '0');
+  const mm = String(minutes % 60).padStart(2, '0');
+  return `Day ${Math.floor(tick / TICKS_PER_DAY) + 1}, ${hh}:${mm}`;
+}
+
+await page.goto(`${appUrl}#${city}`, { waitUntil: 'load', timeout: 5 * MINUTE });
+await page
+  .waitForFunction(() => Number.isFinite(window.__live?.tick) && window.__lots, null, {
+    polling: 250,
+    timeout: 5 * MINUTE,
+  })
+  .catch(() => fail('the live city never drew a tick'));
+// The camera comes down from its opening drift; it must be still before a lot is aimed at.
+await page.waitForTimeout(3000);
+
+const built = await page.evaluate(() => window.__lots.built());
+if (built.length === 0) await fail('the page knows no building anyone built; nothing to hover');
+console.log(
+  `${built.length} buildings someone built, first lot ${built[0].lot} by ${built[0].name} at tick ${built[0].tick}`,
+);
+
+/** Move the pointer onto `lot` and return the text of the card that shows, or null when none does. */
+async function hover(lot, wait = 4000) {
+  // A card left by the last hover would sit between the pointer and the city.
+  await page.mouse.move(2, 2);
+  await page.waitForFunction(() => window.__lots.card() === null, null, { polling: 50, timeout: 3000 }).catch(() => {});
+  const at = await page.evaluate((l) => window.__lots.aim(l), lot);
+  const under = await page.evaluate(([x, y]) => window.__lots.pick(x, y), [at.x, at.y]);
+  if (under !== lot) return { at, under, text: null };
+  await page.mouse.move(at.x - 30, at.y - 30);
+  await page.mouse.move(at.x, at.y, { steps: 3 });
+  const shown = await page
+    .waitForFunction(() => window.__lots.card(), null, { polling: 50, timeout: wait })
+    .then(() => true)
+    .catch(() => false);
+  return { at, under, text: shown ? await page.evaluate(() => window.__lots.card()) : null };
+}
+
+// 1. A building someone built names its builder and says when. Try a few, since a neighbour can stand in front of one.
+let target = null;
+for (const b of built.slice(0, 6)) {
+  const got = await hover(b.lot);
+  if (got.text === null) continue;
+  const want = `Built by ${b.name} · ${expectedWhen(b.tick)} · See it go up`;
+  if (got.text !== want) await fail(`lot ${b.lot}: the card reads "${got.text}", expected "${want}"`);
+  console.log(`lot ${b.lot}: "${got.text}"`);
+  target = { ...b, at: got.at };
+  break;
+}
+if (!target) await fail('no building someone built could be hovered');
+await page.screenshot({ path: join(out, 'built.png') });
+
+// 2. A generated building says it has been here since the start.
+const seeded = await page.evaluate(() => window.__lots.seeded());
+let seededText = null;
+for (const lot of seeded.slice(0, 40)) {
+  const got = await hover(lot, 1500);
+  if (got.text === null) continue;
+  seededText = got.text;
+  console.log(`lot ${lot} (generated): "${got.text}"`);
+  break;
+}
+if (seededText !== 'Here since the start')
+  await fail(`a generated building's card reads ${JSON.stringify(seededText)}`);
+
+// 3. The card goes when the pointer leaves, and stays out of photo mode.
+await page.mouse.move(2, 2);
+await page
+  .waitForFunction(() => window.__lots.card() === null, null, { polling: 50, timeout: 3000 })
+  .catch(() => fail('the card stayed after the pointer left'));
+await page.evaluate(() => document.body.classList.add('photo'));
+const photo = await hover(target.lot, 1500);
+if (photo.text !== null) await fail(`the card shows in photo mode: "${photo.text}"`);
+await page.evaluate(() => document.body.classList.remove('photo'));
+console.log('no card in photo mode');
+
+// 4. A drag still turns the camera, and no card gets in its way.
+const before = await page.evaluate(() => JSON.stringify(window.__camera.view()));
+const centre = { x: 640, y: 360 };
+await page.mouse.move(centre.x, centre.y);
+await page.mouse.down();
+await page.mouse.move(centre.x + 160, centre.y + 40, { steps: 8 });
+if ((await page.evaluate(() => window.__lots.card())) !== null) await fail('a card showed during a drag');
+await page.mouse.up();
+await page.waitForTimeout(500);
+if ((await page.evaluate(() => JSON.stringify(window.__camera.view()))) === before)
+  await fail('a drag did not move the camera');
+console.log('a drag turns the camera');
+
+// 5. "See it go up" goes to just before the building was built, then plays on until the building is there. It samples in
+// the page, because the rise is only a few seconds.
+const first = await hover(target.lot);
+if (first.text === null) await fail('the building could not be hovered again');
+await page.evaluate(
+  ([lot, tick]) => {
+    window.__rise = { samples: [], stop: false };
+    const sample = () => {
+      const shown = window.__metro.shown();
+      if (shown.past !== null) window.__rise.samples.push({ past: shown.past, standing: window.__lots.standing(lot) });
+      if (!window.__rise.stop) setTimeout(sample, 40);
+    };
+    sample();
+    window.__rise.tick = tick;
+  },
+  [target.lot, target.tick],
+);
+await page.locator('.attribution-link').click();
+await page
+  .waitForFunction(() => window.__rise.samples.some((s) => s.past > window.__rise.tick + 4), null, {
+    polling: 100,
+    timeout: 90_000,
+  })
+  .catch(() => fail('the page did not play on past the building going up'));
+const samples = await page.evaluate(() => {
+  window.__rise.stop = true;
+  return window.__rise.samples;
+});
+// The preview of the nearest keyframe may come first; the seek itself lands two ticks before the building.
+const start = samples.find((s) => s.past >= target.tick - 3);
+if (!start || start.past > target.tick - 1) {
+  await fail(`the page went to tick ${start?.past}, not two ticks before ${target.tick}`);
+}
+if (start.standing) await fail(`the lot already had its building at tick ${start.past}`);
+if (!samples.at(-1).standing)
+  await fail(`the lot has no building at tick ${samples.at(-1).past}, after it was built at ${target.tick}`);
+console.log(`See it go up: from tick ${start.past} (bare) to tick ${samples.at(-1).past} (built at ${target.tick})`);
+await page.screenshot({ path: join(out, 'go-up.png') });
+if (errors.length > 0) await fail(`errors on the page: ${errors.join('; ')}`);
+
+// 6. With ?ui=0 there is no card.
+const bare = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+const url = new URL(appUrl);
+url.searchParams.set('ui', '0');
+await bare.goto(`${url}#${city}`, { waitUntil: 'load', timeout: 5 * MINUTE });
+await bare.waitForFunction(() => Number.isFinite(window.__live?.tick), null, { polling: 250, timeout: 5 * MINUTE });
+if (await bare.evaluate(() => window.__lots !== undefined || document.getElementById('attribution') !== null)) {
+  await fail('the card exists under ?ui=0');
+}
+console.log('no card under ?ui=0');
+await browser.close();
+console.log('the card says who built what');

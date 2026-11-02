@@ -26,7 +26,7 @@ fn name(rng: &mut Rng) -> String {
 
 fn event(rng: &mut Rng) -> Event {
     let resident = rng.next_u64() as u32;
-    match rng.below(12) {
+    match rng.below(13) {
         0 => Event::Trip {
             resident,
             vehicle: rng.below(6) as u8,
@@ -85,8 +85,14 @@ fn event(rng: &mut Rng) -> Event {
         10 => Event::Speed {
             ticks_per_second: rng.below(33) as u8,
         },
-        _ => Event::CommandCursor {
+        11 => Event::CommandCursor {
             next: rng.next_u64() >> rng.below(64),
+        },
+        _ => Event::Author {
+            lot: rng.next_u64() as u32,
+            tick: rng.next_u64() as u32,
+            principal: rng.next_u64(),
+            name: name(rng),
         },
     }
 }
@@ -419,7 +425,7 @@ const FLAGS_AT: usize = 5;
 const COUNT_AT: usize = 15;
 
 /// A tag no build has used.
-const UNKNOWN_EVENT_TAG: u8 = 14;
+const UNKNOWN_EVENT_TAG: u8 = 15;
 
 /// A tick record's header for `events` events, with a keyframe if asked, then `body`.
 fn raw_tick(keyframe: bool, events: u8, body: &[u8]) -> Vec<u8> {
@@ -707,6 +713,49 @@ fn json_names_every_field_and_escapes_text() {
         r#"{"kind":"tick","epoch":2,"district":3,"tick":4,"speed":5,"keyframeOffset":6,"wallUs":7,"keyframe":null,"events":[{"type":"command","principal":"00000000000000ff","name":"Ana","id":1,"result":0}]}"#
     );
     assert_eq!(decode_json(&c.encode().unwrap()).unwrap(), c.to_json());
+}
+
+#[test]
+fn an_author_event_round_trips_and_has_its_json() {
+    let author = Event::Author {
+        lot: 1234,
+        tick: 70_000,
+        principal: 255,
+        name: "Ana \"A\"".into(),
+    };
+    let tick = plain_tick(vec![author]);
+    assert_eq!(TickRecord::decode(&tick.encode().unwrap()).unwrap(), tick);
+    assert_eq!(
+        tick.to_json(),
+        r#"{"kind":"tick","epoch":1,"district":0,"tick":5,"speed":4,"keyframeOffset":0,"wallUs":0,"keyframe":null,"events":[{"type":"author","lot":1234,"tick":70000,"principal":"00000000000000ff","name":"Ana \"A\""}]}"#
+    );
+}
+
+#[test]
+fn an_author_event_is_22_bytes_with_a_six_letter_name() {
+    // The cost design.md quotes: a 2-byte head, a lot (2), a tick (3), the hash (8) and the name (1 + 6).
+    let event = Event::Author {
+        lot: 1234,
+        tick: 70_000,
+        principal: 1,
+        name: "Marcus".into(),
+    };
+    let bytes = plain_tick(vec![event]).encode().unwrap();
+    assert_eq!(bytes.len(), PLAIN_HEADER + 22);
+}
+
+#[test]
+fn an_author_name_over_the_limit_is_refused() {
+    let event = Event::Author {
+        lot: 1,
+        tick: 1,
+        principal: 1,
+        name: "x".repeat(MAX_STR + 1),
+    };
+    assert_eq!(
+        plain_tick(vec![event]).encode(),
+        Err(EncodeError::StringTooLong)
+    );
 }
 
 #[test]

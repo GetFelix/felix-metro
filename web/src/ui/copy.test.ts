@@ -1,5 +1,6 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { GO_UP_TEXT, cardText } from '../attribution';
 import { HINT_TEXT } from './hint';
 import { SHORTCUTS } from './keys';
 import { CHOICES } from './settings';
@@ -9,6 +10,11 @@ const JARGON = /\b(logs?|streams?|offsets?|ticks?|shards?|keyframes?|districts?)
 
 const words = [
   HINT_TEXT,
+  GO_UP_TEXT,
+  cardText({ kind: 'built', name: 'Ana', mine: false, tick: 5760 + 2208 }),
+  cardText({ kind: 'built', name: 'Ana', mine: true, tick: 0 }),
+  cardText({ kind: 'start' }),
+  cardText({ kind: 'earlier' }),
   ...CHOICES.flatMap((c) => [c.label, c.hint]),
   ...SHORTCUTS.flatMap((g) => [g.title, g.when ?? '', ...g.rows.map((r) => r.action)]),
 ];

@@ -92,6 +92,7 @@ export function decode(bytes) {
     const tag = head % 16;
     const length = Math.floor(head / 16);
     const body = new DataView(bytes.buffer, bytes.byteOffset + at.i, length);
+    const start = at.i;
     at.i += length;
     if (tag === 7 || tag === 8) {
       out.events.push({ type: tag === 7 ? "built" : "demolished", lot: body.getUint32(0, true), kind: body.getUint16(4, true) });
@@ -101,6 +102,14 @@ export function decode(bytes) {
       out.events.push({ type: "command", principal: body.getBigUint64(0, true), id, result: body.getUint8(13 + nameLength) });
     } else if (tag === 9) {
       out.events.push({ type: "road" });
+    } else if (tag === 14) {
+      // lot and tick are varints, then the builder's hash and display name.
+      const inner = { i: start };
+      const lot = varint(bytes, inner);
+      const built = varint(bytes, inner);
+      const nameLength = bytes[inner.i + 8];
+      const name = Buffer.from(bytes.subarray(inner.i + 9, inner.i + 9 + nameLength)).toString("utf8");
+      out.events.push({ type: "author", lot, tick: built, principal: body.getBigUint64(inner.i - start, true), name });
     }
   }
   return out;

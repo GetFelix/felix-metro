@@ -21,6 +21,12 @@ the ones already there.
 - **Get a hint on a first visit.** When the timeline first appears, a line above it says "Drag the timeline to go
   back in time". It goes away on your first click, key press or scroll, or after a few seconds, and it is not
   shown again in that browser.
+- **See who built a building.** Point at one and a card says who built it and when: "Built by Ana · Day 2, 09:12 ·
+  See it go up". Your own read "Built by you", and buildings the city began with read "Here since the start". On a
+  phone, tap the building; tap anywhere else to close the card. "See it go up" takes the city back to just before
+  the building was built and plays it forward. It does the same as dragging the timeline there and pressing Play, so a
+  page opened at a past moment (`?at`) goes there and stays paused. The card is a pointer feature: it is not
+  reachable from the keyboard.
 - **Reach everything with the keyboard.** Every control can be focused with `Tab` and used with `Enter`,
   `Space` or the arrow keys. The focused control gets a cyan ring. With an earlier moment on screen, `Space` plays
   or pauses it, unless a button or field has focus, in which case it does that control's own job. `J`, `K` and `L`
@@ -31,7 +37,7 @@ These page parameters change the overlay:
 | Parameter        | Effect                                                                                     |
 | ---------------- | ------------------------------------------------------------------------------------------ |
 | `?tier=low`      | Forces a quality for this visit (`low`, `medium` or `high`). It overrides the saved choice |
-| `?ui=0`          | Hides the overlay: no chips, no settings button, no `?` key and no hint                    |
+| `?ui=0`          | Hides the overlay: no chips, no settings button, no `?` key, no hint and no building card  |
 | `?capture&trace` | The same as `?ui=0` for the controls and the hint, since a clip must draw as is            |
 | `?live=0`        | Draws the city with no gateway; the timeline never appears, so there is no hint            |
 | `?hud`           | Shows frame times under the Felix Metro chip, for tuning                                   |
@@ -41,16 +47,17 @@ These page parameters change the overlay:
 The overlay is plain markup in `web/index.html`, styled by CSS files and wired up by TypeScript. There is no UI
 framework. Each part has one file of each kind:
 
-| Part                             | Code                                                        | Styles                    |
-| -------------------------------- | ----------------------------------------------------------- | ------------------------- |
-| Colours, spacing, glass, focus   |                                                             | `web/src/ui/kit.css`      |
-| Felix Metro chip and city picker | `web/src/ui/picker.ts`                                      | `web/src/ui/brand.css`    |
-| Loading screen                   | `web/src/ui/loader.ts`                                      | `web/src/ui/loader.css`   |
-| Clock, LIVE pill, past row       | `web/src/ui/clock.ts`, `web/src/ui/status.ts`               | `web/src/ui/clock.css`    |
-| Timeline bar                     | `web/src/timeline.ts`                                       | `web/src/ui/timeline.css` |
-| Settings sheet and key list      | `web/src/ui/shell.ts`, `settings.ts`, `keys.ts`, `sheet.ts` | `web/src/ui/sheet.css`    |
-| Hint and messages                | `web/src/ui/hint.ts`, `web/src/ui/toast.ts`                 | `web/src/ui/toast.css`    |
-| Frame times (`?hud`)             | `web/src/ui/hud.ts`                                         | `web/src/ui/kit.css`      |
+| Part                             | Code                                                        | Styles                       |
+| -------------------------------- | ----------------------------------------------------------- | ---------------------------- |
+| Colours, spacing, glass, focus   |                                                             | `web/src/ui/kit.css`         |
+| Felix Metro chip and city picker | `web/src/ui/picker.ts`                                      | `web/src/ui/brand.css`       |
+| Loading screen                   | `web/src/ui/loader.ts`                                      | `web/src/ui/loader.css`      |
+| Clock, LIVE pill, past row       | `web/src/ui/clock.ts`, `web/src/ui/status.ts`               | `web/src/ui/clock.css`       |
+| Timeline bar                     | `web/src/timeline.ts`                                       | `web/src/ui/timeline.css`    |
+| Settings sheet and key list      | `web/src/ui/shell.ts`, `settings.ts`, `keys.ts`, `sheet.ts` | `web/src/ui/sheet.css`       |
+| Hint and messages                | `web/src/ui/hint.ts`, `web/src/ui/toast.ts`                 | `web/src/ui/toast.css`       |
+| Building card                    | `web/src/ui/attribution.ts`, `web/src/ui/lot-hover.ts`      | `web/src/ui/attribution.css` |
+| Frame times (`?hud`)             | `web/src/ui/hud.ts`                                         | `web/src/ui/kit.css`         |
 
 `index.html` links the CSS files in that order, so a later file can override an earlier one. Linking them from
 the page, rather than importing them from TypeScript, means the overlay is styled before any script runs.
@@ -105,6 +112,25 @@ row, so the list cannot fall behind the code it describes.
 `#clock` always holds plain `HH:MM` text, so a screen reader and the check scripts read it as one time. `clock.ts`
 wraps each digit in its own element and, when a digit changes, animates the new one in. The old digit is drawn
 from the element's `data-old` attribute, which is not text.
+
+### The building card
+
+Three small pieces, so each can be tested alone:
+
+- `web/src/picking.ts` finds the lot under a point on the screen. A building is tall, so the ground under the pointer
+  is behind it. The code follows the pointer's ray down from the height of the tallest building and tests only the lots
+  near that stretch against their meshes (`pickLot` in `scene.ts`).
+- `web/src/attribution.ts` turns what the page knows into words. The page learns who built each lot from the sim's
+  `author` events (see [design.md](design.md#who-built-what)). It compares a builder's hash with the hash of your own
+  principal, which the gateway names in `hello` (the `principal` feature), to say "you".
+- `web/src/ui/lot-hover.ts` listens to the pointer. A mouse hover shows the card; a short tap with one finger does on
+  touch. A drag, a pinch or a press with a button down never does, and the listeners never stop an event, so the
+  camera still gets every one. The card stays for about a third of a second after the pointer leaves the building, long
+  enough to reach the link, and stays while the pointer is on the card.
+
+The card is hidden in photo mode (`body.photo`) and does not exist under `?ui=0`. "See it go up" seeks to two ticks
+before the building was built through the same path the timeline uses, then plays on if the page has a live
+connection.
 
 ### The hint
 

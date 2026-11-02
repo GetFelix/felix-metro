@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { Gateway, GatewayError, base64, parseFrame, unbase64 } from './gateway';
+import { Gateway, GatewayError, base64, parseFrame, sessionPrincipal, unbase64 } from './gateway';
 
 describe('parseFrame', () => {
   const frame = (headerLen: number, offset: bigint) => {
@@ -88,8 +88,23 @@ describe('Gateway', () => {
       protocol: 1,
       city: 'harbor',
       token: 'token',
-      features: ['binary_events', 'slots', 'shards', 'state', 'read'],
+      features: ['binary_events', 'slots', 'shards', 'state', 'read', 'principal'],
     });
+  });
+
+  it('learns its own principal from a gateway that names it, and does without from one that does not', async () => {
+    await joined();
+    expect(sessionPrincipal()).toBeNull();
+    const connecting = Gateway.connect('ws://x/ws', 'harbor', 'token');
+    await Promise.resolve();
+    await Promise.resolve();
+    FakeSocket.last.say({
+      type: 'hello',
+      features: ['binary_events', 'slots', 'shards', 'state', 'read', 'principal'],
+      principal: '6d9e57ad',
+    });
+    await connecting;
+    expect(sessionPrincipal()).toBe('6d9e57ad');
   });
 
   it('refuses a gateway without a feature it needs', async () => {
