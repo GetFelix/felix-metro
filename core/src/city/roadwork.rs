@@ -203,20 +203,39 @@ impl City {
             while self.segments.len() < road.segment as usize {
                 self.push_built(0, 0, true, None);
             }
-            let (&(ax, az), &(bx, bz)) = self
-                .nodes
-                .get(road.a as usize)
-                .zip(self.nodes.get(road.b as usize))
-                .ok_or(RoadError::UnknownNode)?;
-            if road.a == road.b || (ax != bx && az != bz) {
-                return Err(RoadError::NotInLine);
-            }
+            self.in_line(road.a, road.b)?;
             if road.removed {
                 self.push_built(road.a, road.b, true, None);
             } else {
                 let tiles = self.between(road.a, road.b);
                 self.push_built(road.a, road.b, false, Some(&tiles));
             }
+        }
+        Ok(())
+    }
+
+    /// Lays a road the log says was added as `segment`, which must be the next
+    /// id. Like [`City::restore_roads`] it skips the land checks, since the road
+    /// passed them when it was added.
+    pub fn lay_road(&mut self, segment: u32, a: u32, b: u32) -> Result<(), RoadError> {
+        if segment as usize != self.segments.len() {
+            return Err(RoadError::Order);
+        }
+        self.in_line(a, b)?;
+        let tiles = self.between(a, b);
+        self.push_built(a, b, false, Some(&tiles));
+        Ok(())
+    }
+
+    /// Whether `a` and `b` are two nodes in one row or column.
+    fn in_line(&self, a: u32, b: u32) -> Result<(), RoadError> {
+        let (&(ax, az), &(bx, bz)) = self
+            .nodes
+            .get(a as usize)
+            .zip(self.nodes.get(b as usize))
+            .ok_or(RoadError::UnknownNode)?;
+        if a == b || (ax != bx && az != bz) {
+            return Err(RoadError::NotInLine);
         }
         Ok(())
     }

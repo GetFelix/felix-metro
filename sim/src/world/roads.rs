@@ -4,6 +4,7 @@
 //! The rules about the land are `City::road_tiles`'s; the ones that need the
 //! world are here: the lots residents use, the buildings, and the funds.
 
+use felix_metro_core::RoadError;
 use felix_metro_core::record::{
     Event, LEDGER_BUILD, LEDGER_DEMOLISH, REFUSED_IN_USE, REFUSED_NO_FUNDS, REFUSED_NOT_BUILT,
     REFUSED_OCCUPIED, REFUSED_UNKNOWN, RESULT_APPLIED, ROAD_ADDED, ROAD_REMOVED,
@@ -82,7 +83,7 @@ impl World {
         if self.funds() < economy::REMOVE_ROAD_COST as i64 {
             return Applied::refused(district, REFUSED_NO_FUNDS);
         }
-        self.take_away(segment);
+        self.take_away(segment).expect("checked above");
         self.accounts[usize::from(district)] -= economy::REMOVE_ROAD_COST as i64;
         Applied {
             district,
@@ -105,11 +106,11 @@ impl World {
 
     /// Takes a built segment out of the city and marks it for the next step to
     /// move its vehicles off.
-    pub(super) fn take_away(&mut self, segment: u32) {
-        if self.city.remove_road(segment).is_ok() {
-            self.removed.push(segment);
-            self.roads_changed();
-        }
+    pub(super) fn take_away(&mut self, segment: u32) -> Result<(), RoadError> {
+        self.city.remove_road(segment)?;
+        self.removed.push(segment);
+        self.roads_changed();
+        Ok(())
     }
 
     /// What follows from the road network changing: room for the new segment's

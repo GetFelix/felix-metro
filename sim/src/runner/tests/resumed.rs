@@ -9,7 +9,9 @@ use felix_metro_core::record::{ROAD_ADDED, ROAD_REMOVED};
 
 use super::*;
 use crate::commands::tests::{city as harbor, free_lot};
-use crate::world::roads::tests::{busy_road, world_with_riders};
+use crate::world::roads::tests::{
+    busy_road, roads_in_two_districts, two_district_city, world_with_riders,
+};
 
 /// Runs as fast as the log answers.
 fn quick(stop: u32) -> Settings {
@@ -373,6 +375,60 @@ async fn roads_and_replans_are_the_same_after_a_restart_at_any_tick() {
         total - 1,
     ] {
         let log = with_roads(&[stop], &place, removal, &remove, total).await;
+        assert!(records(&log) == whole, "stopped at tick {stop}");
+    }
+}
+
+/// Two roads laid in one tick keep their ids after a restart that replays that tick, though the one laid first is in a
+/// later district and so is read back second.
+#[tokio::test(start_paused = true)]
+async fn roads_laid_in_one_tick_in_two_districts_are_the_same_after_a_restart() {
+    let (p, q) = roads_in_two_districts();
+    let (at, total) = (70, 300);
+    let run = |log: Memory, stop: u32, place: bool| async move {
+        let inbox = place.then(|| {
+            let (send, inbox) = mpsc::channel(8);
+            for (id, (a, b)) in [(1, p), (2, q)] {
+                send.try_send(log.publish("mayor", id, Command::PlaceRoad { a, b }))
+                    .unwrap();
+            }
+            // Keep the sender alive for the run, as the follower would.
+            std::mem::forget(send);
+            inbox
+        });
+        run_city_with("s3", two_district_city(), quick(stop), log, inbox)
+            .await
+            .unwrap();
+    };
+    let log = Memory::healthy();
+    run(log.clone(), at, false).await;
+    run(log.clone(), total, true).await;
+    let whole = records(&log);
+    // (district, tick, segment, node a), read district by district.
+    let laid: Vec<(usize, u32, u32, u32)> = whole
+        .iter()
+        .enumerate()
+        .flat_map(|(d, records)| records.iter().map(move |r| (d, r)))
+        .flat_map(|(d, r)| {
+            r.events.iter().filter_map(move |e| match *e {
+                Event::Roadwork { segment, a, .. } => Some((d, r.header.tick, segment, a)),
+                _ => None,
+            })
+        })
+        .collect();
+    let [second, first] = laid[..] else {
+        panic!("two roads, not {laid:?}")
+    };
+    assert!(first.3 == p.0 && second.3 == q.0);
+    assert!(first.1 == at && second.1 == at);
+    assert!(first.0 > second.0 && first.2 < second.2);
+
+    // Replaying from the keyframe at tick 0 across the tick, and starting from the next keyframe.
+    for stop in [at + 1, at + 5, TICKS_PER_HOUR + 10] {
+        let log = Memory::healthy();
+        run(log.clone(), at, false).await;
+        run(log.clone(), stop, true).await;
+        run(log.clone(), total, false).await;
         assert!(records(&log) == whole, "stopped at tick {stop}");
     }
 }

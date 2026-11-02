@@ -138,14 +138,36 @@ impl World {
         Ok(world)
     }
 
-    /// Carries out what a `built`, `demolished` or command `ledger` event in
-    /// `district`'s record says. Other events change nothing a restart has to
-    /// rebuild: stepping makes them, a day's `ledger` included.
-    pub(crate) fn apply_logged(&mut self, district: usize, event: &Event) {
+    /// Carries out what one tick's logged events say, given as `(district, event)`
+    /// in any order of districts.
+    pub(crate) fn apply_logged_tick<'a>(
+        &mut self,
+        events: impl IntoIterator<Item = (usize, &'a Event)>,
+    ) -> Result<()> {
+        let mut events: Vec<_> = events.into_iter().collect();
+        // Roads took their ids in the order the sim laid them, which across districts is not the order their records
+        // are read in.
+        events.sort_by_key(|(_, e)| match e {
+            Event::Roadwork {
+                segment, change, ..
+            } => Some((*segment, *change == ROAD_REMOVED)),
+            _ => None,
+        });
+        for (district, event) in events {
+            self.apply_logged(district, event)?;
+        }
+        Ok(())
+    }
+
+    /// Carries out what a `built`, `demolished`, `roadwork` or command `ledger`
+    /// event in `district`'s record says. Other events change nothing a restart
+    /// has to rebuild: stepping makes them, a day's `ledger` included. A road
+    /// must be the next segment id: see [`World::apply_logged_tick`].
+    pub(crate) fn apply_logged(&mut self, district: usize, event: &Event) -> Result<()> {
         let diff = match *event {
             Event::Ledger { reason, spent, .. } if reason != LEDGER_DAY => {
                 self.accounts[district] -= spent as i64;
-                return;
+                return Ok(());
             }
             Event::Roadwork {
                 segment,
@@ -154,14 +176,18 @@ impl World {
                 b,
             } => {
                 if change == ROAD_ADDED {
-                    // The log is what happened, so a road it names is laid even if this build would not have allowed it.
-                    if self.city.add_road(a, b).is_ok() {
-                        self.roads_changed();
-                    }
+                    self.city.lay_road(segment, a, b).with_context(|| {
+                        format!(
+                            "the log adds road {segment} from node {a} to {b}, which cannot be laid"
+                        )
+                    })?;
+                    self.roads_changed();
                 } else if change == ROAD_REMOVED {
-                    self.take_away(segment);
+                    self.take_away(segment).with_context(|| {
+                        format!("the log removes road {segment}, which cannot be removed")
+                    })?;
                 }
-                return;
+                return Ok(());
             }
             Event::Built {
                 lot,
@@ -177,9 +203,10 @@ impl World {
                 kind: NO_BUILDING,
                 rotation: 0,
             },
-            _ => return,
+            _ => return Ok(()),
         };
         self.built.insert(diff.lot, diff);
+        Ok(())
     }
 }
 

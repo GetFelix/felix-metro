@@ -415,11 +415,18 @@ impl History {
             return Ok(world);
         };
         for tick in self.base.map_or(0, |base| base + 1)..=level {
-            for (district, record) in self.ticks[&tick].iter().enumerate() {
-                for event in record.iter().flat_map(|r| &r.events) {
-                    world.apply_logged(district, event);
-                }
-            }
+            let events = self.ticks[&tick]
+                .iter()
+                .enumerate()
+                .flat_map(|(district, record)| {
+                    record
+                        .iter()
+                        .flat_map(|r| &r.events)
+                        .map(move |e| (district, e))
+                });
+            world
+                .apply_logged_tick(events)
+                .with_context(|| format!("replaying tick {tick}"))?;
             world.step();
         }
         Ok(world)

@@ -477,7 +477,7 @@ fn a_replan_keeps_the_kind_of_trip_and_none_happens_without_a_removal() {
 
 /// What the world is rebuilt from at keyframe tick `at`: each district's keyframe, the balances, the council and the
 /// latest `trip` or `replan` of everyone, as a restart reads them back from the log.
-fn restore_at(ticks: &[Vec<DistrictTick>], at: u32) -> World {
+fn restore_at(city: City, ticks: &[Vec<DistrictTick>], at: u32) -> World {
     let frames: Vec<_> = ticks[at as usize]
         .iter()
         .map(|d| d.keyframe.clone().unwrap())
@@ -539,7 +539,104 @@ fn restore_at(ticks: &[Vec<DistrictTick>], at: u32) -> World {
         .iter()
         .find_map(Council::from_event)
         .unwrap();
-    World::restore(harbor(), at, &frames, &balances, council, &departures).unwrap()
+    World::restore(city, at, &frames, &balances, council, &departures).unwrap()
+}
+
+/// One tick's events as a restart reads them, district by district.
+fn logged(tick: &[DistrictTick]) -> impl Iterator<Item = (usize, &Event)> {
+    tick.iter()
+        .enumerate()
+        .flat_map(|(d, t)| t.events.iter().map(move |e| (d, e)))
+}
+
+/// A city with room for two roads in different districts, which the stock ones do not have. Found by trying seeds.
+pub(crate) fn two_district_city() -> City {
+    City::generate("s3", 2).unwrap()
+}
+
+/// Two roads in [`two_district_city`] that can both be built, the first with its node a in a later district than the
+/// second's, so the one laid first is read back second.
+pub(crate) fn roads_in_two_districts() -> ((u32, u32), (u32, u32)) {
+    static FOUND: OnceLock<((u32, u32), (u32, u32))> = OnceLock::new();
+    *FOUND.get_or_init(|| {
+        let probe = World::new(two_district_city());
+        let all = candidates(&probe);
+        let district = |(a, _): (u32, u32)| probe.node_district(a).unwrap();
+        for &p in &all {
+            for &q in &all {
+                let mut city = probe.city.clone();
+                if district(p) > district(q)
+                    && city.add_road(p.0, p.1).is_ok()
+                    && city.road_tiles(q.0, q.1).is_ok()
+                {
+                    return (p, q);
+                }
+            }
+        }
+        panic!("no two roads fit in different districts");
+    })
+}
+
+#[test]
+fn roads_laid_in_one_tick_in_two_districts_keep_their_ids_after_a_restore() {
+    let (p, q) = roads_in_two_districts();
+    let mut original = World::new(two_district_city());
+    let at = 2 * TICKS_PER_HOUR + 10;
+    let mut ticks = run(&mut original, at);
+    // The runner records a command's changes beside the step's events.
+    let mut commands = Vec::new();
+    for (a, b) in [p, q] {
+        let applied = original.apply(&place(a, b));
+        assert_eq!(applied.result, RESULT_APPLIED);
+        commands.push(applied);
+    }
+    assert!(commands[0].district > commands[1].district);
+    let end = at + 20;
+    ticks.extend(run(&mut original, end));
+    for applied in &commands {
+        ticks[at as usize][usize::from(applied.district)]
+            .events
+            .extend(applied.events.iter().cloned());
+    }
+
+    let mut restored = restore_at(two_district_city(), &ticks, 2 * TICKS_PER_HOUR);
+    for tick in 2 * TICKS_PER_HOUR + 1..end {
+        restored
+            .apply_logged_tick(logged(&ticks[tick as usize]))
+            .unwrap();
+        // The command events were added to the tick's record after it was stepped.
+        let mut step = restored.step();
+        if tick == at {
+            for applied in &commands {
+                step[usize::from(applied.district)]
+                    .events
+                    .extend(applied.events.iter().cloned());
+            }
+        }
+        assert!(step == ticks[tick as usize], "tick {tick}");
+    }
+    assert_eq!(restored.city.hash(), original.city.hash());
+}
+
+#[test]
+fn a_logged_road_that_cannot_be_laid_stops_the_replay() {
+    let (a, b, _) = busy_road();
+    let mut world = World::new(harbor());
+    let next = world.city.segments.len() as u32;
+    let skipped = Event::Roadwork {
+        segment: next + 1,
+        change: ROAD_ADDED,
+        a,
+        b,
+    };
+    assert!(world.apply_logged(0, &skipped).is_err());
+    let gone = Event::Roadwork {
+        segment: next,
+        change: ROAD_REMOVED,
+        a,
+        b,
+    };
+    assert!(world.apply_logged(0, &gone).is_err());
 }
 
 #[test]
@@ -575,19 +672,15 @@ fn a_world_restored_on_either_side_of_a_removal_steps_as_the_original_does() {
         .collect();
     assert!(replanned.iter().any(|r| on_road_at_after.contains(r)));
     for at in [before, after] {
-        let mut restored = restore_at(&ticks, at);
+        let mut restored = restore_at(harbor(), &ticks, at);
         assert_eq!(restored.next_tick(), at + 1);
         for tick in at + 1..end {
-            for (district, d) in ticks[tick as usize].iter().enumerate() {
-                for event in &d.events {
-                    restored.apply_logged(district, event);
-                }
-            }
+            let mut logged: Vec<(usize, &Event)> = logged(&ticks[tick as usize]).collect();
             if tick == removal {
-                for event in &removal_events.events {
-                    restored.apply_logged(usize::from(removal_events.district), event);
-                }
+                let district = usize::from(removal_events.district);
+                logged.extend(removal_events.events.iter().map(|e| (district, e)));
             }
+            restored.apply_logged_tick(logged).unwrap();
             assert!(
                 restored.step() == ticks[tick as usize],
                 "restored at {at}, tick {tick}"

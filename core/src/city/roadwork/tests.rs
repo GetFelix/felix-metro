@@ -227,6 +227,22 @@ fn roads_out_of_order_are_refused() {
 }
 
 #[test]
+fn a_logged_road_is_laid_only_at_the_next_id() {
+    let generated = city_of("harbor", 2);
+    let (a, b) = placeable(&generated)[0];
+    let next = generated.segments.len() as u32;
+    let mut city = generated.clone();
+    assert_eq!(city.lay_road(next + 1, a, b), Err(RoadError::Order));
+    assert_eq!(city.lay_road(next, a, a), Err(RoadError::NotInLine));
+    assert_eq!(city.segments.len(), next as usize);
+    city.lay_road(next, a, b).unwrap();
+    let mut added = generated.clone();
+    added.add_road(a, b).unwrap();
+    assert_eq!(city.hash(), added.hash());
+    assert_eq!(city.lay_road(next, a, b), Err(RoadError::Order));
+}
+
+#[test]
 fn every_way_a_road_can_be_refused_happens_on_some_pair() {
     let mut seen = HashSet::new();
     for seed in ["harbor", "pinecrest", "seed-3", "seed-7"] {
