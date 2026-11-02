@@ -74,6 +74,7 @@ built there with the tick of each.
 | `build` | the lot is bare or holds only trees and props, no resident goes there, the kind is a building and the rotation 0 to 3, and the city can pay | unknown lot, bad kind, occupied, in use, no funds |
 | `demolish` | the lot has a building no resident's schedule uses, and the city can pay | unknown lot, empty, in use, no funds |
 | `speed` | 0, 4, 8 or 16; a paused city resumes on a nonzero one | bad speed |
+| `policy` | the kind is a policy, the value is in its range and differs from now, and the policy has not changed in the last city day | malformed, unchanged, cooldown |
 | `place road`, `zone`, `fork` | not yet | unsupported |
 
 The result codes are in `core/src/record.rs`. A paused city holds the commands it reads
@@ -96,6 +97,15 @@ latest scores, how many days in a row each faction has been unhappy, and the ope
 unhappy for 3 days in a row recalls the mayor, which the sim only records. The demands are in
 `sim/src/world/council.rs`, and [docs/design.md](../docs/design.md#the-council) has the rules. A restart restores the
 council, running totals included, from the newest keyframe tick.
+
+## Policy
+
+The mayor sets shop hours (0 to 3 hours later than usual) and a speed limit for avenues and for streets (30 to 100
+percent of the road's speed) with a `policy` command. Each can change once a city day. Later shop hours keep
+shopkeepers at work longer and raise shop tax; a limit caps how fast trips are planned and driven on that class of road.
+District 0 writes a `policy` event when one changes and on every keyframe tick after the first change, with the values and when each last
+changed, and a restart restores them. A client sends one with `policy(kind, value)` from `dev/lib/gateway.mjs`
+(kind 0 is shop hours, 1 the avenue limit, 2 the street limit); the page has no control for it yet. [docs/design.md](../docs/design.md#policy) has the rules.
 
 ## The registry
 

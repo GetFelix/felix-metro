@@ -226,6 +226,18 @@ describe('CityState', () => {
     expect(state.council?.days).toBe(1);
   });
 
+  it('keeps the newest policy event', () => {
+    const state = new CityState(city, trips, 2);
+    expect(state.policy).toBeNull();
+    const policy = (hours: number) => ({
+      type: 'policy' as const,
+      settings: [{ value: hours, changed: hours ? 100 : null }],
+    });
+    state.apply(record(0, 240, [policy(0)]));
+    state.apply(record(0, 241, [policy(2)]));
+    expect(state.policy?.settings[0]?.value).toBe(2);
+  });
+
   it('follows road events, and a keyframe replaces what its district knew', () => {
     const state = new CityState(city, trips, 2);
     state.apply(record(0, 1, [{ type: 'road', segment: 4, change: ROAD_CLOSED }]));

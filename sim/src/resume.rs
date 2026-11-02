@@ -12,7 +12,7 @@ use felix_metro_core::record::{Doing, Event, TickRecord};
 use tracing::warn;
 
 use crate::runner::{Log, Retry};
-use crate::world::{Council, Departure, World, opening_share};
+use crate::world::{Council, Departure, Policy, World, opening_share};
 
 /// Records before the keyframe a restart first reads, so that a trip that
 /// left before it is found. A trip takes minutes of city time; a longer one
@@ -385,6 +385,7 @@ impl History {
                     &frames,
                     &self.balances(base),
                     self.council(base),
+                    self.policy(base),
                     &self.departures,
                 )?;
                 world.restore_authors(self.ticks[&base].iter().flatten().flat_map(|r| &r.events));
@@ -440,6 +441,18 @@ impl History {
             .flat_map(|r| &r.events)
             .find_map(Council::from_event)
             .unwrap_or_else(Council::new)
+    }
+
+    /// The policies as the keyframe tick `base` left them. A log from before
+    /// policies has none, and the city starts with the usual hours and limits.
+    fn policy(&self, base: u32) -> Policy {
+        self.ticks[&base]
+            .first()
+            .into_iter()
+            .flatten()
+            .flat_map(|r| &r.events)
+            .find_map(Policy::from_event)
+            .unwrap_or_else(Policy::new)
     }
 
     /// The ticks some district has not committed yet, oldest first.
