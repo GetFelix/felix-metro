@@ -10,8 +10,8 @@ the ones already there.
 | ![The overlay at noon](screenshots/ui-shell-day.jpg?v=1)      | ![The settings sheet at night](screenshots/ui-settings-night.jpg?v=1)  |
 | **The key list**                                              | **A phone, looking at an earlier moment**                              |
 | ![The key list](screenshots/ui-keys-day.jpg?v=1)              | ![The overlay on a phone at night](screenshots/ui-phone-night.jpg?v=1) |
-| **Following a resident**                                      |                                                                        |
-| ![The follow card at noon](screenshots/ui-follow-day.jpg?v=1) |                                                                        |
+| **Following a resident**                                      | **The follow card on a phone**                                         |
+| ![The follow card at noon](screenshots/ui-follow-day.jpg?v=1) | ![The follow card on a phone](screenshots/ui-follow-phone.jpg?v=1)     |
 
 ## What you can do
 
@@ -147,7 +147,7 @@ flowchart LR
     PAN["Pan, reset or Esc"] -->|let go| FOLLOW
 ```
 
-The card is built once, and rebuilt only when what they are doing changes. It is placed before the city chip in the page
+The card's markup is built once, and its rows are redrawn only when what they are doing changes. It is placed before the city chip in the page
 so the city menu is never hidden behind it, and it is a `.chip`, so photo mode and `?ui=0` hide it. `Esc` is read in
 the capture phase, before photo mode and the sheet close themselves on the same key, so the press that leaves photo
 mode or closes the sheet does not also stop the follow (`isStopKey` is the rule, and it is unit tested).
