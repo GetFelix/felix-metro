@@ -12,6 +12,8 @@ use felix_metro_core::{
     TICKS_PER_HOUR, Trip,
 };
 
+pub(crate) use restore::Departure;
+
 /// Ticks between keyframes: one city hour.
 pub(crate) const KEYFRAME_EVERY: u32 = TICKS_PER_HOUR;
 
@@ -454,5 +456,6 @@ fn count_car(city: &City, cars: &mut [u16], trip: &Trip, tick: u32) {
     }
 }
 
+mod restore;
 #[cfg(test)]
 mod tests;

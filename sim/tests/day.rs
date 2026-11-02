@@ -8,8 +8,9 @@
 //! - `METRO_TEST_BROKER` (default `127.0.0.1:5000`), `METRO_TEST_SERVER_NAME`
 //!   (`localhost`), `METRO_TEST_CA_FILE`, `METRO_TEST_TOKEN_FILE` (required)
 //! - `METRO_TEST_TENANT` (`metro`), `METRO_TEST_NAMESPACE` (`default`) and
-//!   `METRO_TEST_CITY` (`harbor`, 2 by 2 districts) and `METRO_TEST_SPEED_CITY`
-//!   (`speedway`, also 2 by 2, for the speed test, which needs its own empty stream)
+//!   `METRO_TEST_CITY` (`harbor`, 2 by 2 districts), `METRO_TEST_SPEED_CITY`
+//!   (`speedway`, also 2 by 2, for the speed test) and `METRO_TEST_RESTART_CITY` (`phoenix`,
+//!   for the restart test). The speed and restart tests each need an empty stream of their own.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -17,7 +18,8 @@ use std::sync::Arc;
 use felix_metro_core::record::{Doing, Event, TickRecord};
 use felix_metro_core::{City, TICKS_PER_DAY};
 use felix_metro_sim::{
-    Connection, FelixLog, Settings, connect, district_keys, events_stream, run_city, state_at,
+    Connection, FelixLog, Settings, connect, district_keys, events_stream, load_history, run_city,
+    state_at,
 };
 use felix_metro_sim::{Log, Write};
 use std::time::Duration;
@@ -311,6 +313,27 @@ impl Log for Steered {
     async fn read(&self, district: u16, offset: u64) -> anyhow::Result<Option<Vec<u8>>> {
         self.inner.read(district, offset).await
     }
+
+    async fn keyframe(&self, district: u16) -> anyhow::Result<Option<u64>> {
+        self.inner.keyframe(district).await
+    }
+
+    async fn read_from(
+        &self,
+        district: u16,
+        offset: u64,
+        max: u32,
+    ) -> anyhow::Result<Vec<(u64, Vec<u8>)>> {
+        self.inner.read_from(district, offset, max).await
+    }
+
+    async fn commands(
+        &self,
+        from: u64,
+        until: u64,
+    ) -> anyhow::Result<Vec<felix_metro_sim::Incoming>> {
+        self.inner.commands(from, until).await
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -413,6 +436,110 @@ async fn a_city_runs_through_pause_and_every_speed_with_no_gap() {
         assert!(
             wall(39) - wall(33) >= 1_000_000,
             "district {district}: ticks 33 to 39 at 4 Hz"
+        );
+    }
+}
+
+/// Every record of a city's event stream, by district.
+async fn read_city(
+    client: &felix_client::ClusterClient,
+    connection: &Connection,
+    stream: &str,
+) -> HashMap<u16, Vec<(u64, TickRecord)>> {
+    let mut by_district: HashMap<u16, Vec<(u64, TickRecord)>> = HashMap::new();
+    for shard in 0..DISTRICTS as u32 {
+        let mut from = 0;
+        loop {
+            let page = client
+                .read(
+                    &connection.tenant,
+                    &connection.namespace,
+                    stream,
+                    shard,
+                    from,
+                    None,
+                    1000,
+                )
+                .await
+                .unwrap();
+            if page.records.is_empty() {
+                break;
+            }
+            for record in &page.records {
+                let tick = TickRecord::decode(&record.payload).expect("a tick record");
+                by_district
+                    .entry(tick.header.district)
+                    .or_default()
+                    .push((record.offset, tick));
+            }
+            from = page.next_offset;
+        }
+    }
+    by_district
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs a Felix broker; CI runs it"]
+async fn a_city_started_again_carries_on_from_its_log() {
+    let connection = connection();
+    let city_name = var("METRO_TEST_RESTART_CITY").unwrap_or_else(|| "phoenix".into());
+    let stream = events_stream(&city_name);
+    let client = Arc::new(connect(&connection).await.expect("connect to Felix"));
+    let settings = |stop| Settings {
+        paced: false,
+        stop_at: Some(stop),
+        ..Settings::default()
+    };
+    let open = || async {
+        FelixLog::open(Arc::clone(&client), &connection, &city_name, DISTRICTS)
+            .await
+            .expect("open the city's stream")
+    };
+    let city = || City::generate(&city_name, DISTRICTS_PER_SIDE).unwrap();
+
+    // Not a keyframe tick, so the restart has hours of the city to replay.
+    let stopped = 1925;
+    let done = run_city(&city_name, city(), settings(stopped), open().await)
+        .await
+        .expect("the first run");
+    assert_eq!(done.ticks, stopped);
+    let log = open().await;
+    assert!(
+        load_history(&log, DISTRICTS, &settings(0))
+            .await
+            .unwrap()
+            .is_some()
+    );
+
+    let total = 2500;
+    let done = run_city(&city_name, city(), settings(total), log)
+        .await
+        .expect("the run over the first one's log");
+    assert_eq!(done.ticks, total);
+
+    let records = read_city(&client, &connection, &stream).await;
+    assert_eq!(records.len(), DISTRICTS);
+    for district in 0..DISTRICTS as u16 {
+        let rows = &records[&district];
+        assert_eq!(rows.len(), total as usize, "district {district}");
+        for (i, (offset, record)) in rows.iter().enumerate() {
+            assert_eq!(*offset, i as u64, "district {district} offsets are dense");
+            assert_eq!(
+                record.header.tick, i as u32,
+                "district {district}: no tick repeated or missing"
+            );
+            assert_eq!(record.header.epoch, 0);
+        }
+    }
+    // The city after the restart is the city a run with no restart reaches.
+    let newest = (total - 1) / 240 * 240;
+    let expected = state_at(city(), newest);
+    for (district, rows) in &records {
+        let frame = rows[newest as usize].1.keyframe.as_ref().unwrap();
+        assert_eq!(
+            frame,
+            &expected[usize::from(*district)],
+            "district {district}"
         );
     }
 }
