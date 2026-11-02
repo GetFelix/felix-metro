@@ -38,6 +38,9 @@ import { createSound } from './ui/sound';
 import { createSoundscape } from './soundscape';
 import { intoThePast, startsRewind, whooshDue } from './soundscape-mix';
 import { createStatus, type Status } from './ui/status';
+import { createBuildBar } from './ui/build-bar';
+import { Placement, type CommandLink } from './placement';
+import { createPlacementView } from './placement-view';
 import { note, toast } from './ui/toast';
 import { councilView, fitCouncil, renderCouncil, TALL_SCREEN, type CouncilEvent } from './council';
 import { policyRows, USUAL_POLICY, type PolicyEvent } from './policy';
@@ -158,6 +161,31 @@ declare global {
       /** Draw the frame at video time `tMs` and say what is in it. */
       frame(tMs: number): Promise<CaptureFrame>;
     };
+    /** The building tools, for the CI checks and the console: what is held, what the pointer would do, and where lots are on screen. */
+    __build?: {
+      state(): {
+        tool: string | null;
+        kind: number;
+        /** Why the tools cannot be used now, or null. */
+        unavailable: string | null;
+        /** The lot under the pointer and whether the tool would take it. */
+        preview: { lot: number; ok: boolean; why: string | null } | null;
+        /** Commands sent and not yet answered, and what the panel says. */
+        pending: number;
+        /** Commands answered so far, by the city or by the page turning one away, and commands sent. */
+        answered: number;
+        sent: number;
+        status: string;
+      };
+      /** The lots set aside for builders. */
+      development(): number[];
+      /** The kind standing on a lot in the live city, or null. */
+      kindOn(lot: number): number | null;
+      /** Where a lot's middle is on the canvas, or null when it is out of view. */
+      screenOf(lot: number): { x: number; y: number } | null;
+      /** Put the camera over a lot. */
+      focus(lot: number): void;
+    };
     /** Following a resident, for the CI checks and the console; absent where there is no city. */
     __following?: {
       /** The resident followed, or null. */
@@ -209,7 +237,7 @@ async function follow(
   status: Status,
   loader: Loader,
   trace: boolean,
-): Promise<{ state: CityState; link: Link } | null> {
+): Promise<{ state: CityState; link: Link; commands: CommandLink } | null> {
   const url = gateway ?? `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`;
   const state = new CityState(city, metro, districts * districts);
   const link: Link = { down: false };
@@ -245,7 +273,7 @@ async function follow(
   addEventListener('pageshow', (e) => {
     if (e.persisted) location.reload();
   });
-  return live.refused ? null : { state, link };
+  return live.refused ? null : { state, link, commands: live.commands };
 }
 
 /** Where the gateway is and how to sign in to it, or `null` when nothing here answers like one. */
@@ -369,6 +397,8 @@ async function main() {
   let city: City | null = null;
   let state: CityState | null = null;
   let link: Link = { down: false };
+  /** How commands leave the page, once the live connection exists. */
+  let commands: CommandLink | null = null;
   /** The tick the city is held at when it was opened in the past, with no live connection. */
   let pastTick: number | null = null;
   let seekDone = 0;
@@ -394,6 +424,10 @@ async function main() {
   let hasLive = false;
   /** Draws the bar and the past pill from the tick on screen; set once the page can scrub. */
   let timelineFrame: ((tick: number) => void) | null = null;
+  /** Keeps the building tools in step with the pointer and the page; set when there are tools. */
+  let placementFrame: (() => void) | null = null;
+  /** Whether a building tool is in hand, when a click on the city is the tool's and not a follow's. */
+  let toolHeld: () => boolean = () => false;
   /** Resolves when no scrub seek is waiting or running; the clip job draws a frame only after it. */
   let scrubSettled: () => Promise<void> = async () => {};
   /** Moves a playback on and says which tick it draws, or null when nothing is playing. */
@@ -446,6 +480,7 @@ async function main() {
       const joined = await follow(city, new Metro(seed, districts), seed, districts, gateway, status, loader, trace);
       state = joined?.state ?? null;
       link = joined?.link ?? link;
+      commands = joined?.commands ?? null;
       if (!joined) for (let d = 0; d < districts * districts; d++) loader.ready(d);
     }
   }
@@ -460,8 +495,21 @@ async function main() {
   /** The city's residents as core describes them, made when first asked: a page with no log and no follow never builds it. */
   let residentsMetro: Metro | null = null;
   const residents = () => (residentsMetro ??= new Metro(seed, districts));
-  const { scene, construction, ambient, cars, people, glows, setTime, setShadows, fleet, pick, setLot } =
-    await createCity(renderer, quality.tier, city, state !== null, drawn);
+  const {
+    scene,
+    construction,
+    ambient,
+    cars,
+    people,
+    glows,
+    setTime,
+    setShadows,
+    fleet,
+    pick,
+    setLot,
+    lots,
+    previewBuilding,
+  } = await createCity(renderer, quality.tier, city, state !== null, drawn);
   const hud = showHud ? createHud(renderer, quality) : null;
 
   // A tier change rebuilds the post chain; shadows and resolution follow the same settings.
@@ -1166,6 +1214,64 @@ async function main() {
     };
     if (hooks) window.__metro = metroHooks;
   }
+  if (shell && city && layout === 'city') {
+    const lotsOf = city.lots;
+    const placement = new Placement({
+      ground: () => ({ city: city!, built: liveState?.built ?? new Map() }),
+      link: commands,
+      // The live city is on screen only when the page is not in, or going to, an earlier moment.
+      atTip: () => liveState !== null && state === liveState && pastTick === null && scrubTarget === null,
+      wantsLive: wantLive,
+      facing: (lot) => lotsOf[lot]?.facing ?? 0,
+    });
+    toolHeld = () => placement.tool !== null;
+    const bar = createBuildBar(shell.tools, placement, () => shell.isOpen);
+    if (liveState) liveState.onCommand = (e) => placement.result(e.id, e.result);
+    const view = liveState
+      ? createPlacementView({
+          dom: renderer.domElement,
+          camera,
+          scene,
+          city,
+          placement,
+          ground: () => ({ city: city!, built: liveState.built }),
+          lots,
+          previewBuilding,
+        })
+      : null;
+    placementFrame = () => {
+      bar.sync();
+      view?.update();
+    };
+    if (hooks && view) {
+      window.__build = {
+        state: () => {
+          const preview = placement.preview();
+          return {
+            tool: placement.tool,
+            kind: placement.kind,
+            unavailable: placement.unavailable(),
+            preview: preview && {
+              lot: preview.lot,
+              ok: preview.check.ok,
+              why: preview.check.ok ? null : preview.check.why,
+            },
+            pending: placement.pending,
+            answered: placement.answered,
+            sent: placement.sent,
+            status: placement.status.state === 'idle' ? '' : placement.status.text,
+          };
+        },
+        development: () => [...city!.development],
+        kindOn: (lot) => liveState?.built.get(lot)?.kind ?? lotsOf[lot]?.kind ?? null,
+        screenOf: (lot) => view.screenOf(lot),
+        focus: (lot) => {
+          const [x, z] = lots.centre(lot);
+          controls.moveTo({ x, z }, 9, Math.PI / 4, 0.9, { ease: false });
+        },
+      };
+    }
+  }
   const dom = renderer.domElement;
   const card = shell ? createFollowCard(() => following?.stop()) : null;
   const following = city
@@ -1217,10 +1323,12 @@ async function main() {
       });
       bindTap(dom, {
         tap: ({ at, touch }) => {
+          if (toolHeld()) return;
           const hit = find(at, touch ? 28 : 16);
           if (hit) startFollow(hit.resident);
         },
         hover: (at) => {
+          if (toolHeld()) return;
           dom.style.cursor = at && find(at, 16) ? 'pointer' : '';
         },
       });
@@ -1333,6 +1441,7 @@ async function main() {
         });
       }
     }
+    placementFrame?.();
     // A few times a second is plenty for numbers a person reads.
     if (stats?.on && now - statsAt >= 250) {
       statsAt = now;

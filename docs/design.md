@@ -823,6 +823,49 @@ page starts from is drawn finished.
 Building is only allowed at the live tip. A builder who scrubs back sees the
 past read-only, and building there means forking.
 
+### The page's building tools
+
+The page sends `build` and `demolish`; it does not send `place road` or `zone` yet. A tool is picked from the
+overlay (`web/src/ui/build-bar.ts`), the lot under the pointer is found by `web/src/placement-view.ts`, and
+`web/src/placement.ts` decides whether the command may go and sends it. [The overlay page](ui.md#the-building-tools)
+describes the pieces; this is what they rely on.
+
+- **Only at the live tip.** The tools are off unless the page is showing the live city. That means no earlier moment
+  and no scrub in flight, a live connection, and a session that may publish. A sign-in without the right still joins
+  the city: the gateway lists the command stream among the `missing` resources of its `hello`, and the page reads
+  the tools' state from that. Going back in time puts a held tool away.
+- **The sim's own rules, ahead of the sim.** The page offers bare lots of the development area to `build` and the
+  buildings on them to `demolish`, and turns away anything else with a reason in words, without sending. The sim
+  refuses more than that (a home, a workplace and a park that residents go to), but it can only know which lots those
+  are by running every resident's schedule, which the page does not. The development area is exactly the lots none of
+  them use, so the page's rules are never looser than the sim's. A refusal that gets past anyway comes back as a result
+  code (`web/src/build.ts` has the sentence for each).
+- **Sent as a record, answered by an event.** The record is the one in the table above, published to the gateway's
+  `commands` alias with `ack`. The acknowledgement says Felix has the record, not that the sim applied it. The answer is
+  the `command` event the live state hands out as it takes records, matched on the command id, which the page draws at
+  random (the event's principal is a hash of the sign-in's subject, which the page does not know). Until the event
+  arrives the lot is held, so a second click does not send a second command. After 20 seconds with no event
+  the page says so and frees the lot; the command may still go through.
+- **The ghost is the page's.** It is drawn from the tool's building, rotation and lot and is never part of the city's state: a
+  building appears only when the `built` event arrives, and then rises in its scaffold like anyone's.
+  A building faces its street until the builder turns it (`R`), because a lot's `facing` is the way its door opens.
+
+#### What roads and zones need
+
+Neither is a small step from here, which is why they are a separate change:
+
+- **Roads.** `place road` names two nodes, and a road changes the graph every route is built from. The sim must add the
+  segment to its graph, replan any resident whose route could now be shorter (and any whose route crossed a segment that
+  went), and record it with the `road` event, which the format has, and the keyframe's road list, which `CityState`
+  already reads. The page also routes from its own copy of the generated city: core's `Metro` matches a `trip` event's legs
+  against the resident's route in that copy, so a leg on an added segment resolves to nothing and the trip is dropped.
+  The copy has to learn the changed graph, from `CityState.roads`, before a road can carry a trip. The tool also needs
+  a way to pick two nodes and a ghost for a segment.
+- **Zones.** `zone` carries a lot and a zone number, but no record has a field for a lot's zone, so there is nothing
+  for a `zoned` change to be written to or a keyframe to list. The zone also decides which lots count as homes, shops,
+  offices and factories when residents' days are made, so the sim must say what a new zone does to the lots already
+  built on it and to the schedules that send people there.
+
 ## Branching
 
 A fork is a new city whose name records its parent and fork tick

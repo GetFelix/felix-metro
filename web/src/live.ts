@@ -1,12 +1,16 @@
 // The live connection: signs in, follows every district of the city through the gateway and feeds its records to the
 // city's state.
 import { signIn, type Oidc } from './auth';
+import { nameFrom } from './build';
 import type { CityState, TickRecord } from './city';
 import { decodeRecord } from './core/felix_metro_core.js';
 import { Gateway, GatewayError, RETRY_MS, type EventFrame } from './gateway';
+import type { CommandLink } from './placement';
 import { Registry, type CityEntry } from './registry';
 
 const STREAM = 'events';
+/** The alias of the city's command stream. A sign-in with no right to publish to it joins without it. */
+const COMMANDS = 'commands';
 
 export type Status = 'live' | 'reconnecting';
 
@@ -255,17 +259,31 @@ export async function follow(
  */
 export async function connectLive(
   options: LiveOptions,
-): Promise<{ connected: boolean; refused: boolean; close(): void }> {
+): Promise<{ connected: boolean; refused: boolean; commands: CommandLink; close(): void }> {
   const { url, oidc, city, state, onStatus, onRefused, onDistrict, onCities } = options;
   let closed = false;
   let current: Gateway | null = null;
   const feeds = createFeeds(state);
+  /** The session that has caught up, which commands go out through. */
+  let sender: Gateway | null = null;
+  let who = nameFrom('');
+  const commands: CommandLink = {
+    get name() {
+      return who;
+    },
+    blocked: () => (!sender?.alive ? 'down' : sender.missing.includes(COMMANDS) ? 'viewer' : null),
+    async send(record) {
+      if (!sender?.alive) throw new GatewayError('closed', 'the city is out of reach');
+      await sender.publish(COMMANDS, record);
+    },
+  };
   const registry = new Registry(onCities);
   const pause = (attempt: number) =>
     new Promise((r) => setTimeout(r, RETRY_MS[Math.min(attempt, RETRY_MS.length - 1)]));
 
   const session = async () => {
     const token = await signIn(oidc);
+    who = nameFrom(token);
     const gateway = await Gateway.connect(url, city, token);
     current = gateway;
     let end = () => {};
@@ -290,6 +308,10 @@ export async function connectLive(
       throw err;
     }
     void registry.attach(gateway);
+    sender = gateway;
+    void ended.then(() => {
+      if (sender === gateway) sender = null;
+    });
     onStatus?.('live');
     return { ended };
   };
@@ -323,6 +345,7 @@ export async function connectLive(
     void browse();
   };
   const handle = {
+    commands,
     close() {
       closed = true;
       current?.close();
