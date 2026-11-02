@@ -5,7 +5,7 @@ import { createHud } from './ui/hud';
 import { hintDue } from './ui/hint';
 import { ATTRACT_RATE, createAttract } from './attract';
 import { momentLink } from './moments';
-import { createPhoto } from './ui/photo';
+import { PHOTO_CLASS, createPhoto } from './ui/photo';
 import { createShare } from './ui/share';
 import { isPlayKey } from './ui/keys';
 import { parseParams, type Tier } from './params';
@@ -29,6 +29,9 @@ import { agoText, createGuess, createTimeline, moveRange, stepTick, clampTick, t
 import { createLoader, type Loader } from './ui/loader';
 import { createPicker } from './ui/picker';
 import { createShell, type Shell } from './ui/shell';
+import { createSound } from './ui/sound';
+import { createSoundscape } from './soundscape';
+import { intoThePast, startsRewind, whooshDue } from './soundscape-mix';
 import { createStatus, type Status } from './ui/status';
 import { note, toast } from './ui/toast';
 import { displayName } from './registry';
@@ -317,6 +320,25 @@ async function main() {
   const quality = createQuality({ url: urlTier, still, onChange: (t) => apply(t) });
   // The capture job needs the page as it draws, with nothing to dismiss, so it gets no controls and no tip.
   const shell = ui && !capture && layout === 'city' ? createShell(quality) : null;
+  // The sound has no audio context until its button is first used, and none at all without the button.
+  const soundscape = createSoundscape();
+  const sound = shell
+    ? createSound(
+        soundscape,
+        shell.tools,
+        // The message would wait unseen under photo mode and show up after it.
+        (text) => document.body.classList.contains(PHOTO_CLASS) || note(text),
+        () => shell.isOpen,
+      )
+    : null;
+  let lastWhoosh: number | null = null;
+  /** The rewind sweep, at most once in a while however often a rewind is asked for. */
+  const whoosh = () => {
+    const now = performance.now();
+    if (!soundscape.on || !whooshDue(lastWhoosh, now)) return;
+    lastWhoosh = now;
+    sound?.whoosh();
+  };
 
   const renderer = createRenderer(quality.tier);
   let city: City | null = null;
@@ -460,10 +482,12 @@ async function main() {
   slider.value = String(hour);
   slider.addEventListener('input', () => {
     hour = parseFloat(slider.value);
+    soundscape.setHour(hour);
     setTime(hour, post!.bloom);
   });
   post = createPost(renderer, scene, camera, passesFor(quality.tier), glows);
   setTime(hour, post.bloom);
+  soundscape.setHour(hour);
 
   addEventListener('visibilitychange', () => quality.restartWindow());
 
@@ -718,7 +742,7 @@ async function main() {
      * Apply a J, K or L press from the past on screen: a playback is opened if there is none, and its rate and direction
      * follow the key. Rewinding does not need records from the session, but going forward again does.
      */
-    const shuttleBy = async (key: ShuttleKey): Promise<boolean> => {
+    const shuttleBy = async (key: ShuttleKey, quiet = false): Promise<boolean> => {
       if (!canToggle()) return false;
       let p = playback;
       if (!p) {
@@ -728,6 +752,7 @@ async function main() {
         p.paused = true;
       }
       const next = shuttle({ rate: p.rate, paused: p.paused }, key);
+      if (!quiet && startsRewind(p, next)) whoosh();
       p.rate = next.rate;
       p.paused = next.paused;
       if (next.paused) readAhead();
@@ -760,7 +785,12 @@ async function main() {
         refreshing.busy = false;
       }
     };
+    /** A scrub into the past is waiting to be shown, and then plays the whoosh. */
+    let whooshOnShown = false;
+    /** The drag in progress has already asked for its whoosh. */
+    let dragWhooshed = false;
     const goLive = () => {
+      whooshOnShown = false;
       scrubLatest.cancel();
       scrubTarget = null;
       if (!hasLive) {
@@ -847,6 +877,8 @@ async function main() {
         try {
           place(result);
           resumeFrom = null;
+          if (whooshOnShown) whoosh();
+          whooshOnShown = false;
         } catch (err) {
           // The state on screen may be half drawn; the next seek starts from a fresh one.
           shownResult = null;
@@ -854,6 +886,7 @@ async function main() {
           throw err;
         }
       } catch (err) {
+        whooshOnShown = false;
         if (!current()) return keepPlayable();
         keepPlayable();
         note(whyNot(err));
@@ -867,7 +900,7 @@ async function main() {
     scrubSettled = () => scrubLatest.settled();
     /** Where the handle is, to step from: the target if one is on its way. */
     const handleAt = () => scrubTarget ?? pastTick ?? Math.floor(liveState!.latest);
-    const go = (tick: number, moving: boolean) => {
+    const go = (tick: number, moving: boolean, repeat = false) => {
       if (!range) return;
       // A drag is judged against the bar it began on, so releasing at its right end goes live however far the tip moved.
       const bounds = moveRange(bar.held, range, tipTick());
@@ -875,6 +908,11 @@ async function main() {
       const to = clampTick(bounds, tick);
       // The tip is the live city: a step or a release within a city minute of it is going back to it.
       if (hasLive && !moving && to >= tip - LIVE_SNAP_TICKS) return goLive();
+      // The whoosh waits for the seek to show something, so a seek that fails is silent. A drag or a held key makes one.
+      if (intoThePast(handleAt(), to) && !repeat && !(moving && dragWhooshed)) {
+        whooshOnShown = true;
+        dragWhooshed = moving;
+      }
       stopPlayback();
       cancelAhead();
       scrubTarget = to;
@@ -889,13 +927,16 @@ async function main() {
       // A drag or another step since stops playbacks, which moves the mark; then the rewind is no longer wanted.
       const mark = playMark;
       await scrubLatest.settled();
-      if (mark === playMark && scrubTarget === null && pastTick !== null) await shuttleBy('j');
+      if (mark === playMark && scrubTarget === null && pastTick !== null) await shuttleBy('j', true);
     };
     let refresher: ReturnType<typeof setInterval> | null = null;
     const bar = createTimeline(document.getElementById('scrub')!, {
-      onMove: (tick, phase) => go(tick, phase === 'drag'),
-      onStep: (direction, big) => {
-        if (range) go(stepTick({ oldest: range.oldest, newest: tipTick() }, handleAt(), direction, big), false);
+      onMove: (tick, phase) => {
+        go(tick, phase === 'drag');
+        if (phase !== 'drag') dragWhooshed = false;
+      },
+      onStep: (direction, big, repeat) => {
+        if (range) go(stepTick({ oldest: range.oldest, newest: tipTick() }, handleAt(), direction, big), false, repeat);
       },
       onLive: goLive,
       // Reaching for the bar is what reads the span, once; the history sessions are not opened for a viewer who never does.
@@ -1129,6 +1170,7 @@ async function main() {
         const time = cityTime(scrubTarget ?? tick);
         if (frozenHour === null && !(Math.abs(time.hour - shownHour) <= 0.004)) {
           shownHour = hour = time.hour;
+          soundscape.setHour(hour);
           setTime(hour, post!.bloom);
           day.textContent = `Day ${time.day}`;
         }
@@ -1273,7 +1315,7 @@ async function main() {
     createPhoto(() => shell.isOpen);
     // Nothing to share where no gateway feeds the page: the link opens a past tick through it.
     if (wantLive && (hasLive || pastTick !== null))
-      createShare(() => {
+      createShare(shell.tools, () => {
         const tick = scrubTarget ?? liveInfo?.tick;
         if (tick === undefined || Number.isNaN(tick)) return null;
         // The clock coasts past the newest record while the connection is down; the log has nothing there to open.
