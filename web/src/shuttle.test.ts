@@ -99,6 +99,8 @@ describe('shuttleKey', () => {
     expect(key('k', { target: { tagName: 'textarea' } })).toBeNull();
     expect(key('k', { target: { tagName: 'DIV', isContentEditable: true } })).toBeNull();
     expect(key('k', { target: { tagName: 'BUTTON' } })).toBe('k');
+    // A range or checkbox takes no typed text, so the keys still work with one focused.
+    expect(key('k', { target: { tagName: 'INPUT', type: 'range' } })).toBe('k');
   });
 });
 

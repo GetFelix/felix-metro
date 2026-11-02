@@ -43,13 +43,14 @@ export const SHORTCUTS: readonly ShortcutGroup[] = [
   },
   {
     title: 'Playback',
-    when: 'Looking at an earlier moment. Space does nothing while a button is focused.',
+    when: 'Looking at an earlier moment, or J from the live city. Space does nothing while a button is focused.',
     rows: [
       { keys: [['Space']], action: 'Play or pause an earlier moment' },
-      { keys: [['L']], action: 'Play forward, and double the speed on each press (up to 8x)' },
+      { keys: [['L']], action: 'Play forward; each press doubles the speed (up to 8x), or slows a rewind' },
       {
         keys: [['J']],
-        action: 'Rewind, and double the speed on each press (up to 8x); from the live city, step back and rewind',
+        action:
+          'Rewind; each press doubles the speed (up to 8x), or slows a forward play; from the live city, step back first',
       },
       { keys: [['K']], action: 'Stop' },
     ],

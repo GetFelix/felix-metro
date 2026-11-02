@@ -1,6 +1,8 @@
 // The J, K and L keys. They move along one ladder of rates, the way an editing suite's shuttle does: L goes faster
 // forward, J goes slower or backward, K stops. A negative rate plays the past backwards.
 
+import { isTypingTarget } from './ui/keys';
+
 /** Playback rates, in multiples of the city's own speed; negative rewinds, 0 is stopped. */
 export const RATES = [-8, -4, -2, -1, 0, 0.5, 1, 2, 4, 8] as const;
 
@@ -37,9 +39,7 @@ export function shuttleKey(e: {
   target?: EventTarget | null;
 }): ShuttleKey | null {
   if (e.ctrlKey || e.metaKey || e.altKey) return null;
-  const target = e.target as { tagName?: string; isContentEditable?: boolean } | null | undefined;
-  const tag = target?.tagName?.toUpperCase();
-  if (target?.isContentEditable || tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return null;
+  if (isTypingTarget(e.target as Parameters<typeof isTypingTarget>[0])) return null;
   const key = e.key.toLowerCase();
   return key === 'j' || key === 'k' || key === 'l' ? key : null;
 }

@@ -19,7 +19,7 @@ export interface Status {
   playHidden(hidden: boolean): void;
   /** How long ago the moment on screen was. */
   ago(text: string): void;
-  /** The pace when it is not plain 1x forward, such as `2x` or `rewind 4x`; empty hides it. */
+  /** The pace when it is not plain 1x forward, such as `2x` or `Rewind 4x`; empty hides it. */
   rate(text: string): void;
   onPlay(cb: () => void): void;
   onBackToLive(cb: () => void): void;
