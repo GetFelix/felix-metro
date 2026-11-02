@@ -12,7 +12,7 @@
 // docs/design.md, so it needs no wasm build. It reads the events of keyframe records too, and the
 // check fails when a command's result never shows up. Between the build and the
 // demolish it waits for the district's next keyframe, which must list the lot.
-import { APPLIED, OCCUPIED, UNKNOWN, UNSUPPORTED, build, commandBytes, demolish, joined, placeRoad, sleep } from "./lib/gateway.mjs";
+import { APPLIED, OCCUPIED, UNKNOWN, UNSUPPORTED, build, commandBytes, decodeMarkers, demolish, joined, placeRoad, sleep } from "./lib/gateway.mjs";
 
 const city = process.argv[2] ?? process.env.CHECK_CITY ?? "pinecrest";
 const NAME = "check-commands";
@@ -73,6 +73,28 @@ const cases = [
   });
 }
 
+// The timeline's markers: the day's list, kept in district 0's state, names the build, and who made it. The refused
+// build of the same lot left nothing. District 0 commits the tick on its own, so the list can trail the command's
+// result by a moment.
+const MARK_BUILT = 1;
+const MARK_DEMOLISHED = 2;
+const markersOf = async (tick, type, lot) => {
+  const deadline = Date.now() + 20_000;
+  for (;;) {
+    const bytes = await mayor.stateGet(`markers.${Math.floor(tick / 5760)}`);
+    const found = bytes && decodeMarkers(bytes)?.markers.filter((m) => m.type === type && m.subject === lot);
+    if (found?.length || Date.now() > deadline) return found ?? [];
+    await sleep(300);
+  }
+};
+{
+  const found = await markersOf(built.command.record.tick, MARK_BUILT, built.lot);
+  if (found.length !== 1) fail(`the day's markers hold ${found.length} builds of lot ${built.lot}, wanted 1`);
+  if (found[0].tick !== built.command.record.tick) fail(`the marker is at tick ${found[0].tick}, the build at ${built.command.record.tick}`);
+  if (found[0].by !== NAME) fail(`the marker names "${found[0].by}", wanted "${NAME}"`);
+  console.log(`${city}: the day's markers name the build of lot ${built.lot} at tick ${found[0].tick}, by ${found[0].by}`);
+}
+
 // The district's next keyframe shows the build: it is a diff against the generated city, so the lot must be listed.
 {
   const district = built.command.record.district;
@@ -95,6 +117,9 @@ const cases = [
     if (e.result !== APPLIED) fail(`demolishing lot ${lot}: result ${e.result}`);
     if (!e.record.events.some((x) => x.type === "demolished" && x.lot === lot)) fail(`lot ${lot}: no demolished event`);
   }
+  const last = taken.at(-1);
+  const found = await markersOf(seen.get(3000 + last).record.tick, MARK_DEMOLISHED, last);
+  if (found.length !== 1 || found[0].by !== NAME) fail(`the day's markers do not name the demolition of lot ${last}: ${JSON.stringify(found)}`);
 }
 mayor.close();
 console.log(`${city}: commands applied, attributed and refused as expected`);

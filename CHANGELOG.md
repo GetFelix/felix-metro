@@ -13,6 +13,12 @@
 
 ### Added
 
+- Timeline markers: a row of buttons above the timeline marks the rush hours (08:00 and 17:15 each day) and every
+  building a builder put up or took down, with their name. A click seeks to the moment; marks too close together
+  share one numbered button, and clicking it again goes to the next moment in it. The row is a toolbar of its own with
+  an accessible name on every button. The sim writes each city day's builder markers to the events stream's state
+  (`markers.<day>`, a new record kind 5 in district 0's shard), in the same commit as the tick that made the change;
+  tick records and their headers are unchanged. A city with no markers stored reads as before.
 - Moments: a **Share this moment** button copies a link such as `/?at=<tick>&cam=<x,z,distance,azimuth,polar>#harbor`
   that opens the city at that tick from that camera view (`?cam` is new). `H` is photo mode and hides every control.
   A page left alone for 60 seconds turns the camera slowly (`?attract=<seconds>`, `0` turns it off).

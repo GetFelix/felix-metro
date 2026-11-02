@@ -5,6 +5,7 @@ pub mod commands;
 pub mod control;
 pub mod felix;
 mod latency;
+pub mod markers;
 pub mod registry;
 mod resume;
 pub mod runner;
@@ -13,6 +14,7 @@ mod world;
 pub use commands::{Incoming, commands_stream, follow as follow_commands};
 pub use control::{SPEEDS, StartRequest, check_speed, serve as serve_speed_control};
 pub use felix::{Connection, FelixLog, connect, events_stream};
+pub use markers::Marked;
 pub use registry::{REGISTRY_STREAM, announce, announce_later};
 pub use resume::History;
 pub use runner::{

@@ -349,6 +349,10 @@ export function createTimeline(root: HTMLElement, handlers: TimelineHandlers) {
     get dragging() {
       return dragging;
     },
+    /** The scale the bar is drawn on: the held one during a drag, else the latest. */
+    get span(): Span {
+      return hold.current;
+    },
     /** The span a drag in progress began with, or null. A release is judged against this, not the span now. */
     get held() {
       return hold.held;

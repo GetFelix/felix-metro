@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { beforeAll, describe, expect, it } from 'vitest';
+import { parseMarkers } from './markers';
 import { Metro, decodeRecord, hash as cityHash, initSync, residentDayHash } from './core/felix_metro_core.js';
 
 const built = (name: string) => readFileSync(new URL(`./core/${name}`, import.meta.url));
@@ -86,7 +87,7 @@ describe('trips in WebAssembly', () => {
 describe('records in WebAssembly', () => {
   it('decodes every native record to the same JSON text', () => {
     const names = fixture.records.map((r) => r.name);
-    for (const name of ['tick', 'keyframe', 'command', 'registry']) expect(names).toContain(name);
+    for (const name of ['tick', 'keyframe', 'command', 'registry', 'markers']) expect(names).toContain(name);
     for (const { record, json, hash } of fixture.records) {
       const text = decodeRecord(bytes(record));
       expect(fnv1a(text)).toBe(hash);
@@ -100,6 +101,17 @@ describe('records in WebAssembly', () => {
     expect(key).toMatchObject({ kind: 'tick', tick: 240, keyframeOffset: 8192 });
     expect(key.keyframe.buildings).toHaveLength(2);
     expect(key.keyframe.counts).toEqual({ home: 120, atWork: 80, onRoad: 14, asleep: 6 });
+  });
+
+  it('reads a day of timeline markers the way the page labels them', () => {
+    const { record } = fixture.records.find((r) => r.name === 'markers')!;
+    expect(parseMarkers(bytes(record))).toEqual({
+      day: 1,
+      markers: [
+        { tick: 5900, kind: 'built', label: 'Mara built a building' },
+        { tick: 7100, kind: 'road', label: 'A road was closed' },
+      ],
+    });
   });
 
   it('refuses truncated bytes and unknown kinds', () => {

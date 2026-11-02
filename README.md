@@ -13,6 +13,8 @@ and play forward from there.
 > - Opening the city at an earlier moment works: `/?at=<tick>#harbor` draws it there, paused.
 > - The timeline bar scrubs the city back through the hours it still holds. It spans at least one city day, with the
 >   part after the live head dimmed. Drag the handle, or step with `←` and `→` (`Shift` for an hour).
+> - Small marks above the timeline show the rush hours and every building a builder put up or took down; click one to
+>   go there. Marks too close together share one numbered mark.
 > - A settings button under the clock chooses the quality (Automatic, High, Medium or Low), `?` lists every key and a
 >   hint on a first visit points at the timeline ([docs/ui.md](docs/ui.md)).
 > - Space plays forward from an earlier moment at the city's speed, and `J`, `K` and `L` rewind, stop and speed it up
@@ -37,7 +39,7 @@ and play forward from there.
 
 - Look around the city: turn, tilt, slide and zoom with a mouse, trackpad, touch or the keyboard (see [Camera controls](#camera-controls))
 - Watch a generated city go about its day in 3D: residents commute, shop and go home, and the sun rises and sets. Rush hour at 08:00 and 17:15 puts about 23 to 29 cars and 24 to 36 walkers on the streets of the busiest district, and about 70 cars and 70 walkers across the harbor city at 2 by 2 (522 residents; `cargo run --release -p felix-metro-core --example density -- harbor 2` prints the counts). The log is small: extrapolated to 20,000 residents in 16 districts (nothing that size has run), it averages 5.1 KB/s over a day and writes 9.96 KB/s in the busiest minute of the rush, just under the 10 KB/s goal, at 4 ticks a second. That is scaled from the measured harbor city of 522 residents in 4 districts, which averages 449 B/s, and from a city of 5,568 residents. The figure counts a record header of 22 bytes, the most it reaches (it is 16 on a young log). `cargo test -p felix-metro-sim --release report_load -- --ignored --nocapture` prints it, and `docs/design.md` has the arithmetic.
-- Drag the timeline back to any moment the log holds and see the city exactly as it was
+- Drag the timeline back to any moment the log holds and see the city exactly as it was, or click a mark for a rush hour or a build to go straight to it
 - Let go and watch it play forward and catch up to live, or rewind an evening and watch it run backwards
 - Follow one resident or car through their day
 - Place roads, zones and buildings, with every change recorded with who made it
@@ -93,7 +95,7 @@ connection, so a page opened with `?at` cannot play or rewind.
 | --- | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 0   | The look, locked    | In progress: style frame, assets, daylight, post-processing, quality tiers, the UI shell (settings sheet, key list, first-visit hint, rolling clock), camera controls, instanced traffic and ambient life done                                                                |
 | 1   | A live city         | Done                                                                                                                                                                                                                                                                          |
-| 2   | Time travel         | In progress: keyframes, seeking, the timeline scrubber, rewind then follow, and backward playback with speeds built, smoothness not yet measured                                                                                                                              |
+| 2   | Time travel         | In progress: keyframes, seeking, the timeline scrubber and its markers for rush hours and builds, rewind then follow, and backward playback with speeds built, smoothness not yet measured                                                                                    |
 | 3   | Follow a life       | Planned                                                                                                                                                                                                                                                                       |
 | 4   | Build               | In progress: the sim applies build, demolish and speed commands and records who sent them, and the page animates a building going up (scaffold) or coming down (dust) over 8 ticks, backwards when you rewind; placement tools in the page, roads and zones are not built yet |
 | 5   | Branching timelines | Planned                                                                                                                                                                                                                                                                       |

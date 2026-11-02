@@ -25,6 +25,8 @@ import { IDLE_MS, SeekError, Seeker, fold, tryFoldMore, type SeekResult } from '
 import { neighbours } from './rewind';
 import { rateText, shuttle, shuttleKey, type ShuttleKey } from './shuttle';
 import { Latest } from './scrub';
+import { createMarkerFeed, mergeMarkers, type Marker } from './markers';
+import { createMarkerRow } from './marker-row';
 import { agoText, createGuess, createTimeline, moveRange, stepTick, clampTick, type Range } from './timeline';
 import { createLoader, type Loader } from './ui/loader';
 import { createPicker } from './ui/picker';
@@ -743,6 +745,10 @@ async function main() {
     let range: Range | null = null;
     const tipTick = () => (hasLive ? liveState!.latest : (range?.newest ?? 0));
     const refreshing = { busy: false };
+    /** The moments builders left on the timeline, read with the span; the rush hours come from the clock. */
+    const feed = createMarkerFeed(async (day) => (await opened?.markerBytes(day)) ?? null);
+    let fed = 0;
+    let marked: { key: string; markers: Marker[] } = { key: '', markers: [] };
     /** Test knob: milliseconds each scrub seek waits before it is shown, to hold one in flight. */
     let holdSeeks = 0;
     const refreshRange = async () => {
@@ -753,6 +759,7 @@ async function main() {
         if (!s) return;
         opened = s;
         range = await s.retained();
+        if (await feed.load({ oldest: range.oldest, live: tipTick() })) fed++;
       } catch (err) {
         console.warn('the span of the timeline could not be read', err);
         if (err instanceof GatewayError && err.code === 'closed') dropHistory();
@@ -914,6 +921,8 @@ async function main() {
       refresher = setInterval(() => void refreshRange(), 5000);
     };
     const timelineEl = document.getElementById('timeline')!;
+    // A marker goes to its moment the way a release of the handle there does.
+    const row = createMarkerRow(document.getElementById('markers')!, (tick) => go(tick, false));
     status.onBackToLive(goLive);
     status.onPlay(() => void togglePlay());
     addEventListener('keydown', (e) => {
@@ -960,6 +969,12 @@ async function main() {
           at,
           live: !inPast,
         });
+      if (usable) {
+        const shownSpan = bar.span;
+        const key = `${shownSpan.oldest}:${shownSpan.live}:${fed}`;
+        if (key !== marked.key) marked = { key, markers: mergeMarkers(shownSpan, feed.stored) };
+        row.update({ oldest: shownSpan.oldest, newest: shownSpan.newest, markers: marked.markers, at });
+      }
       status.past(inPast);
       if (inPast) {
         status.playLabel(playback && !playback.paused ? 'Pause' : 'Play');

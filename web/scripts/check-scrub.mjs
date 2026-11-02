@@ -348,6 +348,80 @@ if (back.max - Math.floor(back.drawn) > 40)
 if (await page.locator('#past').isVisible()) await fail('the past pill is still showing after Back to live');
 await page.locator('#timeline').screenshot({ path: join(out, 'bar-back-live.png') });
 
+// Notable moments: a row of buttons above the bar. Rush hours come from the clock, so a city with a day behind it has
+// them. They sit beside the slider, are reachable by keyboard, never lie past the live tip, and a click goes to the
+// moment the way a release of the handle there does.
+const momentsNow = () =>
+  page.evaluate(() =>
+    [...document.querySelectorAll('#markers .moment')].map((b) => ({
+      tick: Number(b.dataset.tick),
+      count: Number(b.dataset.count ?? 1),
+      kind: b.dataset.kind,
+      name: b.getAttribute('aria-label'),
+      tab: b.tabIndex,
+    })),
+  );
+{
+  await page.mouse.move(xAt(0.5), y);
+  await page
+    .waitForFunction(() => document.querySelectorAll('#markers .moment').length > 0, null, {
+      polling: 100,
+      timeout: 30_000,
+    })
+    .catch(() => fail('no notable moments on the timeline'));
+  const marks = await momentsNow();
+  const { min: oldest, max: tip } = await read();
+  if (marks.some((m) => m.tick > tip)) await fail(`a moment lies past the live tip ${tip}: ${JSON.stringify(marks)}`);
+  if (marks.some((m) => !m.name || !/Day \d+, \d\d:\d\d/.test(m.name))) await fail('a moment has no accessible name');
+  if (marks.filter((m) => m.tab === 0).length !== 1) await fail('the moments are not one tab stop');
+  if (await page.locator('#scrub #markers, #scrub .moment').count()) await fail('the moments are inside the slider');
+  console.log(`${marks.length} notable moments on the bar`);
+  // A click on a lone moment goes to it, and the city rests there.
+  const click = marks.find((m) => m.count === 1 && m.tick > oldest + 120 && m.tick < tip - 120);
+  if (!click) await fail(`no lone moment to click: ${JSON.stringify(marks)}`);
+  await page.click(`#markers .moment[data-tick="${click.tick}"]`);
+  await settled(click.tick).catch(async () =>
+    fail(`clicking the moment at ${click.tick} did not go there: ${JSON.stringify(await read())}`),
+  );
+  const there = await sample('at a clicked moment', true);
+  if (there.shown.past !== click.tick) await fail(`the moment at ${click.tick} drew ${there.shown.past}`);
+  // Seen from the past, the moments are the same ones and none is past the tip.
+  const seen = await momentsNow();
+  if (seen.some((m) => m.tick > (there.max ?? tip))) await fail('a moment lies past the tip in the past view');
+  if (!seen.some((m) => m.tick > click.tick)) await fail('the moments after the handle disappeared in the past view');
+  // The keyboard: Tab-reachable, arrows move along the row, Enter goes there.
+  await page.focus('#markers .moment[tabindex="0"]');
+  await page.keyboard.press('ArrowRight');
+  const focused = await page.evaluate(() => Number(document.activeElement?.dataset?.tick));
+  if (!Number.isFinite(focused)) await fail('the arrow key did not move focus along the moments');
+  await page.keyboard.press('Enter');
+  await page
+    .waitForFunction((t) => Number(document.getElementById('scrub').dataset.at) >= t, focused, {
+      polling: 100,
+      timeout: MINUTE,
+    })
+    .catch(async () => fail(`Enter on the moment at ${focused} did not go there: ${JSON.stringify(await read())}`));
+  console.log(`clicked ${click.tick}, then reached ${focused} by keyboard`);
+
+  // A page opened at that moment shows the same moments, and none past what the log holds.
+  const url = new URL(appUrl);
+  url.searchParams.set('at', String(click.tick));
+  await page.goto(`${url}#harbor`, { waitUntil: 'load', timeout: 5 * MINUTE });
+  await page
+    .waitForFunction(() => window.__ready === true && document.querySelectorAll('#markers .moment').length > 0, null, {
+      polling: 250,
+      timeout: 5 * MINUTE,
+    })
+    .catch(() => fail('a page opened at a moment shows no notable moments'));
+  const reopened = await momentsNow();
+  const newest = Number(await page.evaluate(() => document.getElementById('scrub').getAttribute('aria-valuemax')));
+  if (reopened.some((m) => m.tick > newest)) await fail('a reopened page shows a moment past the newest tick');
+  const rushOf = (list) => list.filter((m) => m.kind === 'rush' && m.count === 1).map((m) => m.tick);
+  const before = rushOf(marks).filter((t) => t <= newest);
+  if (before.some((t) => !rushOf(reopened).includes(t))) await fail('a reload lost a rush hour moment');
+  console.log(`a page opened at tick ${click.tick} shows ${reopened.length} moments`);
+}
+
 console.log(`${samples} frames sampled, each whole`);
 {
   const l = await page.evaluate(() => window.__live);

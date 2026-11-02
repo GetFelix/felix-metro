@@ -27,6 +27,8 @@ pub const KIND_TICK: u8 = 4;
 pub const KIND_COMMAND: u8 = 2;
 /// Kind byte of a registry record.
 pub const KIND_REGISTRY: u8 = 3;
+/// Kind byte of a day's timeline markers.
+pub const KIND_MARKERS: u8 = 5;
 
 /// Header flag: the record carries a keyframe before its events.
 pub const FLAG_KEYFRAME: u8 = 1;
@@ -45,6 +47,11 @@ pub const ROAD_CLOSED: u8 = 0;
 pub const ROAD_OPENED: u8 = 1;
 pub const ROAD_ADDED: u8 = 2;
 pub const ROAD_REMOVED: u8 = 3;
+
+/// Timeline marker kinds: a building went up, one came down, a road changed.
+pub const MARK_BUILT: u8 = 1;
+pub const MARK_DEMOLISHED: u8 = 2;
+pub const MARK_ROAD: u8 = 3;
 
 /// `command` event results. 0 is applied; everything else is a refusal that
 /// changed nothing in the city.
@@ -126,6 +133,7 @@ pub enum Record {
     Tick(TickRecord),
     Command(CommandRecord),
     Registry(RegistryRecord),
+    Markers(MarkersRecord),
 }
 
 impl Record {
@@ -136,6 +144,7 @@ impl Record {
             Some(&KIND_TICK) => TickRecord::decode(bytes).map(Record::Tick),
             Some(&KIND_COMMAND) => CommandRecord::decode(bytes).map(Record::Command),
             Some(&KIND_REGISTRY) => RegistryRecord::decode(bytes).map(Record::Registry),
+            Some(&KIND_MARKERS) => MarkersRecord::decode(bytes).map(Record::Markers),
             Some(&k) => Err(DecodeError::UnknownKind(k)),
         }
     }
@@ -146,6 +155,7 @@ impl Record {
             Record::Tick(r) => r.to_json(),
             Record::Command(r) => r.to_json(),
             Record::Registry(r) => r.to_json(),
+            Record::Markers(r) => r.to_json(),
         }
     }
 }
@@ -376,6 +386,43 @@ pub enum RegistryRecord {
         tick: u32,
         wall_us: u64,
     },
+}
+
+/// A moment the timeline marks: a builder changed the city.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Marker {
+    pub tick: u32,
+    /// [`MARK_BUILT`], [`MARK_DEMOLISHED`] or [`MARK_ROAD`].
+    pub kind: u8,
+    /// The lot, or for a road the segment.
+    pub subject: u32,
+    /// The building kind, or for a road the change ([`ROAD_CLOSED`] and the rest).
+    pub what: u16,
+    /// The builder's display name; empty when the change had no builder.
+    pub by: String,
+}
+
+/// The markers of one city day (`tick / TICKS_PER_DAY`), in the order they happened. The sim keeps each day's list
+/// in the events stream's state, in the same commit as the tick that added to it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MarkersRecord {
+    pub day: u32,
+    pub markers: Vec<Marker>,
+}
+
+impl MarkersRecord {
+    /// Fails on a name over [`MAX_STR`] bytes.
+    pub fn encode(&self) -> Result<Vec<u8>, EncodeError> {
+        codec::encode_markers(self)
+    }
+
+    pub fn decode(bytes: &[u8]) -> Result<MarkersRecord, DecodeError> {
+        codec::decode_markers(bytes)
+    }
+
+    pub fn to_json(&self) -> String {
+        json::markers(self)
+    }
 }
 
 impl TickRecord {

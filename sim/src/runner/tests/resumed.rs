@@ -357,9 +357,164 @@ async fn a_city_left_paused_stays_paused_until_it_is_resumed() {
 #[tokio::test(start_paused = true)]
 async fn a_log_with_a_record_that_is_not_a_keyframe_is_not_resumed() {
     let log = Memory::healthy();
-    log.append(2, 0, vec![1, 2, 3], false);
+    log.append(2, 0, vec![1, 2, 3], (false, None));
     let err = run_city("harbor", harbor(), quick(10), log.clone())
         .await
         .unwrap_err();
     assert!(format!("{err:#}").contains("no keyframe"), "{err:#}");
+}
+
+fn marker_subjects(log: &Memory, day: u32) -> Vec<(u32, u32, String)> {
+    let stored = log.markers.lock().unwrap().get(&day).cloned();
+    stored.map_or_else(Vec::new, |bytes| {
+        let record = felix_metro_core::record::MarkersRecord::decode(&bytes).unwrap();
+        record
+            .markers
+            .into_iter()
+            .map(|m| (m.tick, m.subject, m.by))
+            .collect()
+    })
+}
+
+#[tokio::test(start_paused = true)]
+async fn markers_survive_a_restart_and_a_refused_command_leaves_none() {
+    let world = World::new(harbor());
+    let lot = free_lot(&world);
+    let build = |kind| Command::Build {
+        lot,
+        kind,
+        rotation: 0,
+    };
+    let (send, inbox) = mpsc::channel(8);
+    let log = Memory::healthy();
+    send.try_send(log.publish("mayor", 1, build(4))).unwrap();
+    // Occupied by the first, so refused.
+    send.try_send(log.publish("viewer", 2, build(6))).unwrap();
+    run_city_with("harbor", harbor(), quick(300), log.clone(), Some(inbox))
+        .await
+        .unwrap();
+    assert_eq!(
+        marker_subjects(&log, 0),
+        vec![(0, lot, "mayor".to_string())]
+    );
+
+    // A restart carries the day's list on instead of starting it over.
+    let (send, inbox) = mpsc::channel(8);
+    let history = load_history(&log, 4, &quick(0)).await.unwrap().unwrap();
+    send.try_send(log.publish("mayor", 3, Command::Demolish { lot }))
+        .unwrap();
+    for missed in log.commands(2, u64::MAX).await.unwrap() {
+        send.try_send(missed).unwrap();
+    }
+    run_with_history(
+        "harbor",
+        harbor(),
+        quick(400),
+        log.clone(),
+        Some(inbox),
+        Some(history),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        marker_subjects(&log, 0),
+        vec![
+            (0, lot, "mayor".to_string()),
+            (300, lot, "mayor".to_string())
+        ]
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_markers_of_a_tick_district_0_missed_are_written_by_the_restart() {
+    let world = World::new(harbor());
+    let lot = free_lot(&world);
+    // Sent after tick 49 is committed in district 0, so it is applied for tick 50.
+    let with_command = |hang: bool| {
+        let (send, inbox) = mpsc::channel(8);
+        let mut log = Memory::new(move |d, offset, attempt| {
+            (hang && d == 0 && offset == 50 && attempt == 1).then_some(Fault::Hang)
+        });
+        let published = log.clone();
+        log.hook = Arc::new(move |d, offset| {
+            if d == 0 && offset == 49 {
+                let build = Command::Build {
+                    lot,
+                    kind: 4,
+                    rotation: 0,
+                };
+                send.try_send(published.publish("mayor", 9, build)).unwrap();
+            }
+        });
+        (log, inbox)
+    };
+    let (whole, inbox) = with_command(false);
+    run_city_with("harbor", harbor(), quick(500), whole.clone(), Some(inbox))
+        .await
+        .unwrap();
+    assert_eq!(
+        marker_subjects(&whole, 0),
+        vec![(50, lot, "mayor".to_string())]
+    );
+
+    let (log, inbox) = with_command(true);
+    killed(
+        Duration::from_secs(3),
+        run_city_with("harbor", harbor(), quick(500), log.clone(), Some(inbox)),
+    )
+    .await;
+    assert_eq!(log.records(0).len(), 50);
+    assert!(marker_subjects(&log, 0).is_empty());
+
+    let (_send, inbox) = mpsc::channel(8);
+    run_city_with("harbor", harbor(), quick(500), log.clone(), Some(inbox))
+        .await
+        .unwrap();
+    assert_eq!(marker_subjects(&log, 0), marker_subjects(&whole, 0));
+}
+
+#[tokio::test(start_paused = true)]
+async fn each_city_day_keeps_its_own_list() {
+    let log = Memory::healthy();
+    let retry = Retry::of(&Settings::default());
+    let change = |lot| {
+        vec![vec![
+            Event::Command {
+                principal: 1,
+                name: "mayor".into(),
+                id: 1,
+                result: RESULT_APPLIED,
+            },
+            Event::Built {
+                lot,
+                kind: 4,
+                rotation: 0,
+            },
+        ]]
+    };
+    let mut today = Today::default();
+    let a = mark(&log, retry, &mut today, 10, &change(1)).await.unwrap();
+    assert_eq!(a.as_ref().map(|m| m.day), Some(0));
+    log.markers.lock().unwrap().insert(0, a.unwrap().bytes);
+    let b = mark(&log, retry, &mut today, TICKS_PER_DAY + 3, &change(2))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(b.day, 1);
+    // A fresh run reads the day it is writing to from the log.
+    let mut fresh = Today::default();
+    let c = mark(&log, retry, &mut fresh, 20, &change(3))
+        .await
+        .unwrap()
+        .unwrap();
+    let record = felix_metro_core::record::MarkersRecord::decode(&c.bytes).unwrap();
+    let ticks: Vec<_> = record.markers.iter().map(|m| (m.tick, m.subject)).collect();
+    assert_eq!(ticks, [(10, 1), (20, 3)]);
+    // A tick with no change reads nothing and writes nothing.
+    assert_eq!(
+        mark(&log, retry, &mut Today::default(), 5, &[Vec::new()])
+            .await
+            .unwrap(),
+        None
+    );
 }

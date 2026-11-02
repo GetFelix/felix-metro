@@ -2,7 +2,7 @@
 // Builds tick records byte by byte from the layout in docs/design.md and reads them with the dev decoder.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { decode } from "./gateway.mjs";
+import { decode, decodeMarkers } from "./gateway.mjs";
 
 const varint = (n) => {
   const out = [];
@@ -73,4 +73,18 @@ test("reads a keyframe's building diff and steps over the rest of it", () => {
 
 test("ignores records of another kind", () => {
   assert.equal(decode(Uint8Array.from([1, 0, 0])), null);
+});
+
+test("reads a day of timeline markers", () => {
+  const mark = (deltaTicks, type, subject, what, by) => [...zigzag(deltaTicks), type, ...varint(subject), ...varint(what), by.length, ...Buffer.from(by)];
+  // Day 2 starts at tick 11520; the first change is 100 ticks in, the second 40 ticks after it.
+  const bytes = Uint8Array.from([5, 2, 2, ...mark(100, 1, 412, 17, "Mara"), ...mark(40, 2, 9, 0, "")]);
+  assert.deepEqual(decodeMarkers(bytes), {
+    day: 2,
+    markers: [
+      { tick: 11620, type: 1, subject: 412, what: 17, by: "Mara" },
+      { tick: 11660, type: 2, subject: 9, what: 0, by: "" },
+    ],
+  });
+  assert.equal(decodeMarkers(Uint8Array.from([4, 0, 0])), null);
 });

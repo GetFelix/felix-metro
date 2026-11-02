@@ -208,12 +208,13 @@ older reader skips a tag it does not know and keeps the rest of the tick, and
 ignores bytes appended to a body it does know. A field can therefore be added
 to the end of an event without a new kind.
 
-| Kind | Record                                        |
-| ---- | --------------------------------------------- |
-| 1    | Retired: the first tick layout, refused       |
-| 2    | Command, on `metro.commands.<city>`           |
-| 3    | Registry entry, on `metro.cities`             |
-| 4    | Tick record, a district's commit for one tick |
+| Kind | Record                                         |
+| ---- | ---------------------------------------------- |
+| 1    | Retired: the first tick layout, refused        |
+| 2    | Command, on `metro.commands.<city>`            |
+| 3    | Registry entry, on `metro.cities`              |
+| 4    | Tick record, a district's commit for one tick  |
+| 5    | A city day's timeline markers, in stream state |
 
 Kind 4 replaced kind 1 to shrink the log (see "Log size"). A log written under
 kind 1 is not readable: the decoder refuses it by its kind byte, and the dev
@@ -370,7 +371,8 @@ hash and the log never holds the principal.
 The sim reads the stream in order and applies commands before it
 steps the next tick, at most 256 a tick. That tick's records carry the `command`
 event, then what it changed (`built` or `demolished`), in the district of the
-lot, and its keyframe already shows the change. A refused command records only
+lot, and its keyframe already shows the change. An applied `build` or `demolish` is also marked on the timeline (see
+[Timeline markers](#timeline-markers)). A refused command records only
 the `command` event, with a result code, and the city steps as if it had not
 been sent. A command with no district, such as a malformed record or a lot past
 the last, is recorded in district 0.
@@ -451,6 +453,60 @@ fit 64 bytes too, so a fork too deep to name is refused the same way.
 A registry record is the kind byte, a tag and fields: `1` created (name, seed,
 districts `u16`, `wall_us` `u64`) or `2` forked (name, parent, tick `u32`,
 `wall_us` `u64`).
+
+### Timeline markers
+
+The timeline marks notable moments, and clicking one seeks there. Two things are marked:
+
+- **Rush hours** come from the clock alone. Office workers arrive about 08:00 and leave about 17:15, so the page puts
+  a peak on those two times of every day the bar spans. Nothing is stored for them, so they cover the whole retained
+  range without reading a record.
+- **What builders did** (a building built or demolished, and a road closed, opened, added or removed once roads can
+  change) comes from the sim, because the page folds only the hour it is looking at and cannot see a build from three
+  days ago. Each marker carries the builder's name, from the `command` event that made the change.
+
+The sim keeps each city day's markers as one value of the events stream's state, under the key `markers.<day>` with the
+day counted from 0 (`tick / 5760`), in district 0's shard beside the `keyframe` pointer. The value is a record of kind 5:
+
+| Field   | Size   | Contents                                                                             |
+| ------- | ------ | ------------------------------------------------------------------------------------ |
+| kind    | 1      | 5                                                                                    |
+| `day`   | varint |                                                                                      |
+| markers | varint | the number of markers, then each one                                                 |
+| `tick`  | zigzag | the tick, as a delta from the marker before (the first from the day's start)         |
+| `type`  | 1      | 1 built, 2 demolished, 3 road                                                        |
+| subject | varint | the lot, or for a road the segment                                                   |
+| `what`  | varint | the building kind, or for a road the change (0 closed, 1 opened, 2 added, 3 removed) |
+| name    | string | the builder's display name, empty when there was none                                |
+
+A marker is about 10 bytes. A day holds at most 256; a builder who passes that is not marked past it, though the changes
+are all in the tick records.
+
+This is not in the tick records, whose size is bounded in [Log size](#log-size): the headers and events are
+unchanged, and a tick that changes nothing commits exactly the bytes it did. The day's value is written in the commit of
+the district 0 record for the tick that made the change, as one more `put` beside that record. A tick that marks nothing
+(nearly every tick) adds nothing to its commit.
+
+Putting the marker in the tick's own commit is what makes it safe to restart. The record and the list land together or
+not at all, so a sim killed between them cannot leave one without the other. A tick run again after a restart (see
+[Restart](#restart)) derives the same markers, because the world steps the same way, and replaces any in the list at or
+after its tick, so the list comes out as it would have. The first change of a day read after a restart loads that day's
+value from the stream's state first. A warm-up commits no commands, so it writes no markers. Past days are never
+rewritten, and their values stay after retention has taken their records; the page asks only for the days the retained
+range touches.
+
+The page reads the days the span touches, through the seeker's history sessions, when the span is read: the first time
+the bar is reached for, and every 5 seconds after while the handle is dragged or the past is shown. A day before the
+tip's is read once; the tip's day is read each time, since it still grows. A marker later than the newest tick every
+district has is left out, because district 0 can be a tick ahead of the others and the bar shows only what has happened.
+A day with no value, a value that does not decode, or a read that fails shows no builder markers and leaves the rush
+hours; the next read tries again. Because markers belong to the city's history and not to the view, they are the same
+whatever tick the page is drawing: after a seek, a rewind, a reload or a page opened with `?at`.
+
+The buttons sit in a row above the bar, in a toolbar of their own and not inside the slider (a slider's children are
+hidden from a screen reader). Markers closer than 14 pixels share one button with a count. A click goes to the marker,
+or to the first one in a cluster after the handle, then the next on each click, wrapping. See [the timeline in
+docs/ui.md](ui.md#the-timeline).
 
 ### Ticks are commits
 
@@ -604,7 +660,8 @@ live city, and the result of that seek is dropped. A seek's result that would
 bring the page to an hour whose keyframe is already on screen is dropped too.
 The history sessions are opened when the bar is first hovered, focused or
 touched, not at page load; the span is read again every 5 s only while the
-handle is dragged or the past is shown, and the sessions close after 30 s idle. The pill in the clock reads how long
+handle is dragged or the past is shown, and the sessions close after 30 s idle. Notable moments are marked on a row above the bar
+([Timeline markers](#timeline-markers)). The pill in the clock reads how long
 before the live tip the city on screen is, in city time.
 
 ## Building
@@ -613,7 +670,7 @@ Builders publish commands (`place road`, `zone`, `build`, `demolish`) to the
 city's command stream, a gateway `stamp_sender` stream. The sim applies
 commands at the next tick and records the result as a `command` event in the
 district it touched, with a hash of the principal. Every change to the city
-carries who made it, and that is visible on the timeline.
+carries who made it, and the timeline marks each one with the builder's name.
 
 A `built` or `demolished` event is instantaneous in the log. The page spreads it over the next 8 ticks of city time
 (`web/src/construction.ts`): a building rises from nothing inside a scaffold from the event's tick, and a demolished one

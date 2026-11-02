@@ -75,6 +75,14 @@ malformed record or an unknown lot, is recorded in district 0.
 The result codes are in `core/src/record.rs`. A paused city holds the commands it reads
 until a `speed` command or the operator resumes it.
 
+## Timeline markers
+
+An applied `build` or `demolish` also lands in the day's list of markers that the page's timeline shows, with the
+builder's name. The list is the state key `markers.<day>` of the city's events stream (`<day>` counts from 0), kept in
+district 0's shard and written in the same commit as the tick that made the change, so a restart leaves it whole and a
+tick run again writes the same list. A day holds at most 256 markers. Nothing about the tick records changes.
+[docs/design.md](../docs/design.md#timeline-markers) has the layout.
+
 ## The registry
 
 Every city, when it starts, writes a `created` record (name, seed, districts a side, wall time) to

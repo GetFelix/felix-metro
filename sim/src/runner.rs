@@ -6,8 +6,8 @@ use std::future::Future;
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
-use felix_metro_core::City;
 use felix_metro_core::record::{Event, Header, TickRecord};
+use felix_metro_core::{City, TICKS_PER_DAY};
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinSet;
 use tokio::time::{Instant, MissedTickBehavior};
@@ -16,6 +16,7 @@ use tracing::{info, warn};
 use crate::commands::{Incoming, MAX_HELD, MAX_PER_TICK, MAX_REFUSED, apply_all, refuse_busy};
 use crate::control::check_speed;
 use crate::latency::Window;
+use crate::markers::{self, Marked, Today};
 use crate::resume::{History, LOOKBACK, read_history, retrying};
 use crate::world::World;
 
@@ -34,7 +35,8 @@ pub enum Write {
 /// must land at, so the log knows a stale writer or a repeated record.
 pub trait Log: Clone + Send + Sync + 'static {
     /// Appends `record` to `district`'s shard at exactly offset `expected`. A
-    /// keyframe also leaves `expected` in the shard's `keyframe` state, in the
+    /// keyframe also leaves `expected` in the shard's `keyframe` state, and
+    /// `markers` leaves a day's timeline markers in the shard's state, in the
     /// same commit.
     fn commit(
         &self,
@@ -42,7 +44,11 @@ pub trait Log: Clone + Send + Sync + 'static {
         expected: u64,
         record: Vec<u8>,
         keyframe: bool,
+        markers: Option<&Marked>,
     ) -> impl Future<Output = Result<Write>> + Send;
+
+    /// The timeline markers stored for city day `day`, or `None` when none were.
+    fn markers(&self, day: u32) -> impl Future<Output = Result<Option<Vec<u8>>>> + Send;
 
     /// The record at `offset` in `district`'s shard, if there is one.
     fn read(
@@ -250,6 +256,7 @@ pub async fn run_with_history<L: Log>(
     let mut timer = new_timer(period, true);
     // Set once the tick that carried speed 0 is committed.
     let mut parked = speed == 0;
+    let mut today = Today::default();
     let mut queue: VecDeque<Incoming> = VecDeque::new();
     let mut refused: VecDeque<Incoming> = VecDeque::new();
     if let Some(history) = &history {
@@ -268,6 +275,7 @@ pub async fn run_with_history<L: Log>(
             cursor = said.or(cursor);
             let mut wanted = at;
             let commanded = apply_all(&mut world, incoming, &mut wanted);
+            let marked = mark(&log, retry, &mut today, tick, &commanded).await?;
             let step = world.step();
             let tick_retries = commit_tick(
                 &log,
@@ -282,6 +290,7 @@ pub async fn run_with_history<L: Log>(
                 },
                 step,
                 commanded,
+                marked,
                 &mut shards,
                 |district| !history.lacks(district, tick),
             )
@@ -418,6 +427,7 @@ pub async fn run_with_history<L: Log>(
             timer.tick().await;
         }
         let started = Instant::now();
+        let marked = mark(&log, retry, &mut today, tick, &commanded).await?;
         let step = world.step();
         let keyframe = step[0].keyframe.is_some();
         let attempts = commit_tick(
@@ -433,6 +443,7 @@ pub async fn run_with_history<L: Log>(
             },
             step,
             commanded,
+            marked,
             &mut shards,
             |_| false,
         )
@@ -480,16 +491,38 @@ struct Tick {
     wall_us: u64,
 }
 
+/// The markers the tick's applied commands make, with the day's list read first when this run has not
+/// written to that day yet. `None` for a tick that marks nothing, which is nearly every tick.
+async fn mark<L: Log>(
+    log: &L,
+    retry: Retry,
+    today: &mut Today,
+    tick: u32,
+    commanded: &[Vec<Event>],
+) -> Result<Option<Marked>> {
+    let new = markers::from_commands(tick, commanded);
+    if new.is_empty() {
+        return Ok(None);
+    }
+    let day = tick / TICKS_PER_DAY;
+    if today.day() != Some(day) {
+        let stored = retrying(retry, "read the day's markers", || log.markers(day)).await?;
+        *today = Today::load(day, stored.as_deref())?;
+    }
+    today.add(tick, new)
+}
+
 /// Encodes the tick's record for each district and commits them, except the
 /// districts `has` says already hold the tick. Waits for every answer, then
-/// moves the districts' offsets on. Returns the commits that had to be sent
-/// again.
+/// moves the districts' offsets on. `marked` goes in district 0's commit.
+/// Returns the commits that had to be sent again.
 async fn commit_tick<L: Log>(
     log: &L,
     retry: Retry,
     tick: Tick,
     step: Vec<crate::world::DistrictTick>,
     mut commanded: Vec<Vec<Event>>,
+    marked: Option<Marked>,
     shards: &mut [Shard],
     has: impl Fn(usize) -> bool,
 ) -> Result<u64> {
@@ -526,10 +559,17 @@ async fn commit_tick<L: Log>(
             .encode()
             .with_context(|| format!("encode district {district} tick {}", tick.number))?;
         let log = log.clone();
+        let marked = if district == 0 { marked.clone() } else { None };
         commits.spawn(async move {
-            let attempts =
-                commit_until_written(&log, district as u16, shard.next, bytes, keyframe, retry)
-                    .await?;
+            let attempts = commit_until_written(
+                &log,
+                district as u16,
+                shard.next,
+                bytes,
+                (keyframe, marked.as_ref()),
+                retry,
+            )
+            .await?;
             Ok::<_, anyhow::Error>((district, keyframe, attempts))
         });
     }
@@ -689,9 +729,15 @@ async fn warm_up<L: Log>(
         committers.spawn(async move {
             let mut retries = 0u64;
             while let Some((bytes, keyframe)) = inbox.recv().await {
-                let attempts =
-                    commit_until_written(&log, district as u16, next, bytes, keyframe, retry)
-                        .await?;
+                let attempts = commit_until_written(
+                    &log,
+                    district as u16,
+                    next,
+                    bytes,
+                    (keyframe, None),
+                    retry,
+                )
+                .await?;
                 retries += u64::from(attempts - 1);
                 next += 1;
             }
@@ -774,7 +820,7 @@ async fn commit_until_written<L: Log>(
     district: u16,
     expected: u64,
     bytes: Vec<u8>,
-    keyframe: bool,
+    (keyframe, marked): (bool, Option<&Marked>),
     retry: Retry,
 ) -> Result<u32> {
     let mut wait = retry.backoff;
@@ -783,7 +829,7 @@ async fn commit_until_written<L: Log>(
     for attempt in 1.. {
         let answer = tokio::time::timeout(
             retry.timeout,
-            log.commit(district, expected, bytes.clone(), keyframe),
+            log.commit(district, expected, bytes.clone(), keyframe, marked),
         )
         .await;
         match answer {

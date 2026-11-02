@@ -5,6 +5,7 @@
 import type { CityState, TickRecord } from './city';
 import { GatewayError, pastEnd, type Gateway, type Page } from './gateway';
 import { keyframePointer, parse } from './live';
+import { markersKey } from './markers';
 import { TICKS_PER_HOUR } from './clock';
 import { WINDOW } from './construction';
 
@@ -182,6 +183,22 @@ export class Seeker {
     this.shut = true;
     this.current?.abort(new DOMException('the seeker was closed', 'AbortError'));
     this.release();
+  }
+
+  /**
+   * The stored timeline markers of city day `day` (counted from 0), or null when the sim wrote none. They sit in the
+   * state of district 0's shard, beside the keyframe pointer.
+   */
+  async markerBytes(day: number, options: SeekOptions = {}): Promise<Uint8Array | null> {
+    const signal = options.signal ?? new AbortController().signal;
+    return this.using(async () => {
+      try {
+        return (await this.cancellable(signal).stateGet(STREAM, markersKey(day), 0)).payload;
+      } catch (err) {
+        if (err instanceof GatewayError && err.code !== 'closed') return null;
+        throw err;
+      }
+    });
   }
 
   /** The oldest tick every district can start from and the newest tick every district has. */

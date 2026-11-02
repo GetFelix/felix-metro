@@ -163,3 +163,75 @@
   outline: 2px solid var(--cyan);
   outline-offset: 3px;
 }
+/* Notable moments: a row above the bar, scaled by the same --oldest and --span the bar uses. */
+.markers {
+  position: relative;
+  height: 14px;
+}
+.markers:empty,
+.timeline:not([data-scrub]) .markers {
+  display: none;
+}
+.moment {
+  position: absolute;
+  top: 0;
+  left: calc((var(--t) - var(--oldest)) / var(--span) * 100%);
+  box-sizing: border-box;
+  width: 14px;
+  height: 14px;
+  margin: 0 0 0 -7px;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  --mark: var(--cyan);
+}
+.moment::before {
+  content: '';
+  position: absolute;
+  inset: 3px;
+  border-radius: 2px;
+  background: var(--mark);
+  box-shadow: 0 0 6px var(--mark);
+  transition: transform 0.12s;
+}
+.moment[data-kind='rush'] {
+  --mark: var(--amber);
+}
+.moment[data-kind='rush']::before {
+  border-radius: 50%;
+}
+.moment[data-kind='demolished'] {
+  --mark: var(--coral);
+}
+.moment[data-kind='road'] {
+  --mark: var(--violet);
+}
+.moment[data-kind='mixed'] {
+  --mark: var(--text, #fff);
+}
+.moment:hover::before,
+.moment:focus-visible::before {
+  transform: scale(1.5);
+}
+.moment:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 1px;
+  border-radius: 4px;
+}
+.moment[data-count]::before {
+  inset: 0;
+  border-radius: 7px;
+  opacity: 0.9;
+}
+.moment[data-count]::after {
+  content: attr(data-count);
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--void);
+  font:
+    700 9px 'JetBrains Mono',
+    monospace;
+}
