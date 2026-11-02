@@ -614,16 +614,18 @@ The stats panel shows the residents, who is on the road and the buildings by kin
 from the folded state the scene is drawn from, never from a separate feed, so a scrub, a rewind or a seek changes them
 with the picture. `web/src/stats.ts` does the counting.
 
-| Number             | Where it comes from                                                                                                            |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
-| Residents          | The residents every district's keyframe lists, added up once all districts have a keyframe of one tick. It never changes.      |
-| On the road        | Residents with a trip that has left by the tick on screen and not yet arrived, split into cars and walkers by vehicle kind.    |
-| Buildings, by kind | The generated city's lots, changed by the lots the state says differ from it. Trees, plaza props and chimneys are not counted. |
+| Number             | Where it comes from                                                                                                                                              |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Residents          | The residents every district's keyframe lists, added up whenever every district has a keyframe of one tick. Nobody moves in or out, so the total stays the same. |
+| On the road        | Residents with a trip that has left by the tick on screen and not yet arrived, split into cars and walkers by vehicle kind.                                      |
+| Buildings, by kind | The generated city's lots, changed by the lots the state says differ from it. Trees, plaza props and chimneys are not counted.                                   |
 
 A trip is on the road from its `depart` tick up to, but not including, its arrival tick. The arrival is known when the
 `trip` event is folded, from the rebuilt journey. A trip that left before the state's first record has no `trip`
 event, so it comes from the keyframe, which lists every resident on the road, and ends at its `arrived` event. That is
-what makes the count right straight after a seek. The page draws such a car only from the resident's next trip (see
+what makes the count right straight after a seek. A seek folds one district's records and then the next's, and an
+arrival is in the district the traveller reaches, not the one the keyframe names them in, so an `arrived` event the
+state cannot place yet is kept until the keyframe that needs it is folded. The page draws such a car only from the resident's next trip (see
 [The live view](#the-live-view)), but it counts it.
 
 The state can hold records a tick or two ahead of the one drawn, so the count is asked for the drawn tick and ignores

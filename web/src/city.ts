@@ -135,6 +135,12 @@ export class CityState {
   unplaced = 0;
   /** The residents on the road, by resident; kept until the page draws past their arrival. */
   private readonly spells = new Map<number, Spell[]>();
+  /**
+   * Arrivals that found no spell to end, by resident. A district's records can be folded before another's, and the
+   * arrival is in the destination's district while the keyframe naming the traveller is in the district they were in;
+   * the keyframe then finds its arrival here.
+   */
+  private readonly orphans = new Map<number, number[]>();
   /** Each district's newest keyframe: its tick and how many residents it held. */
   private readonly held: ({ tick: number; residents: number } | null)[];
   /**
@@ -210,7 +216,7 @@ export class CityState {
         if (old) this.finishing.push(old);
         this.voyages.set(t.resident, { resident: t.resident, vehicle: t.vehicle, depart: t.depart, journey });
       } else if (e.type === 'arrived') {
-        for (const s of this.spells.get(e.resident) ?? []) if (s.to === Infinity) s.to = record.tick;
+        this.arrive(e.resident, record.tick);
       } else if (e.type === 'built' || e.type === 'demolished') {
         this.mark(e, record.tick, this.rising, this.falling);
         this.set(
@@ -303,6 +309,21 @@ export class CityState {
     }
   }
 
+  private arrive(resident: number, tick: number): void {
+    const list = this.spells.get(resident) ?? [];
+    let closed = false;
+    for (const s of list) {
+      if (s.to === Infinity) {
+        s.to = tick;
+        closed = true;
+      }
+    }
+    if (closed || list.some((s) => s.to === tick)) return;
+    const waiting = this.orphans.get(resident);
+    if (waiting) waiting.push(tick);
+    else this.orphans.set(resident, [tick]);
+  }
+
   // The keyframe of another district can name a trip before its event is folded, as an open spell that starts later
   // than the departure; the event completes it.
   private depart(resident: number, spell: Spell): void {
@@ -312,6 +333,14 @@ export class CityState {
   }
 
   private add(resident: number, spell: Spell): void {
+    if (spell.to === Infinity) {
+      const waiting = this.orphans.get(resident);
+      const next = waiting?.filter((t) => t > spell.from).sort((a, b) => a - b)[0];
+      if (next !== undefined) {
+        spell.to = next;
+        waiting!.splice(waiting!.indexOf(next), 1);
+      }
+    }
     const list = this.spells.get(resident);
     if (list) list.push(spell);
     else this.spells.set(resident, [spell]);
@@ -343,10 +372,18 @@ export class CityState {
 
   /** Forget voyages that have arrived by `tick`. */
   retire(tick: number): void {
+    // In place: this runs every frame.
     for (const [resident, list] of this.spells) {
-      const left = list.filter((s) => s.to > tick);
-      if (left.length === 0) this.spells.delete(resident);
-      else if (left.length < list.length) this.spells.set(resident, left);
+      let kept = 0;
+      for (const s of list) if (s.to > tick) list[kept++] = s;
+      if (kept === 0) this.spells.delete(resident);
+      else list.length = kept;
+    }
+    for (const [resident, waiting] of this.orphans) {
+      let kept = 0;
+      for (const t of waiting) if (t > tick) waiting[kept++] = t;
+      if (kept === 0) this.orphans.delete(resident);
+      else waiting.length = kept;
     }
     for (const [resident, v] of this.voyages) {
       if (v.journey.arrive() <= tick) {

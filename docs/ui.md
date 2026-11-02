@@ -119,7 +119,8 @@ reads the numbers for the state and tick on screen a few times a second and hand
 [design notes](design.md#city-stats) say how each number is counted.
 
 It sits halfway down the left edge, clear of the Felix Metro chip, the clock and the timeline. At 600px and below it
-moves to the bottom left, above the timeline. It does not take clicks, so it never covers a thing you can press.
+moves to the bottom left, above the timeline, and on a screen less than 520px tall it goes under the brand chip in two
+columns. It does not take clicks, so it never covers a thing you can press.
 `C` toggles it (see `isStatsKey`, which ignores the key while you type, with Ctrl, Cmd or Alt held, or under an open
 sheet), the switch in the settings sheet does the same, and the choice is kept in local storage under
 `felix-metro.stats`. A number that is not known shows `-`: with no gateway there is no city to count residents in, so

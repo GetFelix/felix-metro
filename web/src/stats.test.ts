@@ -4,6 +4,7 @@ import { CityState, NO_BUILDING, type TickRecord } from './city';
 import { Metro, generate, initSync } from './core/felix_metro_core.js';
 import { KINDS } from './kinds';
 import { parseCity, type City } from './layout';
+import { fold, type SeekResult } from './seek';
 import { GROUPS, createStats, groupOf, type CityStats } from './stats';
 
 // The sim's own log of a morning, from 07:00 to 09:00 in a city of four districts, and what it says was on the road at
@@ -115,21 +116,54 @@ describe('the stats against the sim', () => {
     expect(keyframes).toBe(3);
   });
 
-  it('count a state folded from a keyframe, as a seek does, at random ticks', () => {
+  // The keyframes at 08:00 and 09:00 have people on the road with no trip event in what is folded.
+  const starts = [fixture.from + 240, fixture.from + 480];
+  const random = (start: number, each: (tick: number) => void) => {
+    let seed = start;
+    for (let i = 0; i < 40; i++) {
+      seed = (seed * 1103515245 + 12345) % 2 ** 31;
+      each(start + (seed % (Math.min(240, fixture.to - start) + 1)));
+    }
+  };
+  const fresh = () => new CityState(city, new Metro(fixture.seed, fixture.districts), districts);
+  const expectSim = (state: CityState, tick: number, what: string) => {
+    state.retire(tick);
+    const s = createStats(city)(state, tick);
+    expect(road(s), `${what} to ${tick}`).toBe(fixture.onRoad[at(tick)]);
+    expect(s.walkers, `walking ${what} to ${tick}`).toBe(fixture.walkers[at(tick)]);
+  };
+
+  it('count a state folded from a keyframe, tick by tick, at random ticks', () => {
     const record = log();
-    // The keyframe at 09:00 and the one at 08:00 have people on the road with no trip event in what is folded.
-    for (const start of [fixture.from + 240, fixture.from + 480]) {
-      let seed = start;
-      for (let i = 0; i < 40; i++) {
-        seed = (seed * 1103515245 + 12345) % 2 ** 31;
-        const tick = start + (seed % Math.max(1, Math.min(240, fixture.to - start) + 1));
-        const state = new CityState(city, new Metro(fixture.seed, fixture.districts), districts);
+    for (const start of starts) {
+      random(start, (tick) => {
+        const state = fresh();
         for (let t = start; t <= tick; t++) for (let d = 0; d < districts; d++) state.apply(record(t, d), true);
-        state.retire(tick);
-        const s = createStats(city)(state, tick);
-        expect(road(s), `from ${start} to ${tick}`).toBe(fixture.onRoad[at(tick)]);
-        expect(s.walkers, `walking from ${start} to ${tick}`).toBe(fixture.walkers[at(tick)]);
-      }
+        expectSim(state, tick, `from ${start}`);
+      });
+    }
+  });
+
+  // A seek folds one district's records, then the next's. A traveller's arrival is in another district than the
+  // keyframe that names them, so it can be folded first.
+  it('count a state folded as a seek does, a district at a time, at random ticks', () => {
+    const record = log();
+    for (const start of starts) {
+      random(start, (tick) => {
+        const seek: SeekResult = {
+          tick,
+          requested: tick,
+          exact: true,
+          districts: Array.from({ length: districts }, (_, d) => ({
+            records: Array.from({ length: tick - start + 1 }, (_, i) => record(start + i, d)),
+            offset: tick,
+            before: [],
+          })),
+        };
+        const state = fresh();
+        fold(state, seek);
+        expectSim(state, tick, `seek from ${start}`);
+      });
     }
   });
 });

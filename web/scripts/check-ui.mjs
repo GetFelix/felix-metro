@@ -362,6 +362,7 @@ for (const [size, tag] of [
 for (const [size, tag] of [
   [DESKTOP, '1280'],
   [PHONE, '360'],
+  [{ width: 740, height: 360 }, '740x360'],
 ]) {
   const { context, page } = await open('tier=low&still&t=12', size);
   await page.keyboard.press('c');
