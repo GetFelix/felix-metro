@@ -36,6 +36,8 @@ export const IDLE_MS = 30_000;
 const CLOSED_RETRIES = 2;
 /** How long a district's newest record is trusted, so a scrub of many seeks asks for it about once a second. */
 const NEWEST_MS = 1000;
+/** Records of a district handed over at a time by a scan: a city hour. */
+const SCAN_BATCH = TICKS_PER_HOUR;
 /** Rounds of seeking while retention moves under it, or while districts settle on one tick. */
 const MAX_ROUNDS = 8;
 
@@ -279,6 +281,57 @@ export class Seeker {
         return this.seek(err.nearest, options);
       }
       throw err;
+    }
+  }
+
+  /**
+   * Hands `visit` every record with a tick from `from` up to, not including, `to`, in each district's order, one
+   * district's records in an hour's batches. Nothing is kept: the records are for someone to look through, not a state to
+   * fold, and keeping a day of them would push out what scrubbing has cached. A range the log no longer holds
+   * starts at its oldest record; a `to` past the newest tick ends at the newest.
+   */
+  async scan(from: number, to: number, visit: (record: TickRecord) => void, options: SeekOptions = {}): Promise<void> {
+    await this.using(async () => {
+      // A district that fails stops the reads the others still have waiting.
+      const attempt = new AbortController();
+      const unlink = link(options.signal, attempt);
+      try {
+        await Promise.all(
+          Array.from({ length: this.districts }, (_, d) => this.scanDistrict(d, from, to, visit, attempt.signal)),
+        );
+      } catch (err) {
+        attempt.abort(err);
+        throw err;
+      } finally {
+        unlink();
+      }
+    });
+  }
+
+  private async scanDistrict(
+    d: number,
+    from: number,
+    to: number,
+    visit: (record: TickRecord) => void,
+    signal: AbortSignal,
+  ): Promise<void> {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        const newest = await this.newest(d, signal, true);
+        const last = Math.min(to - 1, newest.record.tick);
+        if (last < from) return;
+        const start = (await this.find(d, from, signal)).rec ?? (await this.at(d, 0, signal));
+        const end = (await this.find(d, last, signal)).rec;
+        if (!start || !end) return;
+        for (let o = start.offset; o <= end.offset; o += SCAN_BATCH) {
+          const records = await this.range(d, o, Math.min(o + SCAN_BATCH, end.offset + 1), signal, false);
+          for (const r of records) if (r.tick >= from && r.tick < to) visit(r);
+        }
+        return;
+      } catch (err) {
+        // Retention moved up past the start of a read: the range is looked up again from what is left.
+        if (!(err instanceof Restart) || attempt >= MAX_ROUNDS) throw err;
+      }
     }
   }
 
@@ -704,7 +757,13 @@ export class Seeker {
    * Records `from` up to, not including, `end`, in order. The first page says how many records a page holds; the rest
    * are then read together. What is cached is not read again.
    */
-  private async range(d: number, from: number, end: number, signal: AbortSignal): Promise<TickRecord[]> {
+  private async range(
+    d: number,
+    from: number,
+    end: number,
+    signal: AbortSignal,
+    remember = true,
+  ): Promise<TickRecord[]> {
     const cache = this.records[d]!;
     const got = new Map<number, TickRecord>();
     let size = 0;
@@ -729,7 +788,7 @@ export class Seeker {
         if (size === 0) size = this.stats.pageSize = page.nextOffset - start;
         for (const r of page.records) {
           const record = this.decode(d, r);
-          this.keep(d, r.offset, record);
+          if (remember) this.keep(d, r.offset, record);
           got.set(r.offset, record);
         }
       });

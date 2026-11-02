@@ -8,6 +8,7 @@ import { momentLink } from './moments';
 import { PHOTO_CLASS, createPhoto } from './ui/photo';
 import { createFollowCard, isFollowKey, isStopKey } from './ui/follow-card';
 import { Following } from './follow';
+import { DayPanel, type DayView } from './day-panel';
 import { bindTap } from './tap';
 import { createShare } from './ui/share';
 import { isPlayKey } from './ui/keys';
@@ -19,7 +20,7 @@ import { createCity, move } from './scene';
 import init, { generate, Metro } from './core/felix_metro_core.js';
 import { parseCity, type City } from './layout';
 import { beforeSignIn, fetchOidc, signIn } from './auth';
-import { CityState, type Building } from './city';
+import { CityState, type Building, type TickRecord } from './city';
 import { TICKS_PER_HOUR, TickClock, cityTime } from './clock';
 import { connectLive, onOldLog } from './live';
 import { Gateway, GatewayError } from './gateway';
@@ -197,6 +198,8 @@ declare global {
       /** Where a car or walker drawn now is on the screen, in CSS pixels, or null when it is not drawn. */
       screenOf(resident: number): { x: number; y: number } | null;
     };
+    /** The follow card's list of a day, for the CI checks: draw a view on the card and hear which row was chosen. */
+    __day?: { show(view: DayView | null): void; onPick: ((index: number) => void) | null };
     /** The settings sheet, key list and first-visit tip, for the CI check and the console; null when the overlay is off. */
     __ui?: Shell;
     __quality?: {
@@ -426,6 +429,8 @@ async function main() {
   let hasLive = false;
   /** Draws the bar and the past pill from the tick on screen; set once the page can scrub. */
   let timelineFrame: ((tick: number) => void) | null = null;
+  /** Shows the city at a tick as the timeline would, once it can seek; null before that and on a page with no history. */
+  let seekTo: ((tick: number) => void) | null = null;
   /** Keeps the building tools in step with the pointer and the page; set when there are tools. */
   let placementFrame: (() => void) | null = null;
   /** Whether a building tool is in hand, when a click on the city is the tool's and not a follow's. */
@@ -1022,6 +1027,15 @@ async function main() {
       preview(to);
       scrubLatest.want(to, moving);
     };
+    seekTo = (tick) => {
+      void (async () => {
+        if (!range) await refreshRange();
+        if (!range) return note('The timeline is not available yet. Try again in a moment.');
+        // An entry from before the oldest moment the log keeps goes to that oldest moment, which the person should be told.
+        if (tick < range.oldest) note('That moment is no longer kept. Showing the oldest one.');
+        go(tick, false);
+      })();
+    };
     const rewindFromLive = async () => {
       if (!hasLive || scrubTarget !== null) return;
       if (!range) await refreshRange();
@@ -1288,7 +1302,16 @@ async function main() {
     }
   }
   const dom = renderer.domElement;
-  const card = shell ? createFollowCard(() => following?.stop()) : null;
+  const card = shell
+    ? createFollowCard(() => following?.stop(), {
+        step: (delta) => dayPanel?.step(delta),
+        pick: (index) => {
+          window.__day?.onPick?.(index);
+          dayPanel?.pick(index);
+        },
+      })
+    : null;
+  if (hooks && card) window.__day = { show: (view) => card.showDay(view), onPick: null };
   const following = city
     ? new Following({
         profile: (resident) => residents().profile(resident),
@@ -1300,8 +1323,35 @@ async function main() {
           if (traffic) traffic.pinned = resident;
         },
         show: (view) => card?.show(view),
+        onFollow: (resident) => {
+          dayPanel?.follow(resident);
+          if (resident === null) card?.showDay(null);
+        },
       })
     : null;
+  /** Listeners for the records the live city takes in, which keep a day that is still going current. */
+  const recordListeners = new Set<(record: TickRecord) => void>();
+  if (liveState && hasLive) liveState.onApplied = (record) => recordListeners.forEach((listener) => listener(record));
+  // A resident's day is read from the log. A page with no log has no day panel to ask, so the card lists the schedule.
+  const dayPanel =
+    following && city && state
+      ? new DayPanel({
+          scan: async (from, to, visit, signal) => {
+            const s = await seeker();
+            if (!s) throw new Error('nothing here answers like a gateway');
+            await s.scan(from, to, visit, { signal });
+          },
+          span: async () => (await seeker())?.retained() ?? null,
+          live: (listener) => {
+            recordListeners.add(listener);
+            return () => recordListeners.delete(listener);
+          },
+          tip: () => (hasLive ? (liveState?.latest ?? null) : null),
+          seek: (tick) => seekTo?.(tick),
+          placeName: (lot) => city!.lots[lot]?.name ?? null,
+          show: (view) => card?.showDay(view),
+        })
+      : null;
   /** What a follow asks each frame, made once: the trip a resident is on in the state on screen, which a seek replaces. */
   const voyageAt = (resident: number, at: number) => state?.voyageAt(resident, at);
   const noVoyage = () => undefined;
@@ -1413,6 +1463,7 @@ async function main() {
         ambient?.drive(ambientTick);
         traffic.update(tick, still ? 0 : dt, state.active());
         following?.frame(tick, voyageAt);
+        dayPanel?.frame(tick);
         state.settle(tick);
         construction.update(tick, state.rising, state.falling);
         ambient?.decorate(ambientTick);
