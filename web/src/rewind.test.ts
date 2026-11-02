@@ -92,11 +92,17 @@ describe('Hour', () => {
     expect(hour.at(480)!.districts[0]!.offset).toBe(480);
   });
 
-  it('has no start while districts disagree on their keyframe, or when a seek read none', () => {
+  it('reaches only as far as the districts that have rolled over until the rest do', () => {
     const hour = Hour.from(seekTo(479));
     hour.add(0, 480, record(0, 480));
-    expect(hour.start).toBeNull();
+    expect(hour.start).toBe(480);
+    expect(hour.covers(480)).toBe(false);
     expect(hour.at(480)).toBeNull();
+    hour.add(1, 480, record(1, 480));
+    expect(hour.covers(480)).toBe(true);
+  });
+
+  it('has no start when a seek read no keyframe', () => {
     const bare = Hour.from({ tick: 5, requested: 5, exact: true, districts: [{ records: [], offset: 5, before: [] }] });
     expect(bare.start).toBeNull();
     expect(bare.covers(5)).toBe(false);
@@ -113,5 +119,45 @@ describe('neighbours', () => {
     expect(neighbours(500, 0, 600)).toEqual([479]);
     expect(neighbours(500, 0, 719)).toEqual([479]);
     expect(neighbours(500, 0, 800)).toEqual([479, 800]);
+  });
+});
+
+describe('Hour with keyframes on different ticks', () => {
+  const at = (d: number, tick: number): TickRecord => ({
+    ...record(d, tick),
+    keyframe: tick === (d === 0 ? 240 : 250) ? { buildings: [] } : null,
+  });
+  const seek = (tick: number): SeekResult => ({
+    tick,
+    requested: tick,
+    exact: true,
+    districts: [240, 250].map((from, d) => ({
+      records: Array.from({ length: tick - from + 1 }, (_, i) => at(d, from + i)),
+      offset: tick,
+      before: [],
+    })),
+  });
+
+  it('starts at the latest keyframe, and covers only from there', () => {
+    const hour = Hour.from(seek(300));
+    expect(hour.start).toBe(250);
+    expect(hour.covers(249)).toBe(false);
+    expect(hour.covers(250)).toBe(true);
+  });
+
+  it('folds each district from its own keyframe', () => {
+    const result = Hour.from(seek(300)).at(260)!;
+    expect(result.districts.map((d) => d.records[0]!.tick)).toEqual([240, 250]);
+    expect(result.districts.map((d) => d.records.at(-1)!.tick)).toEqual([260, 260]);
+    expect(Hour.from(seek(300)).at(249)).toBeNull();
+  });
+
+  it('judges the construction window by the keyframe of each district', () => {
+    const early = record(1, 248);
+    const s = seek(300);
+    s.districts[1]!.before = [early];
+    const hour = Hour.from(s);
+    expect(hour.at(255)!.districts[1]!.before).toEqual([early]);
+    expect(hour.at(259)!.districts[1]!.before).toEqual([]);
   });
 });

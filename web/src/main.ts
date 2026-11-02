@@ -609,11 +609,16 @@ async function main() {
         tail: () => liveState!.latest,
         onFail: (err) => console.warn('playback could not go on', err),
         fresh: () => new CityState(city!, metro, districts * districts),
-        onState: (next, tick) => swap(next, tick),
-        hourAt: async (tick) => {
+        onState: (next, seek) => {
+          next.onRecord = state!.onRecord;
+          swap(next, seek.tick);
+          // Space after a failed scrub starts from the state on screen, not from the seek it began at.
+          shownResult = seek;
+        },
+        hourAt: async (tick, signal) => {
           const s = await seeker();
           if (!s) throw new Error('nothing here answers like a gateway');
-          return s.peek(tick);
+          return s.peek(tick, { signal });
         },
         oldest: () => range?.oldest ?? 0,
         onEdge: () => note('That is as far back as the city goes.'),
@@ -673,6 +678,7 @@ async function main() {
     };
     /** Show the live city at once, in place of the past. */
     const snapLive = () => {
+      cancelAhead();
       stopPlayback();
       resumeFrom = null;
       swap(liveState!, null);
@@ -685,6 +691,7 @@ async function main() {
       if (!canToggle()) return false;
       if (playback) {
         playback.paused = !playback.paused;
+        if (playback.paused) readAhead();
         return true;
       }
       const p = await openPlayback();
@@ -709,6 +716,7 @@ async function main() {
       const next = shuttle({ rate: p.rate, paused: p.paused }, key);
       p.rate = next.rate;
       p.paused = next.paused;
+      if (next.paused) readAhead();
       return true;
     };
 
@@ -797,7 +805,7 @@ async function main() {
         const s = opened;
         if (!s || pastTick === null || scrubTarget !== null || !range) return;
         for (const tick of neighbours(pastTick, range.oldest, tipTick())) {
-          if (stop.signal.aborted) return;
+          if (stop.signal.aborted || pastTick === null) return;
           await s.prefetch(tick, stop.signal);
         }
       }, AHEAD_MS);
@@ -863,8 +871,10 @@ async function main() {
       if (!range) await refreshRange();
       if (!range || pastTick !== null) return;
       go(stepTick({ oldest: range.oldest, newest: tipTick() }, handleAt(), -1, false), false);
+      // A drag or another step since stops playbacks, which moves the mark; then the rewind is no longer wanted.
+      const mark = playMark;
       await scrubLatest.settled();
-      if (pastTick !== null) await shuttleBy('j');
+      if (mark === playMark && scrubTarget === null && pastTick !== null) await shuttleBy('j');
     };
     let refresher: ReturnType<typeof setInterval> | null = null;
     const bar = createTimeline(document.getElementById('scrub')!, {

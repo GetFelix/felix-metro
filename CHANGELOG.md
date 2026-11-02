@@ -9,8 +9,8 @@
 ### The page
 
 - Backward playback and speeds. From an earlier moment, `L` plays forward and each press doubles the speed to 8x, `J`
-  rewinds the same way, and `K` stops; Space still plays and pauses. 0.5x to 8x forward and 1x to 8x backward are
-  there, and the status line names any speed but plain 1x. A rewind refolds the city from the hour's keyframe to each
+  rewinds the same way, and `K` stops; Space still plays and pauses. Forward runs from 0.5x to 8x, backward from 1x to
+  8x, and the status line names any speed but plain 1x. A rewind refolds the city from the hour's keyframe to each
   tick it passes, reads the hour before ahead, and stops with a note at the oldest moment the log holds. The seeker reads
   the hours on either side of the one on screen while the page is idle and now caches three hours of records per
   district instead of two. `J` on the live city steps back 15 minutes and rewinds from there.

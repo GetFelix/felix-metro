@@ -71,6 +71,10 @@ interface Rig {
   /** Every state the playback put on screen, with the tick it was folded to. */
   shown: [CityState, number][];
   fetched: number[];
+  /** The abort signal each hour fetch was given. */
+  signals: AbortSignal[];
+  /** The seek result each replacement state was folded from. */
+  seeks: SeekResult[];
   edges: number[];
   failures: Error[];
   /** Hold the hour fetches until `release` is called. */
@@ -80,6 +84,8 @@ interface Rig {
 const rig = (at: number, opts: { gate?: boolean; oldest?: number; src?: ReturnType<typeof source> } = {}): Rig => {
   const shown: [CityState, number][] = [];
   const fetched: number[] = [];
+  const signals: AbortSignal[] = [];
+  const seeks: SeekResult[] = [];
   const edges: number[] = [];
   const failures: Error[] = [];
   let open: () => void = () => {};
@@ -88,9 +94,13 @@ const rig = (at: number, opts: { gate?: boolean; oldest?: number; src?: ReturnTy
     tail: () => 5000,
     onFail: (e) => failures.push(e),
     fresh: () => new CityState(city, trips, DISTRICTS),
-    onState: (next, tick) => shown.push([next, tick]),
-    hourAt: async (tick) => {
+    onState: (next, seek) => {
+      shown.push([next, seek.tick]);
+      seeks.push(seek);
+    },
+    hourAt: async (tick, signal) => {
       fetched.push(tick);
+      signals.push(signal);
       await gate;
       if (tick < (opts.oldest ?? 0)) throw new SeekError('unretained', 'gone', opts.oldest ?? 0);
       return seekTo(tick);
@@ -98,7 +108,7 @@ const rig = (at: number, opts: { gate?: boolean; oldest?: number; src?: ReturnTy
     oldest: () => opts.oldest ?? 0,
     onEdge: (tick) => edges.push(tick),
   });
-  return { p, shown, fetched, edges, failures, release: open };
+  return { p, shown, fetched, signals, seeks, edges, failures, release: open };
 };
 
 /** A clock the rewind's throttle reads, moved on by hand. */
@@ -136,7 +146,10 @@ describe('Playback rewinding', () => {
       later();
       p.advance(0.5);
     }
-    const want = foldedTo(Math.floor(p.head) + 2);
+    // Built straight from the log, not through the same seek fixture the playback was given.
+    const want = new CityState(city, trips, DISTRICTS);
+    for (let d = 0; d < DISTRICTS; d++)
+      for (let t = 480; t <= Math.floor(p.head) + 2; t++) want.apply(record(d, t), true);
     expect(p.state.ticks).toEqual(want.ticks);
     expect([...p.state.built]).toEqual([...want.built]);
   });
@@ -364,5 +377,113 @@ describe('Playback rewinding', () => {
     p.advance(1);
     expect(p.queued).toEqual([]);
     p.close();
+  });
+});
+
+describe('Playback rewinding, further', () => {
+  it('gives the seek the state was folded from, so a failed scrub can resume from the state on screen', () => {
+    const { p, seeks } = rig(700);
+    p.rate = -4;
+    later();
+    p.advance(1);
+    expect(seeks).toHaveLength(1);
+    expect(seeks[0]!.tick).toBe(p.state.latest);
+    expect(seeks[0]!.districts.map((d) => d.offset)).toEqual([686, 686]);
+  });
+
+  it('abandons the hour fetch when the playback closes', async () => {
+    const { p, signals } = rig(300, { gate: true });
+    p.rate = -1;
+    expect(signals).toHaveLength(1);
+    expect(signals[0]!.aborted).toBe(false);
+    p.close();
+    expect(signals[0]!.aborted).toBe(true);
+  });
+
+  it('catches up from where the rewind left the playhead, not from where the forward play had got to', () => {
+    const { p } = rig(700);
+    p.rate = -8;
+    for (let i = 0; i < 6; i++) {
+      later();
+      p.advance(1);
+    }
+    const head = p.head;
+    expect(head).toBe(508);
+    p.catchUp();
+    later();
+    p.advance(0.1);
+    // At most 960 ticks a second for a tenth of a second.
+    expect(p.shown).toBeGreaterThan(head);
+    expect(p.shown).toBeLessThan(head + 100);
+  });
+
+  it('rewinds across an hour it has just played forward through', async () => {
+    const src = source();
+    const { p, fetched } = rig(715, { src });
+    for (let i = 0; i < 8; i++) {
+      later();
+      p.advance(0.5);
+      await settle();
+    }
+    expect(p.head).toBeGreaterThan(720);
+    p.rate = -8;
+    await settle();
+    expect(fetched[0]).toBe(719);
+    later();
+    p.advance(1);
+    expect(p.head).toBeLessThan(720);
+    expect(kinds(p.state)).toEqual([Math.floor(p.head) + 2, Math.floor(p.head) + 2]);
+    p.close();
+  });
+
+  describe('with keyframes on different ticks in each district', () => {
+    /** District 0 keyframes at tick 240, district 1 at 250: neither is the hour's first tick for both. */
+    const staggered = (d: number, tick: number): TickRecord => {
+      const kf = tick === (d === 0 ? 240 : 250);
+      return {
+        ...record(d, tick),
+        keyframe: kf ? { buildings: [[d, tick, 0]] } : null,
+        events: kf ? [] : [{ type: 'built', lot: d, kind: tick, rotation: 0 }],
+      };
+    };
+    const seekStaggered = (tick: number): SeekResult => ({
+      tick,
+      requested: tick,
+      exact: true,
+      districts: [240, 250].map((from, d) => ({
+        records: Array.from({ length: tick - from + 1 }, (_, i) => staggered(d, from + i)),
+        offset: tick,
+        before: [],
+      })),
+    });
+
+    it('refolds inside the part of the hour every district holds, and waits at the later keyframe', () => {
+      const fetched: number[] = [];
+      const from = seekStaggered(300);
+      const state = new CityState(city, trips, DISTRICTS);
+      fold(state, from);
+      const p = new Playback(null, state, from, {
+        tail: () => 5000,
+        fresh: () => new CityState(city, trips, DISTRICTS),
+        onState: () => {},
+        hourAt: async (tick) => {
+          fetched.push(tick);
+          return seekStaggered(tick);
+        },
+      });
+      p.rate = -8;
+      later();
+      p.advance(1);
+      expect(p.head).toBe(268);
+      expect(kinds(p.state)).toEqual([270, 270]);
+      later();
+      p.advance(1);
+      // 250 is where both districts can fold from; the hour before is asked for, once.
+      expect(p.head).toBe(250);
+      later();
+      p.advance(1);
+      expect(p.head).toBe(250);
+      expect(fetched).toEqual([249]);
+    });
   });
 });

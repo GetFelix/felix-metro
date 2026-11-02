@@ -437,8 +437,8 @@ no live state to join and cannot play.
 **Rewinding and speeds.** `J`, `K` and `L` move along one ladder of rates, in multiples of the city's own speed: 8x, 4x, 2x
 and 1x backward, a stop, then 0.5x, 1x, 2x, 4x and 8x forward. `L` goes a rung faster forward (a rewind slows to a stop
 first), `J` goes a rung slower or faster backward, and `K` stops. From a stop each starts at 1x. A forward rate only scales
-the playhead's pace, so the pumps above feed it as before. At 8x the city's top speed of 16 ticks a second is 128, which
-the 480-record read-ahead keeps up with.
+the playhead's pace, so the pumps above feed it as before. At 8x on a city running at 16 ticks a second that is 128 ticks
+a second, which the pumps have not been measured against.
 
 A state only moves forward, so a rewind refolds. The playback keeps the records of the hour on screen, from its keyframe:
 those the seek that made the state read, plus every record played forward since. Going back, it folds a fresh state from
@@ -457,14 +457,15 @@ flowchart LR
 ```
 
 The hour before is read ahead. When a rewind starts, and again each time it enters an hour, the playback asks the seeker
-for the hour before the one it is in. While the past sits on screen unmoved, 400 ms after it came to rest the seeker also
-reads the last tick of the hour before and of the hour after, so a rewind or an hour step finds them cached. It holds
-three hours of records per district for this: the one on screen and one either side. These reads never cancel a seek, a
-seek never cancels them, and a new scrub stops them. With the hour before on hand the playhead crosses the boundary in the
-step that reaches it. Without it, the playhead waits at the keyframe until it arrives. If retention has taken the hour
-before, the rewind stops at the oldest tick the log holds and says so. Any other failed read ends the playback and shows
-the live city, like any other playback failure. `J` from the live city steps back 15 minutes, as the left arrow does, and
-rewinds from there.
+for the hour before the one it is in; ending the playback abandons that read. Separately, 400 ms after the past comes to
+rest on screen (a seek lands, or a playback is paused), the seeker reads the last tick of the hour before and of the hour
+after, so a rewind or an hour step finds them cached. It holds three hours of records per district for this: the one on
+screen and one either side. Neither kind of read cancels a seek or is cancelled by one, except that starting a scrub or
+leaving the past stops the idle read-ahead. With the hour before on hand the playhead crosses the boundary in the step
+that reaches it. Without it, the playhead waits at the keyframe until it arrives. If retention has taken the hour before,
+the rewind stops at the oldest tick the log holds and says so. Any other failed read ends the playback and shows the live
+city, like any other playback failure. Districts need not keyframe on the same tick: the hour on hand reaches back to the
+latest of their keyframes. `J` from the live city steps back 15 minutes, as the left arrow does, and rewinds from there.
 
 **Scrubbing** draws the nearest keyframe on hand while the handle moves, with
 the sun and the clock at the handle's hour, and fills in events once it rests.

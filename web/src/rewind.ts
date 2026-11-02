@@ -31,11 +31,18 @@ export class Hour {
     );
   }
 
-  /** The keyframe's tick, or null when some district's records do not begin at the same keyframe. */
+  /**
+   * The first tick every district can fold from: the latest of their keyframes, which need not be on the same tick. Null
+   * when some district's records do not begin at a keyframe.
+   */
   get start(): number | null {
-    const first = this.runs[0]?.records[0];
-    if (!first?.keyframe) return null;
-    return this.runs.every((r) => r.records[0]?.keyframe && r.records[0].tick === first.tick) ? first.tick : null;
+    let start = -1;
+    for (const r of this.runs) {
+      const first = r.records[0];
+      if (!first?.keyframe) return null;
+      start = Math.max(start, first.tick);
+    }
+    return start < 0 ? null : start;
   }
 
   /** The newest tick every district holds, or -1. */
@@ -65,16 +72,8 @@ export class Hour {
    * hour does not reach back to it. A district that skipped a tick settles every district on the earlier one all have.
    */
   at(tick: number): SeekResult | null {
-    const start = this.start;
-    if (start === null) return null;
-    let at = Math.min(tick, this.end);
-    for (;;) {
-      const lasts = this.runs.map((r) => lastNotAfter(r.records, at));
-      const lowest = Math.min(...lasts);
-      if (lowest === at) break;
-      at = lowest;
-    }
-    if (at < start) return null;
+    const at = this.tickAt(tick);
+    if (at === null) return null;
     return {
       tick: at,
       requested: tick,
@@ -85,10 +84,23 @@ export class Hour {
         return {
           records,
           offset: r.first + records.length - 1,
-          before: at - start < WINDOW ? (this.before[d] ?? []) : [],
+          before: at - r.records[0]!.tick < WINDOW ? (this.before[d] ?? []) : [],
         };
       }),
     };
+  }
+
+  /** The tick {@link at} would answer, without copying the records; null when the hour does not reach back to it. */
+  tickAt(tick: number): number | null {
+    const start = this.start;
+    if (start === null) return null;
+    let at = Math.min(tick, this.end);
+    for (;;) {
+      const lowest = Math.min(...this.runs.map((r) => lastNotAfter(r.records, at)));
+      if (lowest === at) break;
+      at = lowest;
+    }
+    return at < start ? null : at;
   }
 }
 

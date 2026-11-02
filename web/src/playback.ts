@@ -169,9 +169,9 @@ export interface PlaybackOptions {
   release?(): void;
   /** What a rewind needs: an empty state to refold into, and to be told when it replaces the one on screen. */
   fresh?(): CityState;
-  onState?(next: CityState, tick: number): void;
-  /** The records from the keyframe of the hour holding `tick` up to it. */
-  hourAt?(tick: number): Promise<SeekResult>;
+  onState?(next: CityState, seek: SeekResult): void;
+  /** The records from the keyframe of the hour holding `tick` up to it; abandoned when `signal` aborts. */
+  hourAt?(tick: number, signal: AbortSignal): Promise<SeekResult>;
   /** The oldest tick a rewind can reach. */
   oldest?(): number;
   /** Told when a rewind has gone as far back as the log holds, and stopped. */
@@ -198,6 +198,7 @@ export class Playback {
   private source: Source | null = null;
   private fail: (err: Error) => void;
   private closed = false;
+  private readonly stop = new AbortController();
   private _rate = 1;
   /** Where each district's records go on from: the offset and tick of the last one the state holds. */
   private cursor: { offset: number; tick: number }[];
@@ -297,6 +298,8 @@ export class Playback {
   /** Race to the live tip in about {@link CATCH_UP_SECONDS}, however far back the playhead is. */
   catchUp(): void {
     if (this._rate < 0) this.rate = 1;
+    // A rewind moved the head below the pace a forward play left behind.
+    this.pace = this.head;
     const gap = Math.max(0, this.options.tail() - this.head);
     this.closing = Math.max(MIN_CLOSING_TPS, gap / CATCH_UP_SECONDS);
     this.catchingUp = true;
@@ -415,7 +418,7 @@ export class Playback {
     const floor = Math.max(this.floor, this.options.oldest?.() ?? 0);
     if (next < floor || next < 0 || (tick === undefined && this.earlier?.covers(next))) return;
     this.fetching = true;
-    this.options.hourAt(next).then(
+    this.options.hourAt(next, this.stop.signal).then(
       (seek) => {
         this.fetching = false;
         if (!this.closed) this.earlier = Hour.from(seek);
@@ -424,7 +427,8 @@ export class Playback {
         this.fetching = false;
         if (this.closed) return;
         // Retention has taken the hour: a rewind stops where the log now begins.
-        if (err instanceof SeekError && err.reason === 'unretained') this.floor = err.nearest ?? this.hour.start ?? 0;
+        const bound = err instanceof SeekError && err.reason === 'unretained' ? (err.nearest ?? this.hour.start) : null;
+        if (bound !== null) this.floor = bound;
         else this.fail(err instanceof Error ? err : new Error(String(err)));
       },
     );
@@ -432,10 +436,10 @@ export class Playback {
 
   /** Fold the state to `tick` of the hour on hand, unless it is there or, without `force`, was folded a moment ago. */
   private refold(tick: number, force = false): void {
-    const seek = this.hour.at(tick);
-    if (!seek || seek.tick === this.state.latest) return;
-    const now = performance.now();
-    if (!force && now - this.foldedAt < FOLD_MS) return;
+    const at = this.hour.tickAt(tick);
+    if (at === null || at === this.state.latest) return;
+    if (!force && performance.now() - this.foldedAt < FOLD_MS) return;
+    const seek = this.hour.at(tick)!;
     try {
       const next = this.options.fresh!();
       fold(next, seek);
@@ -444,14 +448,15 @@ export class Playback {
       this.fail(err instanceof Error ? err : new Error(String(err)));
       return;
     }
-    this.foldedAt = now;
+    this.foldedAt = performance.now();
     this.cursor = seek.districts.map((d) => ({ offset: d.offset, tick: seek.tick }));
-    this.options.onState!(this.state, seek.tick);
+    this.options.onState!(this.state, seek);
   }
 
   /** Stop listening. The state keeps what was applied. */
   close(): void {
     this.closed = true;
+    this.stop.abort();
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
     for (const p of this.pumps) p.close();
