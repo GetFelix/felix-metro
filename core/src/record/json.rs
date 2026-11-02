@@ -156,6 +156,19 @@ fn event(out: &mut String, e: &Event) {
         Event::CommandCursor { next } => {
             let _ = write!(out, "{{\"type\":\"commandCursor\",\"next\":{next}");
         }
+        Event::Ledger {
+            reason,
+            earned,
+            spent,
+        } => {
+            let _ = write!(
+                out,
+                "{{\"type\":\"ledger\",\"reason\":{reason},\"earned\":{earned},\"spent\":{spent}"
+            );
+        }
+        Event::Balance { amount } => {
+            let _ = write!(out, "{{\"type\":\"balance\",\"amount\":{amount}");
+        }
     }
     out.push('}');
 }
