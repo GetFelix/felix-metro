@@ -48,6 +48,7 @@ export interface Params {
 // ?trace keeps what became of every record in `window.__trace`. ?capture (with ?trace) hands the render clock to the clip script.
 // ?t=18.5 freezes the clock at that hour, ?still freezes motion, ?tier=low|medium|high forces a tier, ?ui=0 hides the
 // overlay, ?hud shows frame statistics, ?slow=40 adds 40 ms to every frame.
+// ?as=mayor (not read here; see auth.ts) signs in as that person at a loopback sign-in, which is how the dev stack's page builds.
 export function parseParams(search: string, hash = ''): Params {
   const params = new URLSearchParams(search);
   const tier = params.get('tier');

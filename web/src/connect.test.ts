@@ -68,4 +68,60 @@ describe('connectLive', () => {
     expect(connect.mock.calls.length).toBeGreaterThan(2);
     live.close();
   });
+
+  /** A session that has caught up on an empty city, and keeps what is published through it. */
+  const joined = (missing: string[]) => {
+    const session = {
+      missing,
+      alive: true,
+      published: [] as [string, Uint8Array][],
+      onError: () => {},
+      close: () => {},
+      async subscribe() {
+        return { sub: 1, startOffset: 0, liveOffset: 0 };
+      },
+      async stateGet() {
+        return { payload: null, version: null, asOf: 0 };
+      },
+      async read() {
+        return { records: [], nextOffset: 0 };
+      },
+      async publish(stream: string, payload: Uint8Array) {
+        session.published.push([stream, payload]);
+      },
+    };
+    return session;
+  };
+
+  it('sends commands through the session that caught up, and says when it cannot', async () => {
+    const session = joined([]);
+    connect.mockResolvedValue(session);
+    const state = new CityState({ lots: [] } as never, { trip: () => undefined }, 1);
+    const live = await connectLive({ url: 'ws://x/ws', oidc: {} as never, city: 'harbor', state });
+    expect(live.commands.blocked()).toBeNull();
+    await live.commands.send(Uint8Array.of(1, 2));
+    expect(session.published).toEqual([['commands', Uint8Array.of(1, 2)]]);
+    session.alive = false;
+    expect(live.commands.blocked()).toBe('down');
+    await expect(live.commands.send(Uint8Array.of(3))).rejects.toMatchObject({ code: 'closed' });
+    expect(session.published).toHaveLength(1);
+    live.close();
+  });
+
+  it('knows a sign-in with no right to the command stream', async () => {
+    connect.mockResolvedValue(joined(['commands']));
+    const state = new CityState({ lots: [] } as never, { trip: () => undefined }, 1);
+    const live = await connectLive({ url: 'ws://x/ws', oidc: {} as never, city: 'harbor', state });
+    expect(live.commands.blocked()).toBe('viewer');
+    live.close();
+  });
+
+  it('is out of reach before it has a session', async () => {
+    vi.useFakeTimers();
+    connect.mockRejectedValue(new Error('cannot reach'));
+    const state = new CityState({ lots: [] } as never, { trip: () => undefined }, 1);
+    const live = await connectLive({ url: 'ws://x/ws', oidc: {} as never, city: 'harbor', state });
+    expect(live.commands.blocked()).toBe('down');
+    live.close();
+  });
 });

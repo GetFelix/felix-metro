@@ -1,5 +1,8 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { families, refusal } from '../build';
+import { whyNot } from '../placement';
+import { BUILD_LABEL, DEMOLISH_LABEL, HINTS } from './build-bar';
 import { HINT_TEXT } from './hint';
 import { SHORTCUTS } from './keys';
 import { archetypeLabel, doing, type Activity, type Archetype } from '../follow';
@@ -38,6 +41,12 @@ const words = [
   SHARE_LABEL,
   SHARE_COPIED,
   SHARE_NONE,
+  BUILD_LABEL,
+  DEMOLISH_LABEL,
+  ...Object.values(HINTS),
+  ...[1, 2, 3, 4, 5, 7, 8, 9, 99].map(refusal),
+  ...families().flatMap((f) => [f.title, ...f.choices.map((c) => c.label)]),
+  whyNot({ link: null, atTip: () => true, wantsLive: true }) ?? '',
   ...GROUPS.map((g) => g.label),
   ...CHOICES.flatMap((c) => [c.label, c.hint]),
   ...SHORTCUTS.flatMap((g) => [g.title, g.when ?? '', ...g.rows.map((r) => r.action)]),
