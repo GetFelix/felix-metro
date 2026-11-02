@@ -51,6 +51,20 @@
 - Space plays or pauses an earlier moment from the timeline too, and does nothing while the settings sheet is open.
 - Brand tints in the overlay's CSS are tokens in `kit.css` (`--coral-wash`, `--amber-wash`, `--violet-glow`, `--cyan-glow`).
 - Short messages, such as "That moment is no longer kept.", now sit above the timeline in the page's glass style.
+- Cars and walkers are drawn as instances (#91). One draw call covers every car of a kind's mesh, one every walker of a
+  model's mesh, and three more cover all the car lights, so the first cars and walkers on screen add a fixed 219 draw
+  calls on the high tier (155 on medium, 59 on low) and more add none, where each used to add about 18. Cars and walkers
+  more than 1.5 tiles outside the view are not drawn. Walkers no longer carry bones: the walk clip is baked into a
+  texture per model and a shared clock, offset for each resident, picks the pose (`web/src/walk.ts`). The tier limits on
+  cars and walkers drawn at once go from 40 to 80 on low and from 80 to 160 on medium; high is still unlimited. They are
+  not measured against a GPU. `web/traffic-load.html` and `web/scripts/check-traffic.mjs` count the draw calls for N
+  movers, and `check-traffic-pictures.mjs` compares a car and a walker close up with renders in `web/references`; CI
+  runs both. [docs/art.md](docs/art.md#cars-and-walkers) has the details and the numbers.
+- A visible look change: car headlights, taillights and the light on the road ahead now show at night on the high and
+  medium tiers, and they feed the bloom. They were made after the first frame, so the pass that hides the glows for
+  ambient occlusion and the distance blur left them hidden for good. A dense night at 800 movers on high does not blow
+  out: the lights read as small points, below the street lamps' pools.
+- A car or walker whose trip has just ended is no longer drawn for a frame after it when the page has no new tick.
 - Camera controls. Left-drag turns and tilts, right-drag or Shift-drag slides, the wheel and a pinch zoom toward the
   point under the pointer, one finger turns and two fingers slide on a touch screen, and `W` `A` `S` `D`, `Q` `E`,
   `+` `-` and `0` do the same from the keyboard (`0` goes back to the opening view). The point the camera looks at

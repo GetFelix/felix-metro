@@ -658,7 +658,7 @@ timelines locked to the same tick.
 
 - **Three.js**, plain TypeScript, no UI framework, built with Vite.
 - **Kenney city kits** (Roads, Commercial, Suburban, Industrial, Car Kit): CC0, one consistent style, restyled by material name to one palette.
-- **Instanced meshes** for cars, people, trees and repeated buildings.
+- **Instanced meshes** for cars and people, so a rush hour of hundreds costs the draw calls of a handful ([how](art.md#cars-and-walkers)). Trees and repeated buildings are still one object each.
 - **Distance haze**: a depth-of-field pass that blurs only what lies beyond a wide sharp band past the focus, with saturated colour, so the city reads sharp up close and softens toward the horizon.
 - **A camera you can move.** Turn, tilt, slide and zoom with a mouse, trackpad, touch or the keyboard, kept inside the city. See [the camera](art.md#camera).
 - **Day and night from the tick.** Sun angle, sky, street lights and window lights all follow the city clock, live and while scrubbing.
