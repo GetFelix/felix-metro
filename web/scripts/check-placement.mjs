@@ -31,7 +31,14 @@ const browser = await chromium.launch({
   args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'],
 });
 const problems = [];
+let step = 'starting';
+let stepAt = Date.now();
+const progress = (what) => {
+  step = what;
+  stepAt = Date.now();
+};
 const check = (ok, what) => {
+  progress(what);
   if (!ok) problems.push(what);
   console.log(`${ok ? 'ok  ' : 'FAIL'} ${what}`);
 };
@@ -42,7 +49,11 @@ const within = (ms, work, fallback) => {
   const late = new Promise((resolve) => (timer = setTimeout(resolve, ms, fallback)));
   return Promise.race([work, late]).finally(() => clearTimeout(timer));
 };
+let failing = false;
 const fail = async (message) => {
+  // Two waits can fail together (Promise.all); the first one reports.
+  if (failing) return new Promise(() => {});
+  failing = true;
   console.error(message);
   for (const [i, page] of pages.entries())
     await within(
@@ -64,18 +75,33 @@ const busy = () =>
     10_000,
     (async () => {
       const cdp = await browser.newBrowserCDPSession();
-      const sample = async () => (await cdp.send('SystemInfo.getProcessInfo')).processInfo;
-      const before = await sample();
-      await new Promise((resolve) => setTimeout(resolve, 2000));
-      return (await sample())
-        .map((q) => {
-          const was = before.find((o) => o.id === q.id)?.cpuTime ?? q.cpuTime;
-          return `${q.type}#${q.id} ${Math.round(((q.cpuTime - was) / 2) * 100)}%`;
-        })
-        .join(', ');
+      try {
+        const sample = async () => (await cdp.send('SystemInfo.getProcessInfo')).processInfo;
+        const before = await sample();
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+        return (await sample())
+          .map((q) => {
+            const was = before.find((o) => o.id === q.id)?.cpuTime ?? q.cpuTime;
+            return `${q.type}#${q.id} ${Math.round(((q.cpuTime - was) / 2) * 100)}%`;
+          })
+          .join(', ');
+      } finally {
+        await cdp.detach().catch(() => {});
+      }
     })().catch((e) => `no process info: ${e.message}`),
     'no process info',
   );
+
+/**
+ * Every Playwright call on a hung renderer can stay pending for good, whatever its own timeout says. Node's timers still
+ * run, so a step that makes no progress for STALL_MS fails the run with the step it stopped at.
+ */
+const STALL_MS = 6 * MINUTE;
+setInterval(async () => {
+  if (failing || Date.now() - stepAt < STALL_MS) return;
+  console.log(`browser cpu: ${await busy()}`);
+  await fail(`no progress for ${STALL_MS / MINUTE} minutes; last step: ${step}`);
+}, 15_000).unref();
 
 /**
  * A page signed in as `who`, once its city is drawn and the live connection has caught up. A page that does not get
@@ -88,16 +114,23 @@ const OPEN_TRIES = 3;
 async function open(name, who, options = {}) {
   for (let attempt = 1; ; attempt++) {
     const started = Date.now();
+    progress(`opening ${name}`);
     let context = null;
     let page = null;
+    // An attempt we gave up on may still finish loading; it closes itself and its errors no longer count.
+    let dead = false;
     const load = async () => {
-      context = await browser.newContext({ viewport: { width: 1280, height: 720 }, ...options });
-      await context.addInitScript((t) => sessionStorage.setItem('metro.token', t), who);
-      page = await context.newPage();
+      const mine = await browser.newContext({ viewport: { width: 1280, height: 720 }, ...options });
+      context = mine;
+      if (dead) return mine.close().then(() => 'abandoned');
+      await mine.addInitScript((t) => sessionStorage.setItem('metro.token', t), who);
+      const tab = await mine.newPage();
+      page = tab;
+      if (dead) return mine.close().then(() => 'abandoned');
       page.label = name;
       page.crashed = false;
       page.on('crash', () => (page.crashed = true));
-      page.on('pageerror', (e) => problems.push(`${name}: page error: ${e}`));
+      page.on('pageerror', (e) => !dead && problems.push(`${name}: page error: ${e}`));
       page.on('console', (m) => m.type() === 'error' && console.log(`${name} console: ${m.text()}`));
       await page.goto(appUrl, { waitUntil: 'load', timeout: READY_MS });
       await page.waitForFunction(
@@ -109,10 +142,12 @@ async function open(name, who, options = {}) {
     };
     const why = await within(
       READY_MS + 10_000,
-      load().catch((e) => String(e.message).split('\n')[0]),
+      load().catch((e) => String(e?.message ?? e).split('\n')[0]),
       'no answer from the browser',
     );
+    if (why !== null) dead = true;
     if (why === null) {
+      progress(`opened ${name}`);
       console.log(`opened ${name} in ${Date.now() - started} ms${attempt > 1 ? ` (try ${attempt})` : ''}`);
       pages.push(page);
       return { context, page };
@@ -143,20 +178,31 @@ async function open(name, who, options = {}) {
 const state = (page) => page.evaluate(() => window.__build.state());
 const kindOn = (page, lot) => page.evaluate((l) => window.__build.kindOn(l), lot);
 const HUNG = Symbol('hung');
-const until = (page, fn, arg, what, timeout = 2 * MINUTE) =>
-  within(timeout + 10_000, page.waitForFunction(fn, arg, { polling: 250, timeout }), HUNG).then(
-    (done) => (done === HUNG ? fail(`${page.label}: ${what} (the page stopped answering)`) : done),
-    () => fail(`${page.label}: ${what}`),
+const until = (page, fn, arg, what, timeout = 2 * MINUTE) => {
+  progress(`${page.label}: waiting until ${what}`);
+  return within(timeout + 10_000, page.waitForFunction(fn, arg, { polling: 250, timeout }), HUNG).then(
+    (done) => {
+      if (done === HUNG) return fail(`${page.label}: ${what} (the page stopped answering)`);
+      progress(`${page.label}: ${what} was met`);
+      return done;
+    },
+    (e) => fail(`${page.label}: ${what} (${String(e?.message ?? e).split('\n')[0]}; crashed=${page.crashed})`),
   );
+};
 /** Two frames on, so the camera has been placed and the lots' screen positions are current. */
 const frames = (page) =>
-  page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
+  within(
+    MINUTE,
+    page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))),
+    HUNG,
+  ).then((done) => (done === HUNG ? fail(`${page.label}: no frame was drawn in a minute`) : done));
 
 /**
  * Hold `tool` over `lot` and use it: with the mouse, or with a tap. Resolves with the state once the city has answered,
  * which the number of answers moves past.
  */
 async function use(page, tool, lot, { kind = null, touch = false, confirm = false } = {}) {
+  progress(`${page.label}: ${tool} on lot ${lot}`);
   await page.evaluate((l) => window.__build.focus(l), lot);
   await frames(page);
   const at = await page.evaluate((l) => window.__build.screenOf(l), lot);
@@ -187,7 +233,10 @@ async function use(page, tool, lot, { kind = null, touch = false, confirm = fals
             () => false,
           );
         if (went) break;
-        if (tap === 3) await fail(`${page.label}: no tap confirmed the demolish: ${JSON.stringify(await state(page))}`);
+        if (tap === 3)
+          await fail(
+            `${page.label}: no tap confirmed the demolish: ${JSON.stringify(await within(5000, state(page), null))}`,
+          );
       }
     }
   } else {
@@ -216,7 +265,10 @@ async function answer(page, before) {
     (await state(page)).tool === null && !(await page.locator('#build-panel').isVisible()),
     'B gives a viewer no tool',
   );
-  await context.close();
+  await within(
+    10_000,
+    context.close().catch(() => {}),
+  );
   pages.pop();
 }
 
@@ -504,11 +556,18 @@ await Promise.all(
   await a.page.screenshot({ path: join(out, 'a-road-gone.png') });
 }
 
-await b.page.screenshot({ path: join(out, 'b-final.png') });
+await within(
+  10_000,
+  b.page.screenshot({ path: join(out, 'b-final.png') }).catch(() => {}),
+);
 
-await browser.close();
+await within(
+  10_000,
+  browser.close().catch(() => {}),
+);
 if (problems.length) {
   console.error(`\n${problems.length} problem(s):\n${problems.join('\n')}`);
   process.exit(1);
 }
 console.log('two builders edited at once and saw each other’s changes');
+process.exit(0);
