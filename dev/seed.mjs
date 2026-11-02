@@ -10,6 +10,7 @@ import { chmod, mkdir, writeFile } from "node:fs/promises";
 import {
   AUDIENCE,
   CONTROL_PLANE,
+  IDP,
   NAMESPACE,
   TENANT,
   createCityStreams,
