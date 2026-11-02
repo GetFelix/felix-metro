@@ -251,6 +251,27 @@ async fn collect<L: Log>(
                                 depart: *depart,
                                 vehicle: *vehicle,
                                 route: route.clone(),
+                                node: None,
+                            },
+                        );
+                    }
+                }
+                // A replanned trip is the one the vehicle is on from the tick of the event.
+                Event::Replan {
+                    resident,
+                    vehicle,
+                    node,
+                    route,
+                } if base.is_some_and(|base| tick <= base) => {
+                    let newer = departures.get(resident).is_none_or(|d| d.depart <= tick);
+                    if newer {
+                        departures.insert(
+                            *resident,
+                            Departure {
+                                depart: tick,
+                                vehicle: *vehicle,
+                                route: route.clone(),
+                                node: Some(*node),
                             },
                         );
                     }

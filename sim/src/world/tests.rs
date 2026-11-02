@@ -605,6 +605,7 @@ fn a_world_restored_from_a_keyframe_steps_as_the_original_does() {
                                 depart: *depart,
                                 vehicle: *vehicle,
                                 route: route.clone(),
+                                node: None,
                             },
                         );
                     }

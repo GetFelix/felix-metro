@@ -5,8 +5,8 @@ use std::collections::{BTreeMap, HashSet};
 use felix_metro_core::record::{
     BuildingDiff, Command, Counts, Doing, Event, Keyframe, LEDGER_BUILD, LEDGER_DAY,
     LEDGER_DEMOLISH, Leg, NO_BUILDING, REFUSED_BAD_KIND, REFUSED_EMPTY, REFUSED_IN_USE,
-    REFUSED_NO_FUNDS, REFUSED_OCCUPIED, REFUSED_UNKNOWN, REFUSED_UNSUPPORTED, RESULT_APPLIED,
-    ResidentState, Vehicle,
+    REFUSED_NO_FUNDS, REFUSED_OCCUPIED, REFUSED_ROAD_BLOCKED, REFUSED_UNKNOWN, REFUSED_UNSUPPORTED,
+    RESULT_APPLIED, ROAD_ADDED, ROAD_REMOVED, ResidentState, RoadDiff, Vehicle,
 };
 use felix_metro_core::{
     Activity, BuildingKind, City, Congestion, Mode, Places, Resident, TICKS_PER_DAY,
@@ -74,6 +74,8 @@ pub(crate) struct World {
     accounts: Vec<i64>,
     /// Road and park upkeep a day, by district.
     upkeep: Vec<u64>,
+    /// Segments removed since the last step, whose vehicles that step replans.
+    removed: Vec<u32>,
 }
 
 /// What a command did: the district it touched and the events to record there.
@@ -130,6 +132,7 @@ impl World {
             cars,
             built: BTreeMap::new(),
             in_use,
+            removed: Vec::new(),
         }
     }
 
@@ -161,6 +164,10 @@ impl World {
                 }
                 if !is_empty(now) {
                     return Applied::refused(district, REFUSED_OCCUPIED);
+                }
+                let at = &self.city.lots[lot as usize];
+                if self.city.is_road(at.x, at.z) {
+                    return Applied::refused(district, REFUSED_ROAD_BLOCKED);
                 }
                 // A park residents go to stays one.
                 if self.in_use.contains(&lot) {
@@ -236,11 +243,10 @@ impl World {
                     ],
                 }
             }
-            // A road changes the graph every route and the page's own copy of
-            // the city are built on, and a zone has no record to carry it.
-            Command::PlaceRoad { .. } | Command::Zone { .. } => {
-                Applied::refused(0, REFUSED_UNSUPPORTED)
-            }
+            Command::PlaceRoad { a, b } => self.place_road(a, b),
+            Command::RemoveRoad { segment } => self.remove_road(segment),
+            // A zone has no record to carry it.
+            Command::Zone { .. } => Applied::refused(0, REFUSED_UNSUPPORTED),
             Command::Speed { .. } | Command::Fork { .. } => {
                 Applied::refused(0, REFUSED_UNSUPPORTED)
             }
@@ -276,6 +282,7 @@ impl World {
         let city = &self.city;
         let planned_around = self.cars.clone();
         let cong = Congestion::new(&planned_around);
+        let removed = std::mem::take(&mut self.removed);
         for person in &mut self.people {
             let id = person.resident.id;
             match &mut person.state {
@@ -284,6 +291,33 @@ impl World {
                     vehicle,
                     district,
                 } => {
+                    if !removed.is_empty() && trip.arrive() > tick {
+                        let (leg, _) = trip.leg_progress(tick);
+                        let hit = trip.legs()[leg..]
+                            .iter()
+                            .any(|l| removed.contains(&l.segment));
+                        // A removed segment is a whole leg ahead or the one being driven, and either way the
+                        // leg being driven ends at a node.
+                        if hit
+                            && let Some(node) = trip.leg_end_node(city, leg)
+                            && let Some(new) = person.resident.replan(
+                                city,
+                                person.block,
+                                node,
+                                tick,
+                                &cong,
+                                trip.mode,
+                            )
+                        {
+                            out[usize::from(*district)].events.push(Event::Replan {
+                                resident: id,
+                                vehicle: *vehicle,
+                                node,
+                                route: new.legs(),
+                            });
+                            *trip = new;
+                        }
+                    }
                     // The last step can end in another district, so cross before
                     // arriving. The vehicle ends in the district of the lot it
                     // reaches, which a road beside a boundary may not be in.
@@ -403,6 +437,20 @@ impl World {
                 counts: Counts::default(),
             })
             .collect();
+        // Every road a builder added, in id order, in the district of its first node.
+        for segment in self.city.segments.iter().filter(|s| s.built) {
+            let district = self.node_district(segment.a).unwrap_or(0);
+            frames[usize::from(district)].roads.push(RoadDiff {
+                segment: segment.id,
+                change: if segment.removed {
+                    ROAD_REMOVED
+                } else {
+                    ROAD_ADDED
+                },
+                a: segment.a,
+                b: segment.b,
+            });
+        }
         // A keyframe lists every lot that differs from the generated city, so a viewer can tell a lot it leaves out
         // is the generated one.
         for diff in self.built.values() {
@@ -505,5 +553,6 @@ fn count_car(city: &City, cars: &mut [u16], trip: &Trip, tick: u32) {
 
 mod economy;
 mod restore;
+pub(crate) mod roads;
 #[cfg(test)]
 mod tests;

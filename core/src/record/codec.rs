@@ -31,6 +31,8 @@ const EV_ARRIVAL: u8 = 13;
 const EV_EXTENDED: u8 = 15;
 const EXT_LEDGER: u64 = 1;
 const EXT_BALANCE: u64 = 2;
+/// Kinds 3 to 5 are taken by the author, the council and policies.
+const EXT_ROADWORK: u64 = 6;
 
 const CMD_PLACE_ROAD: u8 = 1;
 const CMD_ZONE: u8 = 2;
@@ -38,6 +40,7 @@ const CMD_BUILD: u8 = 3;
 const CMD_DEMOLISH: u8 = 4;
 const CMD_SPEED: u8 = 5;
 const CMD_FORK: u8 = 6;
+const CMD_REMOVE_ROAD: u8 = 7;
 
 const REG_CREATED: u8 = 1;
 const REG_FORKED: u8 = 2;
@@ -262,11 +265,13 @@ fn put_event(w: &mut Writer, e: &Event, tick: u32) -> Result<(), EncodeError> {
         }),
         Event::Replan {
             resident,
-            from_segment,
+            vehicle,
+            node,
             route,
         } => w.framed(EV_REPLAN, EVENT_TAG_BITS, |b| {
             b.varint(u64::from(*resident));
-            b.varint(u64::from(*from_segment));
+            b.u8(*vehicle);
+            b.varint(u64::from(*node));
             put_route(b, route);
             Ok(())
         }),
@@ -319,6 +324,19 @@ fn put_event(w: &mut Writer, e: &Event, tick: u32) -> Result<(), EncodeError> {
         Event::Road { segment, change } => w.framed(EV_ROAD, EVENT_TAG_BITS, |b| {
             b.u32(*segment);
             b.u8(*change);
+            Ok(())
+        }),
+        Event::Roadwork {
+            segment,
+            change,
+            a,
+            b: to,
+        } => w.framed(EV_EXTENDED, EVENT_TAG_BITS, |b| {
+            b.varint(EXT_ROADWORK);
+            b.varint(u64::from(*segment));
+            b.u8(*change);
+            b.varint(u64::from(*a));
+            b.varint(u64::from(*to));
             Ok(())
         }),
         Event::Command {
@@ -385,7 +403,8 @@ fn get_entry(r: &mut Reader, tick: u32, out: &mut Vec<Event>) -> Result<(), Deco
         },
         EV_REPLAN => Event::Replan {
             resident: r.varint_u32()?,
-            from_segment: r.varint_u32()?,
+            vehicle: r.u8()?,
+            node: r.varint_u32()?,
             route: get_route(r)?,
         },
         EV_ARRIVED => Event::Arrived {
@@ -439,6 +458,12 @@ fn get_entry(r: &mut Reader, tick: u32, out: &mut Vec<Event>) -> Result<(), Deco
             EXT_BALANCE => Event::Balance {
                 amount: r.svarint()?,
             },
+            EXT_ROADWORK => Event::Roadwork {
+                segment: r.varint_u32()?,
+                change: r.u8()?,
+                a: r.varint_u32()?,
+                b: r.varint_u32()?,
+            },
             _ => return Ok(()),
         },
         _ => return Ok(()),
@@ -466,6 +491,8 @@ fn put_keyframe(w: &mut Writer, k: &Keyframe, tick: u32) -> Result<(), EncodeErr
         w.delta(prev, d.segment);
         prev = d.segment;
         w.u8(d.change);
+        w.varint(u64::from(d.a));
+        w.varint(u64::from(d.b));
     }
     w.varint(k.residents.len() as u64);
     prev = 0;
@@ -514,6 +541,8 @@ fn get_keyframe(r: &mut Reader, tick: u32) -> Result<Keyframe, DecodeError> {
         roads.push(RoadDiff {
             segment: prev,
             change: r.u8()?,
+            a: r.varint_u32()?,
+            b: r.varint_u32()?,
         });
     }
     let n = r.count()?;
@@ -585,6 +614,10 @@ pub(super) fn encode_command(c: &CommandRecord) -> Result<Vec<u8>, EncodeError> 
             w.u32(*tick);
             w.str(name)?;
         }
+        Command::RemoveRoad { segment } => {
+            w.u8(CMD_REMOVE_ROAD);
+            w.u32(*segment);
+        }
     }
     Ok(w.0)
 }
@@ -616,6 +649,7 @@ pub(super) fn decode_command(bytes: &[u8]) -> Result<CommandRecord, DecodeError>
             tick: r.u32()?,
             name: r.str()?,
         },
+        CMD_REMOVE_ROAD => Command::RemoveRoad { segment: r.u32()? },
         tag => return Err(DecodeError::UnknownTag(tag)),
     };
     r.finish()?;

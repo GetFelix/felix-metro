@@ -175,12 +175,13 @@ writes decisions instead, and the client works out positions:
 | Event                  | Fields                                                                         | Meaning                                             |
 | ---------------------- | ------------------------------------------------------------------------------ | --------------------------------------------------- |
 | `trip`                 | resident, vehicle kind, depart tick, route (segment ids with a speed each)     | Leaves now along this route                         |
-| `replan`               | resident, from segment, new route                                              | A jam or a closed road changed the route            |
+| `replan`               | resident, vehicle, node, new route                                             | A removed road changed the route                    |
 | `arrived`              | resident, lot                                                                  | Reached a building                                  |
 | `activity`             | resident, kind (sleep, work, shop, ...), until tick                            | What they are doing inside                          |
 | `left` / `entered`     | resident, other district; `entered` adds the vehicle state with the route left | Crossed into another district                       |
 | `built` / `demolished` | lot, building kind, rotation                                                   | A building changed                                  |
-| `road`                 | segment, change (closed, opened, added, removed)                               | A road changed                                      |
+| `road`                 | segment, change (closed, opened, added, removed)                               | Reserved: closing and opening a road               |
+| `roadwork`             | segment, change (added, removed), the segment's two nodes                      | A builder added or removed a road                   |
 | `command`              | principal hash, builder name, command id, result                               | A builder's command was applied or refused          |
 | `speed`                | ticks per second                                                               | The city's speed changed; 0 is paused               |
 | `ledger`               | reason (day, build, demolish), earned, spent                                   | Money moved in or out of the city's funds           |
@@ -255,14 +256,14 @@ skips.
 | Tag | Event            | Fields                                                           |
 | --- | ---------------- | ---------------------------------------------------------------- |
 | 1   | `trip`           | resident, vehicle `u8`, depart, route                            |
-| 2   | `replan`         | resident, from segment, route                                    |
+| 2   | `replan`         | resident, vehicle `u8`, node, route                              |
 | 3   | `arrived`        | resident, lot                                                    |
 | 4   | `activity`       | resident, kind `u8`, until                                       |
 | 5   | `left`           | resident, district                                               |
 | 6   | `entered`        | resident, district, vehicle state                                |
 | 7   | `built`          | lot `u32`, kind `u16`, rotation `u8`                             |
 | 8   | `demolished`     | lot `u32`, kind `u16`, rotation `u8`                             |
-| 9   | `road`           | segment `u32`, change `u8`                                       |
+| 9   | `road`           | segment `u32`, change `u8`; nothing writes it yet                |
 | 10  | `command`        | principal `u64`, name, id `u32`, result `u8`                     |
 | 11  | `speed`          | ticks per second `u8`                                            |
 | 12  | `command_cursor` | next command stream offset, varint                               |
@@ -276,8 +277,9 @@ fields.
 | ---- | --------- | --------------------------------------------------------------------- |
 | 1    | `ledger`  | reason `u8` (0 day, 1 build, 2 demolish), earned varint, spent varint |
 | 2    | `balance` | amount, a zigzag varint (may be negative)                             |
+| 6    | `roadwork`| segment, change `u8` (2 added, 3 removed), node a, node b: varints    |
 
-A reader skips an extended kind it does not know.
+A reader skips an extended kind it does not know. Kinds 3, 4 and 5 are the author, the council and policies, which other changes write.
 
 Every arrival the sim makes is an `arrived` followed by the same resident's
 `activity`, so the encoder writes the pair as one `arrival` entry and the decoder
@@ -308,13 +310,14 @@ commit also writes the stream state key `keyframe`, so the newest one is one
 | Part      | Contents                                                                                                                                                                                                                                                                             |
 | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | buildings | varint count; per lot that differs from the generated city: lot delta, kind `u16` (65535 for none), rotation `u8`                                                                                                                                                                    |
-| roads     | varint count; per segment closed or added: segment delta, change `u8`                                                                                                                                                                                                                |
+| roads     | varint count; per segment a builder added, live or since removed: segment delta, change `u8` (2 added, 3 removed), node a and node b as varints. A district lists the segments whose node a is in it                                                                               |
 | residents | varint count; per resident in the district: id delta, then a frame (the body length shifted left two bits, the tag in the low two): tag `0`, kind `u8`, lot varint and until as a delta from the tick (an activity in that lot), or tag `1` and a vehicle state (a trip in progress) |
 | counts    | varints: home, at work, on the road, asleep. Home between 22:00 and 06:00 is asleep; work and school are at work; shopping and leisure are in none of them                                                                                                                           |
 
 Because buildings and roads are diffs against the city the seed generates, the
 keyframe of a city nobody has built in carries none of them, and the cost is
-the residents. The counts are what the stats sparkline plots.
+the residents. A removed road stays in the list, because segment ids are never
+reused and a page that starts here has to know the ids that are gone. The counts are what the stats sparkline plots.
 
 ### Log size
 
@@ -378,6 +381,7 @@ caused it, so the budget can be read back, and scrubbed, like everything else.
 | $4 per resident per city day, to their home district | $1 per tile of road per city day                                                                              |
 | $30 per shop, office and factory per city day        | $20 per lot of park land per city day                                                                         |
 |                                                      | A build or demolition, once: $300 a house, $500 a shop, $1,500 a skyscraper, $800 a factory, $100 to demolish |
+|                                                      | A road, once: $100 for each tile of new road, $100 to remove one                                              |
 
 These numbers are placeholders until the economy has been played. A shop, office or factory pays tax for as long as
 the building stands; opening hours arrive with policies.
@@ -473,9 +477,15 @@ for every other command.
 | 4      | `demolish` on a lot with nothing on it                                                 |
 | 5      | `build` of a kind that is not a building, or a rotation past 3                         |
 | 6      | `speed` other than 0, 4, 8 or 16                                                       |
-| 7      | not carried out yet: `place road`, `zone` and `fork`                                   |
+| 7      | not carried out yet: `zone` and `fork`                                                 |
 | 8      | the lot is one residents go to                                                         |
 | 9      | sent while the city was paused with more commands waiting than it holds; send it again |
+| 10     | `build`, `demolish`, `place road` or `remove road` the funds cannot pay for            |
+| 11     | `place road` between nodes that are the same, or not in one row or column              |
+| 12     | `place road` longer than 12 tiles                                                      |
+| 13     | `place road` between two nodes a road already joins                                    |
+| 14     | `place road` over a tile that is not bare ground, or beside a road; `build` on a road  |
+| 15     | `remove road` of a segment that is not a builder's road, or is already removed         |
 
 Lots residents go to (homes, workplaces, parks) cannot be built over or demolished,
 because the schedules that send people there do not change.
@@ -495,6 +505,7 @@ fit 64 bytes too, so a fork too deep to name is refused the same way.
 | 4   | demolish   | lot `u32`                            |
 | 5   | speed      | ticks per second `u8`                |
 | 6   | fork       | tick `u32`, name                     |
+| 7   | remove road | segment `u32`                       |
 
 A registry record is the kind byte, a tag and fields: `1` created (name, seed,
 districts `u16`, `wall_us` `u64`) or `2` forked (name, parent, tick `u32`,
@@ -676,9 +687,59 @@ page starts from is drawn finished.
 Building is only allowed at the live tip. A builder who scrubs back sees the
 past read-only, and building there means forking.
 
+### Roads
+
+A builder can add a street between two intersections and take one away again. `place road` names two nodes
+(intersections, bends and dead ends of the road graph, by index) and `remove road` names a segment.
+
+**What `place road` may do.** It adds one straight street segment between two nodes that already exist.
+
+- The nodes are different and share a row or a column, and the segment is at most 12 tiles long.
+- No segment already joins them.
+- Every tile strictly between them is bare ground: not road and not water, a lot that is empty or has only trees or a
+  plaza prop on it, that no resident's day goes to (the same rule as `build`), and with no road on either side of it. So a
+  new street never crosses or touches another road, and never makes a node or splits a segment: the graph gains an edge
+  and nothing else. The nodes' own tiles get a new neighbour, so a corner can become a T.
+- It costs $100 for each tile between the nodes, and the funds must cover it.
+
+A refusal has its own result code (see the table above) and changes nothing. The new segment takes the next segment id,
+it is a street, and it is named `Link Road 1`, `Link Road 2`, and so on in the order builders added them.
+
+**What `remove road` may do.** Only a segment a builder added. The generated roads stay, because lots have their doors on
+them and residents' days run along them. A removed segment keeps its id: routes in the log name segments by id for
+ever, so ids are never reused. It leaves the graph, and its tiles go back to the lots they were. It costs $100. The graph
+cannot fall apart, since a built road only ever joins nodes the generated roads already connect.
+
+**Roads and the sim.** `City::add_road` and `City::remove_road` in `core` do all of this to the city (the tiles and their
+pieces, the segment list, the adjacency, the names and the hash), and the sim's world calls them. The page rebuilds its
+own copy of the city from the log with `City::restore_roads` (see below), which lays the same roads by the same code.
+Road upkeep counts the segments that are in the graph, so a built road costs $1 a tile a day and a removed one nothing.
+Park land that a road covers stops costing park upkeep.
+
+**Replanning.** A trip is planned on the graph as it is, so a road added later only changes the trips that start after
+it. A removed road is different: a vehicle may be on it or about to be. In the tick after the removal (the tick the
+command is applied in), every vehicle on the road whose remaining route, from the leg it is on, includes the removed
+segment is planned again, and its district writes a `replan` event. The vehicle is moved to the node at the end of the
+leg it is on, and drives a new route to the same door from there, as the same kind of trip (a walker stays one). The jump
+is short and happens in one tick, which is better than a car on a road that is gone. A route is planned from a node
+as a trip from a door at that end of the first generated segment that meets the node, so the page and the sim agree on it
+without knowing which roads were removed when. The `replan` event is written in the district the vehicle is in. No
+position the sim writes after the removal is on a removed segment.
+
+**The log.** An added or removed road is a `roadwork` event (extended kind 6) in the district of the segment's node a,
+next to the `command` event and the `ledger` event that paid for it. Keyframes list every road a builder added, as above.
+A page that starts from a keyframe, and a sim that restarts from one, therefore know every segment id, the live ones and
+the removed ones, and rebuild the city by laying the live ones in id order. The restart also reads `replan` events when it
+looks for the trip a vehicle on the road is on.
+
+**The page.** It keeps the roads in its `CityState` the way it keeps buildings, from keyframes and `roadwork` events,
+and `Metro.setRoads` gives core's copy the same roads so a trip or a replan on a built segment resolves. Road tiles are
+redrawn when the set changes. A `replan` ends the vehicle's drawn trip and starts the new one at the node. A rewind folds
+from a keyframe, so a road built after the tick on screen is not there, and a road removed after it is.
+
 ### The page's building tools
 
-The page sends `build` and `demolish`; it does not send `place road` or `zone` yet. A tool is picked from the
+The page sends `build`, `demolish`, `place road` and `remove road`; it does not send `zone` yet. A tool is picked from the
 overlay (`web/src/ui/build-bar.ts`), the lot under the pointer is found by `web/src/placement-view.ts`, and
 `web/src/placement.ts` decides whether the command may go and sends it. [The overlay page](ui.md#the-building-tools)
 describes the pieces; this is what they rely on.
@@ -703,18 +764,11 @@ describes the pieces; this is what they rely on.
   building appears only when the `built` event arrives, and then rises in its scaffold like anyone's.
   A building faces its street until the builder turns it (`R`), because a lot's `facing` is the way its door opens.
 
-#### What roads and zones need
+#### What zones need
 
-Neither is a small step from here, which is why they are a separate change:
+`zone` is still not carried out:
 
-- **Roads.** `place road` names two nodes, and a road changes the graph every route is built from. The sim must add the
-  segment to its graph, replan any resident whose route could now be shorter (and any whose route crossed a segment that
-  went), and record it with the `road` event, which the format has, and the keyframe's road list, which `CityState`
-  already reads. The page also routes from its own copy of the generated city: core's `Metro` matches a `trip` event's legs
-  against the resident's route in that copy, so a leg on an added segment resolves to nothing and the trip is dropped.
-  The copy has to learn the changed graph, from `CityState.roads`, before a road can carry a trip. The tool also needs
-  a way to pick two nodes and a ghost for a segment.
-- **Zones.** `zone` carries a lot and a zone number, but no record has a field for a lot's zone, so there is nothing
+- `zone` carries a lot and a zone number, but no record has a field for a lot's zone, so there is nothing
   for a `zoned` change to be written to or a keyframe to list. The zone also decides which lots count as homes, shops,
   offices and factories when residents' days are made, so the sim must say what a new zone does to the lots already
   built on it and to the schedules that send people there.

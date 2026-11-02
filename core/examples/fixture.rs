@@ -69,8 +69,15 @@ fn records() -> Vec<(&'static str, Vec<u8>)> {
             },
             Event::Replan {
                 resident: 77,
-                from_segment: 12,
+                vehicle: 1,
+                node: 12,
                 route: route(&city, 200, 5),
+            },
+            Event::Roadwork {
+                segment: 40,
+                change: 2,
+                a: 3,
+                b: 9,
             },
             Event::Arrived {
                 resident: 9,
@@ -132,7 +139,9 @@ fn records() -> Vec<(&'static str, Vec<u8>)> {
             ],
             roads: vec![RoadDiff {
                 segment: 40,
-                change: 0,
+                change: 2,
+                a: 3,
+                b: 9,
             }],
             residents: vec![
                 ResidentState {
@@ -181,6 +190,11 @@ fn records() -> Vec<(&'static str, Vec<u8>)> {
                 tick: 960,
                 name: "harbor~bridge-closed".into(),
             },
+        },
+        CommandRecord {
+            id: 4,
+            name: "Ben".into(),
+            command: Command::RemoveRoad { segment: 40 },
         },
     ];
     let registry = [

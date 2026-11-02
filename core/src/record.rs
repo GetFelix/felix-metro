@@ -70,6 +70,17 @@ pub const REFUSED_IN_USE: u8 = 8;
 pub const REFUSED_BUSY: u8 = 9;
 /// `build` or `demolish` that the city's account cannot pay for.
 pub const REFUSED_NO_FUNDS: u8 = 10;
+/// `place road` between a node and itself, or two nodes not in one row or column.
+pub const REFUSED_NOT_STRAIGHT: u8 = 11;
+/// `place road` longer than 12 tiles.
+pub const REFUSED_TOO_LONG: u8 = 12;
+/// `place road` between two nodes a road already joins.
+pub const REFUSED_ROAD_EXISTS: u8 = 13;
+/// `place road` over a tile that is not bare ground or has a road beside it, or
+/// `build` on a lot a road covers.
+pub const REFUSED_ROAD_BLOCKED: u8 = 14;
+/// `remove road` of a segment that is generated or already removed.
+pub const REFUSED_NOT_BUILT: u8 = 15;
 
 /// `ledger` event reasons.
 /// A city day's taxes in, and road and building upkeep out.
@@ -208,9 +219,12 @@ pub enum Event {
         depart: u32,
         route: Vec<Leg>,
     },
+    /// A vehicle was moved to `node` and sent on `route` from there, because a
+    /// road on its way was removed. `vehicle` is the trip's: 0 on foot.
     Replan {
         resident: u32,
-        from_segment: u32,
+        vehicle: u8,
+        node: u32,
         route: Vec<Leg>,
     },
     Arrived {
@@ -243,9 +257,18 @@ pub enum Event {
         kind: u16,
         rotation: u8,
     },
+    /// Reserved for closing and opening roads; nothing writes it.
     Road {
         segment: u32,
         change: u8,
+    },
+    /// A builder added or removed a road: `change` is [`ROAD_ADDED`] or
+    /// [`ROAD_REMOVED`], and `a` and `b` are the segment's nodes.
+    Roadwork {
+        segment: u32,
+        change: u8,
+        a: u32,
+        b: u32,
     },
     Command {
         principal: u64,
@@ -284,7 +307,7 @@ pub enum Event {
 pub struct Keyframe {
     /// Lots that differ from the generated city.
     pub buildings: Vec<BuildingDiff>,
-    /// Segments closed or added since generation.
+    /// The roads builders added, live or since removed, by segment.
     pub roads: Vec<RoadDiff>,
     pub residents: Vec<ResidentState>,
     pub counts: Counts,
@@ -301,7 +324,11 @@ pub struct BuildingDiff {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RoadDiff {
     pub segment: u32,
+    /// [`ROAD_ADDED`] or [`ROAD_REMOVED`].
     pub change: u8,
+    /// The segment's nodes.
+    pub a: u32,
+    pub b: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -364,6 +391,10 @@ pub enum Command {
     Fork {
         tick: u32,
         name: String,
+    },
+    /// Takes away a road a builder added, by segment id.
+    RemoveRoad {
+        segment: u32,
     },
 }
 

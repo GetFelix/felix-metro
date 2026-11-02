@@ -65,12 +65,13 @@ fn event(out: &mut String, e: &Event) {
         }
         Event::Replan {
             resident,
-            from_segment,
+            vehicle,
+            node,
             route: legs,
         } => {
             let _ = write!(
                 out,
-                "{{\"type\":\"replan\",\"resident\":{resident},\"fromSegment\":{from_segment},\"route\":"
+                "{{\"type\":\"replan\",\"resident\":{resident},\"vehicle\":{vehicle},\"node\":{node},\"route\":"
             );
             route(out, legs);
         }
@@ -133,6 +134,17 @@ fn event(out: &mut String, e: &Event) {
                 "{{\"type\":\"road\",\"segment\":{segment},\"change\":{change}"
             );
         }
+        Event::Roadwork {
+            segment,
+            change,
+            a,
+            b,
+        } => {
+            let _ = write!(
+                out,
+                "{{\"type\":\"roadwork\",\"segment\":{segment},\"change\":{change},\"a\":{a},\"b\":{b}"
+            );
+        }
         Event::Command {
             principal,
             name,
@@ -179,7 +191,7 @@ fn keyframe(out: &mut String, k: &Keyframe) {
     });
     out.push_str(",\"roads\":");
     list(out, &k.roads, |o, d| {
-        let _ = write!(o, "[{},{}]", d.segment, d.change);
+        let _ = write!(o, "[{},{},{},{}]", d.segment, d.change, d.a, d.b);
     });
     out.push_str(",\"residents\":");
     list(out, &k.residents, |o, r| {
@@ -248,6 +260,9 @@ pub(super) fn command(c: &CommandRecord) -> String {
                 out,
                 "{{\"type\":\"speed\",\"ticksPerSecond\":{ticks_per_second}}}"
             );
+        }
+        Command::RemoveRoad { segment } => {
+            let _ = write!(out, "{{\"type\":\"removeRoad\",\"segment\":{segment}}}");
         }
         Command::Fork { tick, name } => {
             let _ = write!(out, "{{\"type\":\"fork\",\"tick\":{tick},\"name\":");

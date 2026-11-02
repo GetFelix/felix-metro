@@ -7,7 +7,7 @@ use crate::{
     names::resident_name,
     record::Leg,
     rng::{FNV_OFFSET, Rng, fnv1a},
-    route::{Congestion, Mode, Trip, route},
+    route::{Congestion, Mode, Trip, route, route_as},
     schedule::{Activity, Anchors, Archetype, Schedule, TICKS_PER_DAY},
 };
 
@@ -122,6 +122,9 @@ fn pieces(city: &City) -> Vec<u32> {
         })
         .collect()
 }
+
+/// The lot a replanned trip leaves: none, it starts at a node.
+pub const NO_LOT: u32 = u32::MAX;
 
 /// A `trip` event's route matched to one of a resident's blocks.
 struct Matched {
@@ -251,6 +254,52 @@ impl Resident {
         route(city, from, to, depart, cong)
     }
 
+    /// The trip from block `block` to the next one, sent from `node` in `mode`
+    /// at `depart`: what a resident gets when a road on their way is removed.
+    pub fn replan(
+        &self,
+        city: &City,
+        block: usize,
+        node: u32,
+        depart: u32,
+        cong: &Congestion,
+        mode: Mode,
+    ) -> Option<Trip> {
+        let blocks = &self.schedule.blocks;
+        let to = city.lots[blocks[(block + 1) % blocks.len()].lot as usize].door()?;
+        route_as(city, city.node_door(node), to, depart, cong, mode)
+    }
+
+    /// The trip a `replan` event describes: the block whose next lot the legs
+    /// reach from `node`, and if more than one does, the one that was due to
+    /// leave most recently before `depart`. Like
+    /// [`Resident::trip_in_progress`], with the block and day. `None` if no
+    /// block's trip has these legs.
+    pub fn replan_in_progress(
+        &self,
+        city: &City,
+        node: u32,
+        depart: u32,
+        legs: &[Leg],
+        mode: Mode,
+    ) -> Option<(Trip, usize, u32)> {
+        let found = self.match_route(city, Some(node), depart, legs, mode)?;
+        Some((found.trip, found.block, found.day))
+    }
+
+    /// Like [`Resident::replan_in_progress`], with the lot the trip enters.
+    pub fn replan_between(
+        &self,
+        city: &City,
+        node: u32,
+        depart: u32,
+        legs: &[Leg],
+        mode: Mode,
+    ) -> Option<(Trip, u32)> {
+        let found = self.match_route(city, Some(node), depart, legs, mode)?;
+        Some((found.trip, found.to_lot))
+    }
+
     /// The trip a `trip` event for this resident describes: the block whose
     /// doors the legs join, and if more than one does, the one that was due
     /// to leave most recently before `depart`. `None` if no block's trip has
@@ -274,7 +323,7 @@ impl Resident {
         legs: &[Leg],
         mode: Mode,
     ) -> Option<(Trip, u32, u32)> {
-        let found = self.match_route(city, depart, legs, mode)?;
+        let found = self.match_route(city, None, depart, legs, mode)?;
         Some((found.trip, found.from_lot, found.to_lot))
     }
 
@@ -288,20 +337,32 @@ impl Resident {
         legs: &[Leg],
         mode: Mode,
     ) -> Option<(Trip, usize, u32)> {
-        let found = self.match_route(city, depart, legs, mode)?;
+        let found = self.match_route(city, None, depart, legs, mode)?;
         Some((found.trip, found.block, found.day))
     }
 
-    fn match_route(&self, city: &City, depart: u32, legs: &[Leg], mode: Mode) -> Option<Matched> {
+    /// `from` is the node a replanned trip starts at, or `None` for a trip that
+    /// leaves a block's lot by its door.
+    fn match_route(
+        &self,
+        city: &City,
+        from: Option<u32>,
+        depart: u32,
+        legs: &[Leg],
+        mode: Mode,
+    ) -> Option<Matched> {
         let blocks = &self.schedule.blocks;
         let today = depart / TICKS_PER_DAY;
         (0..blocks.len())
             .filter_map(|block| {
                 let (from_lot, to_lot) =
                     (blocks[block].lot, blocks[(block + 1) % blocks.len()].lot);
-                let from = city.lots[from_lot as usize].door()?;
                 let to = city.lots[to_lot as usize].door()?;
-                let trip = Trip::from_route(city, from, to, depart, legs, mode)?;
+                let door = match from {
+                    Some(node) => city.node_door(node),
+                    None => city.lots[from_lot as usize].door()?,
+                };
+                let trip = Trip::from_route(city, door, to, depart, legs, mode)?;
                 let due = [today.saturating_sub(1), today]
                     .into_iter()
                     .map(|d| (self.schedule.leave_tick(block, d), d))
@@ -312,7 +373,7 @@ impl Resident {
                     trip,
                     block,
                     day: due.map_or(today, |(_, d)| d),
-                    from_lot,
+                    from_lot: if from.is_some() { NO_LOT } else { from_lot },
                     to_lot,
                 })
             })

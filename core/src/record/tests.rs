@@ -26,7 +26,7 @@ fn name(rng: &mut Rng) -> String {
 
 fn event(rng: &mut Rng) -> Event {
     let resident = rng.next_u64() as u32;
-    match rng.below(14) {
+    match rng.below(15) {
         0 => Event::Trip {
             resident,
             vehicle: rng.below(6) as u8,
@@ -38,7 +38,8 @@ fn event(rng: &mut Rng) -> Event {
         },
         1 => Event::Replan {
             resident,
-            from_segment: rng.next_u64() as u32,
+            vehicle: rng.below(7) as u8,
+            node: rng.next_u64() as u32,
             route: {
                 let len = rng.below(20);
                 route(rng, len)
@@ -93,6 +94,12 @@ fn event(rng: &mut Rng) -> Event {
             earned: rng.next_u64() >> rng.below(64),
             spent: rng.next_u64() >> rng.below(64),
         },
+        13 => Event::Roadwork {
+            segment: rng.next_u64() as u32,
+            change: 2 + rng.below(2) as u8,
+            a: rng.next_u64() as u32,
+            b: rng.next_u64() as u32,
+        },
         _ => Event::Balance {
             amount: (rng.next_u64() as i64) >> rng.below(64),
         },
@@ -111,7 +118,9 @@ fn keyframe(rng: &mut Rng) -> Keyframe {
         roads: (0..rng.below(8))
             .map(|_| RoadDiff {
                 segment: rng.next_u64() as u32,
-                change: rng.below(4) as u8,
+                change: 2 + rng.below(2) as u8,
+                a: rng.next_u64() as u32,
+                b: rng.next_u64() as u32,
             })
             .collect(),
         residents: (0..rng.below(12))
@@ -173,7 +182,7 @@ fn command_record(rng: &mut Rng) -> CommandRecord {
     CommandRecord {
         id: rng.next_u64() as u32,
         name: name(rng),
-        command: match rng.below(6) {
+        command: match rng.below(7) {
             0 => Command::PlaceRoad {
                 a: lot,
                 b: rng.next_u64() as u32,
@@ -191,6 +200,7 @@ fn command_record(rng: &mut Rng) -> CommandRecord {
             4 => Command::Speed {
                 ticks_per_second: rng.below(33) as u8,
             },
+            5 => Command::RemoveRoad { segment: lot },
             _ => Command::Fork {
                 tick: lot,
                 name: format!("{}-fork", name(rng)),
@@ -471,6 +481,58 @@ fn an_unknown_extended_kind_is_skipped_and_the_rest_is_kept() {
             ticks_per_second: 4
         }]
     );
+}
+
+#[test]
+fn a_roadwork_event_is_extended_kind_6_and_roundtrips() {
+    let event = Event::Roadwork {
+        segment: 700,
+        change: 2,
+        a: 12,
+        b: 300,
+    };
+    let record = TickRecord {
+        header: Header {
+            epoch: 1,
+            district: 0,
+            tick: 5,
+            speed: 4,
+            keyframe_offset: 0,
+            wall_us: 0,
+        },
+        keyframe: None,
+        events: vec![event.clone()],
+    };
+    let bytes = record.encode().unwrap();
+    // The entry is the last bytes: frame head (tag 15), kind 6, then the four fields as varints.
+    let tail = [head(15, 7), 6, 0xbc, 0x05, 2, 12, 0xac, 0x02];
+    assert!(bytes.ends_with(&tail), "{bytes:?}");
+    assert_eq!(TickRecord::decode(&bytes).unwrap(), record);
+}
+
+#[test]
+fn the_legacy_road_event_still_decodes() {
+    let body = [head(9, 5), 7, 0, 0, 0, 1];
+    let r = TickRecord::decode(&raw_tick(false, 1, &body)).unwrap();
+    assert_eq!(
+        r.events,
+        [Event::Road {
+            segment: 7,
+            change: 1
+        }]
+    );
+}
+
+#[test]
+fn a_remove_road_command_is_tag_7() {
+    let c = CommandRecord {
+        id: 9,
+        name: "m".into(),
+        command: Command::RemoveRoad { segment: 300 },
+    };
+    let bytes = c.encode().unwrap();
+    assert_eq!(&bytes[bytes.len() - 5..], [7, 44, 1, 0, 0]);
+    assert_eq!(CommandRecord::decode(&bytes).unwrap(), c);
 }
 
 #[test]

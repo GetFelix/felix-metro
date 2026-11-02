@@ -16,10 +16,11 @@ pub mod schedule;
 pub mod wasm;
 
 pub use city::{
-    City, District, Door, GenerateError, Lot, RoadPiece, RoadTile, Segment, SegmentClass, Zone,
+    BuiltRoad, City, District, Door, GenerateError, Lot, MAX_ROAD_LENGTH, RoadError, RoadPiece,
+    RoadTile, Segment, SegmentClass, Zone,
 };
 pub use kinds::{BuildingKind, KINDS, KindInfo};
 pub use names::resident_name;
-pub use resident::{Places, Resident, day_hash};
-pub use route::{Congestion, Mode, Position, Trip, route};
+pub use resident::{NO_LOT, Places, Resident, day_hash};
+pub use route::{Congestion, Mode, Position, Trip, route, route_as};
 pub use schedule::{Activity, Archetype, Block, Schedule, TICKS_PER_DAY, TICKS_PER_HOUR};
