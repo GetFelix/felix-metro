@@ -13,6 +13,13 @@
 
 ### Added
 
+- Follow a life: click a car or walker (tap on a touch screen) and the camera follows that resident, with a card under
+  the city name that shows their name, what kind of resident they are, what they are doing now and their day. The
+  resident is known by number, so the follow holds across districts and through seeks, scrubs and rewinds; indoors the
+  camera stays on their building and the card says what they are doing there. `Esc`, the card's button or moving the
+  view lets go; turning and zooming keep the follow. `?follow=<resident>` opens a page on one, and **Share this moment**
+  adds it to the link. The key list has a Following group. `core`'s WebAssembly `Metro` gains `population()` and
+  `profile(resident)`, a resident's name, kind and day as JSON.
 - Moments: a **Share this moment** button copies a link such as `/?at=<tick>&cam=<x,z,distance,azimuth,polar>#harbor`
   that opens the city at that tick from that camera view (`?cam` is new). `H` is photo mode and hides every control.
   A page left alone for 60 seconds turns the camera slowly (`?attract=<seconds>`, `0` turns it off).

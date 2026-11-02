@@ -299,3 +299,92 @@ describe('the fleet’s walkers', () => {
     expect(crowd.counts().people).toBe(0);
   });
 });
+
+describe('picking', () => {
+  /** A camera 20 tiles up looking straight down at the middle of a 1000 by 500 view. */
+  function lookDown() {
+    const camera = new THREE.PerspectiveCamera(28, 2, 0.1, 200);
+    camera.position.set(0, 20, 0.001);
+    camera.lookAt(0, 0, 0);
+    camera.updateMatrixWorld();
+    return camera;
+  }
+  const SIZE = { width: 1000, height: 500 };
+  /** The point of the view a spot on the ground lands on, in normalised device coordinates. */
+  const ndc = (camera: THREE.Camera, x: number, y: number, z: number) => {
+    const p = new THREE.Vector3(x, y, z).project(camera);
+    return { x: p.x, y: p.y };
+  };
+
+  it('finds the resident whose car or walker is under the pointer', () => {
+    const { crowd } = make();
+    const camera = lookDown();
+    crowd.fleet.begin(0);
+    crowd.fleet.car(1, -3, 0.036, 0, 0, 1, 42);
+    crowd.fleet.person(7, 3, 0, 0, 0, 1);
+    crowd.fleet.end();
+    const car = ndc(camera, -3, 0.04, 0);
+    const walker = ndc(camera, 3, 0.1, 0);
+    expect(crowd.pick(camera, car.x, car.y, SIZE, 16)).toEqual({ resident: 42, car: true });
+    expect(crowd.pick(camera, walker.x, walker.y, SIZE, 16)).toEqual({ resident: 7, car: false });
+  });
+
+  it('finds the resident, not the instance slot, after others have come and gone', () => {
+    const { crowd } = make();
+    const camera = lookDown();
+    const spot = ndc(camera, 2, 0.1, 0);
+    crowd.fleet.begin(0);
+    crowd.fleet.person(5, -4, 0, 0, 0, 1);
+    crowd.fleet.person(9, 2, 0, 0, 0, 1);
+    crowd.fleet.end();
+    expect(crowd.pick(camera, spot.x, spot.y, SIZE, 16)?.resident).toBe(9);
+    // Resident 5 left; 9 now holds the first instance slot.
+    crowd.fleet.begin(0);
+    crowd.fleet.person(9, 2, 0, 0, 0, 1);
+    crowd.fleet.end();
+    expect(crowd.pick(camera, spot.x, spot.y, SIZE, 16)?.resident).toBe(9);
+  });
+
+  it('takes the nearest when two overlap, and nothing when none is close', () => {
+    const { crowd } = make();
+    const camera = lookDown();
+    crowd.fleet.begin(0);
+    crowd.fleet.person(1, 0, 0, 0, 0, 1);
+    crowd.fleet.person(2, 0.1, 0, 0, 0, 1);
+    crowd.fleet.end();
+    const near = ndc(camera, 0.1, 0.1, 0);
+    expect(crowd.pick(camera, near.x, near.y, SIZE, 30)?.resident).toBe(2);
+    expect(crowd.pick(camera, 0.9, 0.9, SIZE, 16)).toBeNull();
+  });
+
+  it('leaves out what is not drawn: a car that is nobody’s, a vanished one and one the camera cannot see', () => {
+    const { crowd } = make();
+    const camera = lookDown();
+    const spot = ndc(camera, 0, 0.04, 0);
+    crowd.fleet.begin(0);
+    crowd.fleet.car(7, 0, 0.036, 0, 0, 1);
+    crowd.fleet.car(1, 0, 0.036, 0, 0, 0, 3);
+    crowd.fleet.end();
+    expect(crowd.pick(camera, spot.x, spot.y, SIZE, 16)).toBeNull();
+    const away = new THREE.PerspectiveCamera(28, 2, 0.1, 200);
+    away.position.set(60, 20, 60);
+    away.lookAt(80, 0, 80);
+    crowd.fleet.view(away);
+    crowd.fleet.begin(0);
+    crowd.fleet.person(4, 0, 0, 0, 0, 1);
+    crowd.fleet.end();
+    expect(crowd.pick(camera, spot.x, spot.y, SIZE, 16)).toBeNull();
+  });
+
+  it('forgets last round’s movers when a round begins', () => {
+    const { crowd } = make();
+    const camera = lookDown();
+    const spot = ndc(camera, 0, 0.1, 0);
+    crowd.fleet.begin(0);
+    crowd.fleet.person(4, 0, 0, 0, 0, 1);
+    crowd.fleet.end();
+    crowd.fleet.begin(0);
+    crowd.fleet.end();
+    expect(crowd.pick(camera, spot.x, spot.y, SIZE, 16)).toBeNull();
+  });
+});

@@ -5,7 +5,10 @@ import { createHud } from './ui/hud';
 import { hintDue } from './ui/hint';
 import { ATTRACT_RATE, createAttract } from './attract';
 import { momentLink } from './moments';
-import { createPhoto } from './ui/photo';
+import { createPhoto, PHOTO_CLASS } from './ui/photo';
+import { createFollowCard, isStopKey } from './ui/follow-card';
+import { Following } from './follow';
+import { bindTap } from './tap';
 import { createShare } from './ui/share';
 import { isPlayKey } from './ui/keys';
 import { parseParams, type Tier } from './params';
@@ -144,6 +147,15 @@ declare global {
       latest(): number;
       /** Draw the frame at video time `tMs` and say what is in it. */
       frame(tMs: number): Promise<CaptureFrame>;
+    };
+    /** Following a resident, for the CI checks and the console; absent where there is no city. */
+    __following?: {
+      /** The resident followed, or null. */
+      resident(): number | null;
+      start(resident: number): boolean;
+      stop(): void;
+      /** Where a car or walker drawn now is on the screen, in CSS pixels, or null when it is not drawn. */
+      screenOf(resident: number): { x: number; y: number } | null;
     };
     /** The settings sheet, key list and first-visit tip, for the CI check and the console; null when the overlay is off. */
     __ui?: Shell;
@@ -295,6 +307,7 @@ async function main() {
     gateway,
     at,
     cam,
+    follow: followParam,
     attract: attractSeconds,
     trace,
     capture,
@@ -410,13 +423,10 @@ async function main() {
   // A shared view replaces the opening drift.
   const sharedView = cam !== null && controls.setState(cam, { ease: false });
   const drawn: ReadonlyMap<number, Building> = new Map(state?.built);
-  const { scene, construction, ambient, cars, people, glows, setTime, setShadows, fleet, setLot } = await createCity(
-    renderer,
-    quality.tier,
-    city,
-    state !== null,
-    drawn,
-  );
+  /** The city's residents as core describes them, for the trips the log tells of and for the card of one followed. */
+  const residents = city ? new Metro(seed, districts) : null;
+  const { scene, construction, ambient, cars, people, glows, setTime, setShadows, fleet, pick, setLot } =
+    await createCity(renderer, quality.tier, city, state !== null, drawn);
   const hud = showHud ? createHud(renderer, quality) : null;
 
   // A tier change rebuilds the post chain; shadows and resolution follow the same settings.
@@ -497,7 +507,7 @@ async function main() {
     if (hooks) window.__live = liveInfo;
   }
   if (state && traffic && city) {
-    const metro = new Metro(seed, districts);
+    const metro = residents!;
     const summary = (s: CityState) => ({ ticks: [...s.ticks], buildings: s.built.size, sig: signature(s.built) });
     /** Draw `next` in place of the state on screen, which is let go; the live one keeps filling in the background. */
     const swap = (next: CityState, tick: number | null) => {
@@ -1077,6 +1087,71 @@ async function main() {
     };
     if (hooks) window.__metro = metroHooks;
   }
+  const dom = renderer.domElement;
+  const card = shell ? createFollowCard(() => following?.stop()) : null;
+  const following =
+    city && residents
+      ? new Following({
+          profile: (resident) => residents.profile(resident),
+          lots: city.lots,
+          half: (city.tiles - 1) / 2,
+          rig: controls,
+          positionOf: (voyage, tick) => traffic?.positionOf(voyage, tick) ?? null,
+          pin: (resident) => {
+            if (traffic) traffic.pinned = resident;
+          },
+          show: (view) => card?.show(view),
+        })
+      : null;
+  /** Follow `resident`, or say there is no such one. */
+  const startFollow = (resident: number, keepView = false): boolean => {
+    const ok = following?.start(resident, keepView) ?? false;
+    if (!ok) note(`There is no resident ${resident} in this city.`);
+    return ok;
+  };
+  if (following && !capture) {
+    // Moving the view lets go; turning and zooming do not, so a follow can be looked at from any side.
+    controls.addEventListener('steer', () => following.stop());
+    // Capture phase, to see photo mode and the sheet before they close themselves on the same key.
+    addEventListener(
+      'keydown',
+      (e) => {
+        if (following.resident === null) return;
+        if (isStopKey(e, document.body.classList.contains(PHOTO_CLASS), shell?.isOpen ?? false)) following.stop();
+      },
+      true,
+    );
+    if (pick) {
+      const find = (at: { x: number; y: number }, slack: number) =>
+        pick(camera, at.x, at.y, { width: dom.clientWidth, height: dom.clientHeight }, slack);
+      bindTap(dom, {
+        tap: ({ at, touch }) => {
+          const hit = find(at, touch ? 28 : 16);
+          if (hit) startFollow(hit.resident);
+        },
+        hover: (at) => {
+          dom.style.cursor = at && find(at, 16) ? 'pointer' : '';
+        },
+      });
+    }
+    if (hooks) {
+      const corner = new THREE.Vector3();
+      window.__following = {
+        resident: () => following.resident,
+        start: (resident) => startFollow(resident),
+        stop: () => following.stop(),
+        screenOf(resident) {
+          const at = traffic?.where().find((w) => w.resident === resident);
+          if (!at) return null;
+          camera.updateMatrixWorld();
+          corner.set(at.x, 0.1, at.z).project(camera);
+          return { x: ((corner.x + 1) / 2) * dom.clientWidth, y: ((1 - corner.y) / 2) * dom.clientHeight };
+        },
+      };
+    }
+  }
+  // A link that names a resident opens with the camera on them, and keeps the view it carries.
+  const followed = followParam !== null && !capture && startFollow(followParam, sharedView);
   let intro: ReturnType<typeof startIntro> | null = null;
   /** Set when attract mode is on: turns the camera a frame's worth once the page has sat untouched. */
   let turnWhenIdle: ((now: number, dt: number) => void) | null = null;
@@ -1123,6 +1198,7 @@ async function main() {
         // which lots are going up or coming down at this tick.
         ambient?.drive(ambientTick);
         traffic.update(tick, still ? 0 : dt, state.active());
+        following?.frame(tick, (resident, at) => state!.voyageAt(resident, at));
         state.settle(tick);
         construction.update(tick, state.rising, state.falling);
         ambient?.decorate(ambientTick);
@@ -1144,6 +1220,8 @@ async function main() {
         });
       }
     }
+    // With no log there is no tick, only the hour on the slider, and the resident is placed by their schedule.
+    if (!state) following?.frame(hour * TICKS_PER_HOUR, () => undefined);
     // A frame with no tick has no update to draw a voyage that just ended away.
     traffic?.sync();
     if (paint) post!.render(controls.target);
@@ -1277,7 +1355,12 @@ async function main() {
         const tick = scrubTarget ?? liveInfo?.tick;
         if (tick === undefined || Number.isNaN(tick)) return null;
         // The clock coasts past the newest record while the connection is down; the log has nothing there to open.
-        return momentLink(location.href, state ? Math.min(tick, state.latest) : tick, controls.state());
+        return momentLink(
+          location.href,
+          state ? Math.min(tick, state.latest) : tick,
+          controls.state(),
+          following?.resident ?? null,
+        );
       });
   }
   if (city && !still && !reduced && !capture && attractSeconds > 0) {
@@ -1289,7 +1372,7 @@ async function main() {
       if (!intro && idle.active(now)) controls.drift(ATTRACT_RATE * dt);
     };
   }
-  if (city && !still && frozenHour === null && !reduced && !capture && !sharedView)
+  if (city && !still && frozenHour === null && !reduced && !capture && !sharedView && !followed)
     intro = startIntro(camera, controls, performance.now());
   if (capture) {
     controls.enabled = false;

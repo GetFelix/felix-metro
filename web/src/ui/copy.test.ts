@@ -2,13 +2,35 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { HINT_TEXT } from './hint';
 import { SHORTCUTS } from './keys';
+import { archetypeLabel, doing, type Activity, type Archetype } from '../follow';
+import { STOP_LABEL } from './follow-card';
 import { SHARE_COPIED, SHARE_LABEL, SHARE_NONE } from './share';
 import { CHOICES } from './settings';
 
 // docs/ui.md sets the copy rules: plain words, none of the system's own, and no em dashes.
 const JARGON = /\b(logs?|streams?|offsets?|ticks?|shards?|keyframes?|districts?)\b/i;
 
+// What the follow card says: the kinds of resident, and what each activity reads as indoors, on foot and by car.
+const activities: Activity[] = ['home', 'work', 'school', 'shop', 'leisure'];
+const kinds: Archetype[] = ['office', 'shift', 'shopkeeper', 'student', 'retiree', 'night'];
+const said = activities.flatMap((activity) => {
+  const day = {
+    id: 0,
+    name: '',
+    archetype: 'office' as const,
+    home: 0,
+    vehicle: 1,
+    blocks: [{ activity, lot: 1, leave: 9 }],
+  };
+  return [0, 5000]
+    .map((tick) => doing(day, tick, null).text)
+    .concat(doing(day, 0, { car: true, to: 1 }).text, doing(day, 0, { car: false, to: 1 }).text);
+});
+
 const words = [
+  STOP_LABEL,
+  ...kinds.map(archetypeLabel),
+  ...said,
   HINT_TEXT,
   SHARE_LABEL,
   SHARE_COPIED,

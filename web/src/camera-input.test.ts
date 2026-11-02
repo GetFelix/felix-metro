@@ -73,7 +73,7 @@ describe('the mouse', () => {
       const { rig, onDom } = setup();
       onDom('pointerdown', { ...down, clientX: 500, clientY: 250 });
       onDom('pointermove', { ...down, clientX: 625, clientY: 250 });
-      expect(rig.grab).toHaveBeenCalledWith({ x: 0, y: 0 }, { x: 0.25, y: 0 });
+      expect(rig.grab).toHaveBeenCalledWith({ x: 0, y: 0 }, { x: 0.25, y: 0 }, true);
       expect(rig.orbit).not.toHaveBeenCalled();
     }
   });
@@ -146,9 +146,20 @@ describe('touch', () => {
     onDom('pointerdown', finger(2, 600, 250));
     onDom('pointermove', finger(2, 850, 250));
     // The middle moved from 500 to 625 and the spread from 200 to 450.
-    expect(rig.grab).toHaveBeenCalledWith({ x: 0, y: 0 }, { x: 0.25, y: 0 });
+    expect(rig.grab).toHaveBeenCalledWith({ x: 0, y: 0 }, { x: 0.25, y: 0 }, true);
     expect(rig.zoomAt).toHaveBeenCalledWith({ x: 0.25, y: 0 }, 200 / 450);
     expect(rig.orbit).not.toHaveBeenCalled();
+  });
+
+  it('does not call a pinch’s wobble a move of the view', () => {
+    const { rig, onDom } = setup();
+    onDom('pointerdown', finger(1, 400, 250));
+    onDom('pointerdown', finger(2, 600, 250));
+    onDom('pointermove', finger(2, 640, 252));
+    expect(rig.grab).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), false);
+    // The middle drifted 20 px so far; another 20 is a slide.
+    onDom('pointermove', finger(2, 680, 252));
+    expect(rig.grab).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), true);
   });
 
   it('does not jump when a second finger lands or lifts', () => {

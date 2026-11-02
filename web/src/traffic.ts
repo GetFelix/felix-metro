@@ -64,23 +64,30 @@ export interface Fleet {
   view(camera: THREE.Camera | null): void;
   /** Start a round of placements. `dt` seconds is how far the walkers' legs move on. */
   begin(dt: number): void;
-  /** Place a car of vehicle kind `kind` (1 to 6 from the log, 7 for the page's own garbage truck). `size` is 1 at full size and 0 at nothing. */
-  car(kind: number, x: number, y: number, z: number, heading: number, size: number): void;
+  /**
+   * Place a car of vehicle kind `kind` (1 to 6 from the log, 7 for the page's own garbage truck). `size` is 1 at full
+   * size and 0 at nothing. `resident` is who drives it, left out for a car that is nobody's.
+   */
+  car(kind: number, x: number, y: number, z: number, heading: number, size: number, resident?: number): void;
   /** Place the walker `resident` is. */
   person(resident: number, x: number, y: number, z: number, heading: number, size: number): void;
   end(): void;
 }
 
-interface Slot {
-  car: boolean;
-  /** Where the voyage was drawn last: the road pose, or the turn into a lot. */
+/** Where a voyage stands at a tick: the road pose, or the turn into a lot. */
+export interface Placed {
   x: number;
   y: number;
   z: number;
   heading: number;
+  /** 1 at full size, shrinking to 0 as the trip turns into a lot. */
   size: number;
   /** The heading on the road, kept for when the trip stands still. */
   road: number;
+}
+
+interface Slot extends Placed {
+  car: boolean;
   vehicle: number;
   voyage: Voyage;
 }
@@ -101,6 +108,8 @@ export class Traffic {
 
   /** Voyages left undrawn by the last update because `cap` were already drawn. */
   capped = 0;
+  /** A resident the cap never leaves out, such as the one the camera follows. */
+  pinned: number | null = null;
   /** Most voyages drawn at once. Ones already drawn stay until their voyage ends, so lowering it drains. */
   cap = Infinity;
 
@@ -140,8 +149,6 @@ export class Traffic {
 
   /** Place every voyage under way at tick `tick`, a fraction, and move walkers' legs on by `dt` seconds. */
   update(tick: number, dt: number, voyages: Iterable<Voyage>): void {
-    const whole = Math.floor(tick);
-    const f = tick - whole;
     this.capped = 0;
     this.updating = true;
     for (const v of voyages) {
@@ -149,58 +156,76 @@ export class Traffic {
         this.release(v);
         continue;
       }
-      v.journey.positionAt(whole, this.a);
-      v.journey.positionAt(whole + 1, this.b);
       let slot = this.slots.get(v.resident);
       if (slot && slot.voyage !== v) continue;
       if (!slot) {
-        // First come, first drawn: nearest-to-camera would need a sort a frame.
-        if (this.slots.size >= this.cap) {
+        // First come, first drawn: nearest-to-camera would need a sort a frame. A resident being followed is always drawn.
+        if (this.slots.size >= this.cap && v.resident !== this.pinned) {
           this.capped++;
           continue;
         }
         slot = { car: v.vehicle !== 0, x: 0, y: 0, z: 0, heading: 0, size: 1, road: 0, vehicle: v.vehicle, voyage: v };
         this.slots.set(v.resident, slot);
       }
-      const on = v.vehicle === 0;
-      this.from[0] = this.a[0]! / 1000 - this.half;
-      this.from[1] = this.a[1]! / 1000 - this.half;
-      this.to[0] = this.b[0]! / 1000 - this.half;
-      this.to[1] = this.b[1]! / 1000 - this.half;
-      const arrive = v.journey.arrive();
-      const pose = poseBetween(this.from, this.to, f, on ? PAVEMENT : LANE, slot.road, this.pose);
-      slot.road = pose.heading;
-      let into = doorEase(tick, v.depart, arrive);
-      let heading = pose.heading;
-      if (into > 0) {
-        // The lot at the end the trip is nearer: the one it left, or the one it is reaching.
-        v.journey.lots(this.ends);
-        const lot = this.lots[this.ends[tick - v.depart < arrive - tick ? 0 : 1]!];
-        if (lot) {
-          const tx = lot.x - this.half;
-          const tz = lot.z - this.half;
-          let turn = Math.atan2(tx - pose.x, tz - pose.z) - heading;
-          turn -= Math.round(turn / (2 * Math.PI)) * 2 * Math.PI;
-          heading += into * turn;
-          pose.x += into * (tx - pose.x);
-          pose.z += into * (tz - pose.z);
-        } else into = 0;
-      }
-      slot.size = 1 - into;
-      slot.x = pose.x;
-      slot.y = on ? 0 : 0.036;
-      slot.z = pose.z;
-      slot.heading = heading;
+      this.place(v, tick, slot);
     }
     this.updating = false;
     this.draw(dt);
+  }
+
+  /**
+   * Where `voyage` stands at `tick`, whether or not it holds a place: the cap and the camera do not decide it. `null`
+   * when the trip has not left or has arrived.
+   */
+  positionOf(voyage: Voyage, tick: number): Placed | null {
+    if (tick < voyage.depart || tick >= voyage.journey.arrive()) return null;
+    const slot = this.slots.get(voyage.resident);
+    const placed: Placed = { x: 0, y: 0, z: 0, heading: 0, size: 1, road: slot?.voyage === voyage ? slot.road : 0 };
+    this.place(voyage, tick, placed);
+    return placed;
+  }
+
+  private place(v: Voyage, tick: number, into: Placed): void {
+    const whole = Math.floor(tick);
+    const f = tick - whole;
+    v.journey.positionAt(whole, this.a);
+    v.journey.positionAt(whole + 1, this.b);
+    const on = v.vehicle === 0;
+    this.from[0] = this.a[0]! / 1000 - this.half;
+    this.from[1] = this.a[1]! / 1000 - this.half;
+    this.to[0] = this.b[0]! / 1000 - this.half;
+    this.to[1] = this.b[1]! / 1000 - this.half;
+    const arrive = v.journey.arrive();
+    const pose = poseBetween(this.from, this.to, f, on ? PAVEMENT : LANE, into.road, this.pose);
+    into.road = pose.heading;
+    let turned = doorEase(tick, v.depart, arrive);
+    let heading = pose.heading;
+    if (turned > 0) {
+      // The lot at the end the trip is nearer: the one it left, or the one it is reaching.
+      v.journey.lots(this.ends);
+      const lot = this.lots[this.ends[tick - v.depart < arrive - tick ? 0 : 1]!];
+      if (lot) {
+        const tx = lot.x - this.half;
+        const tz = lot.z - this.half;
+        let turn = Math.atan2(tx - pose.x, tz - pose.z) - heading;
+        turn -= Math.round(turn / (2 * Math.PI)) * 2 * Math.PI;
+        heading += turned * turn;
+        pose.x += turned * (tx - pose.x);
+        pose.z += turned * (tz - pose.z);
+      } else turned = 0;
+    }
+    into.size = 1 - turned;
+    into.x = pose.x;
+    into.y = on ? 0 : 0.036;
+    into.z = pose.z;
+    into.heading = heading;
   }
 
   private draw(dt: number): void {
     this.stale = false;
     this.fleet.begin(dt);
     for (const [resident, s] of this.slots) {
-      if (s.car) this.fleet.car(s.vehicle, s.x, s.y, s.z, s.heading, s.size);
+      if (s.car) this.fleet.car(s.vehicle, s.x, s.y, s.z, s.heading, s.size, resident);
       else this.fleet.person(resident, s.x, s.y, s.z, s.heading, s.size);
     }
     this.extras?.(this.fleet);

@@ -5,11 +5,13 @@ the settings button and the panels it opens. This page says what it does, where 
 to add to it. It also holds the rules (colour, type, motion and wording) that keep new controls looking like
 the ones already there.
 
-| Day, with the LIVE pill                                  | Night, with the settings sheet                                         |
-| -------------------------------------------------------- | ---------------------------------------------------------------------- |
-| ![The overlay at noon](screenshots/ui-shell-day.jpg?v=1) | ![The settings sheet at night](screenshots/ui-settings-night.jpg?v=1)  |
-| **The key list**                                         | **A phone, looking at an earlier moment**                              |
-| ![The key list](screenshots/ui-keys-day.jpg?v=1)         | ![The overlay on a phone at night](screenshots/ui-phone-night.jpg?v=1) |
+| Day, with the LIVE pill                                       | Night, with the settings sheet                                         |
+| ------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| ![The overlay at noon](screenshots/ui-shell-day.jpg?v=1)      | ![The settings sheet at night](screenshots/ui-settings-night.jpg?v=1)  |
+| **The key list**                                              | **A phone, looking at an earlier moment**                              |
+| ![The key list](screenshots/ui-keys-day.jpg?v=1)              | ![The overlay on a phone at night](screenshots/ui-phone-night.jpg?v=1) |
+| **Following a resident**                                      |                                                                        |
+| ![The follow card at noon](screenshots/ui-follow-day.jpg?v=1) |                                                                        |
 
 ## What you can do
 
@@ -21,10 +23,16 @@ the ones already there.
 - **Get a hint on a first visit.** When the timeline first appears, a line above it says "Drag the timeline to go
   back in time". It goes away on your first click, key press or scroll, or after a few seconds, and it is not
   shown again in that browser.
+- **Follow a resident.** Click a car or walker (tap on a touch screen). The camera tracks them, and a card under
+  the city name shows their name, what kind of resident they are, what they are doing now and their day. `Esc`, the
+  card's close button or moving the view lets go; turning and zooming do not.
+  [Following a resident](../README.md#following-a-resident) says more.
 - **Share a moment.** The link button under the settings button copies a link that opens the city at the moment on
-  screen, from the same camera view. [Moments](../README.md#moments) shows the link and how it is read.
-- **Hide the controls.** `H` hides every control, message and the frame times, for a clean picture. `H` or `Esc`
-  brings them back. It does nothing while a field has focus or the settings sheet is open.
+  screen, from the same camera view, and with the same resident followed if there is one.
+  [Moments](../README.md#moments) shows the link and how it is read.
+- **Hide the controls.** `H` hides every control, message, the follow card and the frame times, for a clean picture.
+  `H` or `Esc` brings them back, and that `Esc` does not stop a follow. It does nothing while a field has focus or the
+  settings sheet is open.
 - **Leave it on a wall.** After a minute with no mouse, touch or key the camera turns slowly. Any input stops it.
 - **Reach everything with the keyboard.** Every control can be focused with `Tab` and used with `Enter`,
   `Space` or the arrow keys. The focused control gets a cyan ring. With an earlier moment on screen, `Space` plays
@@ -39,6 +47,7 @@ These page parameters change the overlay:
 | `?ui=0`          | Hides the overlay: no chips, no settings button, no `?` key and no hint                    |
 | `?capture&trace` | The same as `?ui=0` for the controls and the hint, since a clip must draw as is            |
 | `?attract=30`    | Seconds with no input before the camera turns on its own (60 by default, `0` for never)    |
+| `?follow=412`    | Opens with the camera on resident 412 and their card. A resident the city lacks is said so |
 | `?live=0`        | Draws the city with no gateway; the timeline never appears, so there is no hint            |
 | `?hud`           | Shows frame times under the Felix Metro chip, for tuning                                   |
 
@@ -56,6 +65,7 @@ framework. Each part has one file of each kind:
 | Timeline bar                     | `web/src/timeline.ts`                                              | `web/src/ui/timeline.css` |
 | Settings sheet and key list      | `web/src/ui/shell.ts`, `settings.ts`, `keys.ts`, `sheet.ts`        | `web/src/ui/sheet.css`    |
 | Share button, photo mode         | `web/src/ui/share.ts`, `web/src/ui/photo.ts`, `web/src/moments.ts` | `web/src/ui/photo.css`    |
+| Follow card                      | `web/src/ui/follow-card.ts`, `web/src/follow.ts`, `web/src/tap.ts` | `web/src/ui/follow.css`   |
 | Hint and messages                | `web/src/ui/hint.ts`, `web/src/ui/toast.ts`                        | `web/src/ui/toast.css`    |
 | Frame times (`?hud`)             | `web/src/ui/hud.ts`                                                | `web/src/ui/kit.css`      |
 
@@ -118,6 +128,36 @@ from the element's `data-old` attribute, which is not text.
 `hint.ts` decides whether to show the tip (`hintDue` says when, and is unit tested). It remembers in local storage that it was shown, and treats blocked
 storage as "not seen" so it never throws. The tip is offered when the timeline first becomes usable and the
 page is not already showing the past. With no gateway there is no timeline, so no tip.
+
+### The follow card
+
+A click or tap on a car or walker starts a follow. `tap.ts` tells a click from the start of a drag, so turning the view
+never picks anything, and `main.ts` asks the fleet which resident is under the pointer. `follow.ts` holds the rest and
+has no DOM in it: a `Following` object keeps the resident's number, and each frame it works out where they are and what
+they are doing, moves the camera and hands the card a `CardView`. `follow-card.ts` only draws that view.
+
+```mermaid
+flowchart LR
+    CLICK["Click or tap<br/>tap.ts"] --> PICK["Fleet.pick<br/>who is under it"]
+    URL["?follow=412"] --> FOLLOW["Following.start"]
+    PICK --> FOLLOW
+    FOLLOW -->|every frame| WHERE["Where are they at this tick?<br/>trip, or the schedule"]
+    WHERE --> CAM["Camera tracks them"]
+    WHERE --> CARD["Card: name, doing, day"]
+    PAN["Pan, reset or Esc"] -->|let go| FOLLOW
+```
+
+The card is built once, and rebuilt only when what they are doing changes. It is placed before the city chip in the page
+so the city menu is never hidden behind it, and it is a `.chip`, so photo mode and `?ui=0` hide it. `Esc` is read in
+the capture phase, before photo mode and the sheet close themselves on the same key, so the press that leaves photo
+mode or closes the sheet does not also stop the follow (`isStopKey` is the rule, and it is unit tested).
+
+The camera tells `steer` when the person moves the point it looks at (a drag of the ground, a pan key, reset); that
+is what lets go. Turning and zooming do not, so a resident can be looked at from any side. A pinch is not a move: two
+fingers must slide their middle 24 pixels before it counts.
+
+To change what the card says, edit the phrases in `follow.ts`; `copy.test.ts` checks them against the same rules as the
+rest of the overlay.
 
 ## The kit
 
@@ -217,7 +257,8 @@ node scripts/check-ui.mjs http://localhost:5173/ /tmp/ui
 `check-ui.mjs` drives the page with the keyboard (open the sheet, pick a quality, read the key list, `Esc`),
 checks that the hint is shown once and never under `?ui=0` or `?capture`, that the clock rolls and holds still
 with reduced motion, that `H` hides every control, that `?cam` starts the camera where a link says, that attract
-mode turns the camera and stops on a mouse move, and that nothing overflows or collides at 360px, even with the city picker's arrow showing
+mode turns the camera and stops on a mouse move, that `?follow=` shows the resident's card with their day and puts the
+camera on them, that turning keeps the follow and `Esc`, a pan, a pan key and reset let it go, and that nothing overflows or collides at 360px, even with the city picker's arrow showing
 and the Reconnecting pill. It writes screenshots of the shell, the
 sheet, the key list and the hint, by day and night, at 1280px and 360px wide, into the folder you name. Look at
 them: the checks do not know whether the page looks right.

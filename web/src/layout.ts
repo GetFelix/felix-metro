@@ -10,6 +10,8 @@ export interface Lot {
   kind: number;
   /** Quarter turns from facing south: 0 south, 1 east, 2 north, 3 west. */
   facing: number;
+  /** The business's name, or null for a lot without one. */
+  name?: string | null;
 }
 export interface Road {
   x: number;

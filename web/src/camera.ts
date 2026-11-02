@@ -48,8 +48,11 @@ const round = (n: number) => Math.round(n * 1000) / 1000;
  * Looks at a point on the ground from a distance and two angles, and is the one thing that moves the camera. The
  * person's input and the app's own moves (`moveTo`) both set a goal, and the camera chases it on a spring that does not
  * bounce. `target` is the point it looks at, as Three.js's controls have it, for the passes that focus on it.
+ *
+ * It tells `start` whenever anything takes the camera, and `steer` when the person moves the point it looks at (a drag
+ * of the ground, a pan key, the reset), which is what ends a follow. Turning and zooming leave it alone.
  */
-export class CameraRig extends THREE.EventDispatcher<{ start: object }> {
+export class CameraRig extends THREE.EventDispatcher<{ start: object; steer: object }> {
   readonly target: THREE.Vector3;
   enabled = true;
   private goal: View;
@@ -120,8 +123,17 @@ export class CameraRig extends THREE.EventDispatcher<{ start: object }> {
     else this.omega = EASE_OMEGA;
   }
 
+  /**
+   * Keep looking at (x, z) while it moves, as a follow does each frame: the look-at point is set and the camera
+   * chases it, with the distance and angles the person chose left as they are.
+   */
+  track(x: number, z: number) {
+    this.goal = clampView({ ...this.goal, x, z }, this.limits);
+  }
+
   /** Back to the view the page opened on. */
   reset(options: MoveOptions = {}) {
+    this.dispatchEvent({ type: 'steer' });
     this.moveTo(this.home, this.home.distance, this.home.azimuth, this.home.polar, options);
   }
 
@@ -155,9 +167,10 @@ export class CameraRig extends THREE.EventDispatcher<{ start: object }> {
     this.goal = orbitBy(this.goal, azimuth, 0, this.limits);
   }
 
-  /** Drag the ground so what was under `from` is under `to`. */
-  grab(from: Ndc, to: Ndc) {
+  /** Drag the ground so what was under `from` is under `to`. `steers` is false for the small drift of a pinch. */
+  grab(from: Ndc, to: Ndc, steers = true) {
     this.take();
+    if (steers) this.dispatchEvent({ type: 'steer' });
     this.goal = panGrab(this.goal, from, to, this.lens(), this.limits);
   }
 
@@ -171,6 +184,7 @@ export class CameraRig extends THREE.EventDispatcher<{ start: object }> {
   hold(action: CameraAction, down: boolean) {
     if (down) {
       this.take();
+      if (action.startsWith('pan')) this.dispatchEvent({ type: 'steer' });
       this.held.add(action);
     } else this.held.delete(action);
   }

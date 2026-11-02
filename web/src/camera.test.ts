@@ -279,3 +279,38 @@ describe('drift', () => {
     expect(started).not.toHaveBeenCalled();
   });
 });
+
+describe('following', () => {
+  it('chases a moving point and keeps the distance and angles the person chose', () => {
+    const { rig } = make();
+    rig.moveTo({ x: 0, z: 0 }, 14, 1.1, 0.8, { ease: false });
+    let at = 0;
+    // A car at 3 tiles a second; the camera trails it by a fraction of a second.
+    run(rig, 3, () => rig.track((at += 3 / 60), 2));
+    const v = rig.view();
+    expect(v.x).toBeGreaterThan(at - 1);
+    expect(v.x).toBeLessThan(at);
+    expect(v.z).toBeCloseTo(2, 2);
+    expect([v.distance, v.azimuth, v.polar]).toEqual([14, 1.1, 0.8]);
+  });
+
+  it('tells steer when the person moves the point it looks at, and not for turning or zooming', () => {
+    const { rig } = make();
+    const steer = vi.fn();
+    rig.addEventListener('steer', steer);
+    rig.orbit(0.2, 0.1);
+    rig.zoomAt({ x: 0, y: 0 }, 0.9);
+    rig.grab({ x: 0, y: 0 }, { x: 0.01, y: 0 }, false);
+    rig.moveTo({ x: 1, z: 1 }, 12, 1, 0.8);
+    rig.track(3, 3);
+    rig.hold('rotateLeft', true);
+    rig.hold('zoomIn', true);
+    expect(steer).not.toHaveBeenCalled();
+    rig.grab({ x: 0, y: 0 }, { x: 0.2, y: 0 });
+    expect(steer).toHaveBeenCalledTimes(1);
+    rig.hold('panForward', true);
+    expect(steer).toHaveBeenCalledTimes(2);
+    rig.reset();
+    expect(steer).toHaveBeenCalledTimes(3);
+  });
+});
