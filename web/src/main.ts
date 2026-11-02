@@ -765,6 +765,7 @@ async function main() {
         // Nothing live feeds a page opened at a moment; opening it again without one is the way back.
         const url = new URL(location.href);
         url.searchParams.delete('at');
+        url.searchParams.delete('cam');
         location.assign(url);
         return;
       }
@@ -1263,10 +1264,12 @@ async function main() {
   if (shell) {
     createPhoto(() => shell.isOpen);
     // Nothing to share where no gateway feeds the page: the link opens a past tick through it.
-    if (wantLive)
+    if (wantLive && (hasLive || pastTick !== null))
       createShare(() => {
         const tick = scrubTarget ?? liveInfo?.tick;
-        return tick === undefined || Number.isNaN(tick) ? null : momentLink(location.href, tick, controls.state());
+        if (tick === undefined || Number.isNaN(tick)) return null;
+        // The clock coasts past the newest record while the connection is down; the log has nothing there to open.
+        return momentLink(location.href, state ? Math.min(tick, state.latest) : tick, controls.state());
       });
   }
   if (city && !still && !reduced && !capture && attractSeconds > 0) {

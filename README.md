@@ -142,14 +142,15 @@ http://localhost:5173/?at=18400&cam=3.2,-1.5,22,0.785,0.9#harbor
 ```
 
 `at` is the city tick, paused as for any earlier moment, and `cam` is where the camera stands:
-`x,z,distance,azimuth,polar`. The link keeps the city (the hash, `districts`, `layout` and `gateway`) and leaves out the rest of your visit.
+`x,z,distance,azimuth,polar`. The camera is held inside the city's limits, so a link opened with a different `districts` or
+`layout` shows the nearest view it allows. The link keeps the city (the hash, `districts`, `layout` and `gateway`) and leaves out the rest of your visit.
 If the log no longer holds the tick, the page says so and shows the city live.
 
-Press `H` for photo mode: every control, the tip and the messages go away until you press `H` or `Esc`. It is a
-keyboard feature, so on a touch screen there is no way back from it other than a reload.
+Press `H` for photo mode: every control, the tip and the messages go away until you press `H` or `Esc`. The camera and
+playback keys still work. A touch screen has no `H`, so reload to leave it.
 
-A page nobody has touched for 60 seconds turns the camera slowly, so a screen left on a wall shows the city. Any
-mouse move, touch or key stops it. `?attract=30` changes the wait, `?attract=0` turns it off, and it is also off with
+A page nobody has touched for 60 seconds turns the camera slowly, for a display left running. Any mouse move, click,
+scroll, touch or key stops it. `?attract=30` changes the wait, `?attract=0` turns it off, and it is also off with
 reduced motion. Following one resident from a link is not built yet.
 
 ## Recording the clip

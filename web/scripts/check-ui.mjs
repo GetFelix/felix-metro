@@ -272,6 +272,8 @@ for (const [size, tag] of [
   await page.keyboard.press('h');
   check((await shown()) > 0, 'H brings them back');
   await page.keyboard.press('h');
+  await page.keyboard.press('?');
+  check(!(await visible(page, '#sheet')), '? opens nothing in photo mode');
   await page.keyboard.press('Escape');
   check((await shown()) > 0, 'Esc brings them back');
   await page.keyboard.press('?');

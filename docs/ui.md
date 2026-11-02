@@ -216,7 +216,8 @@ node scripts/check-ui.mjs http://localhost:5173/ /tmp/ui
 
 `check-ui.mjs` drives the page with the keyboard (open the sheet, pick a quality, read the key list, `Esc`),
 checks that the hint is shown once and never under `?ui=0` or `?capture`, that the clock rolls and holds still
-with reduced motion, that `H` hides every control, that `?cam` starts the camera where a link says and that attract mode turns the camera and stops on a mouse move, and that nothing overflows or collides at 360px, even with the city picker's arrow showing
+with reduced motion, that `H` hides every control, that `?cam` starts the camera where a link says, that attract
+mode turns the camera and stops on a mouse move, and that nothing overflows or collides at 360px, even with the city picker's arrow showing
 and the Reconnecting pill. It writes screenshots of the shell, the
 sheet, the key list and the hint, by day and night, at 1280px and 360px wide, into the folder you name. Look at
 them: the checks do not know whether the page looks right.
