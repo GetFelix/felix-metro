@@ -19,10 +19,10 @@ mod wire;
 #[cfg(test)]
 mod tests;
 
-pub use codec::{TICK_HEADER_LEN, building_diffs};
+pub use codec::building_diffs;
 
-/// Kind byte of a tick record.
-pub const KIND_TICK: u8 = 1;
+/// Kind byte of a tick record. Kind 1 was the layout before the compact one and is refused.
+pub const KIND_TICK: u8 = 4;
 /// Kind byte of a command record.
 pub const KIND_COMMAND: u8 = 2;
 /// Kind byte of a registry record.
@@ -216,7 +216,6 @@ pub enum Event {
     Left {
         resident: u32,
         district: u16,
-        vehicle: Vehicle,
     },
     /// Crossed into this district from `district`.
     Entered {

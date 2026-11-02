@@ -265,7 +265,6 @@ impl World {
                         out[usize::from(*district)].events.push(Event::Left {
                             resident: id,
                             district: now,
-                            vehicle: state.clone(),
                         });
                         out[usize::from(now)].events.push(Event::Entered {
                             resident: id,

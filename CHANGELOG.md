@@ -5,6 +5,16 @@
 ### Changed
 
 - Built on Felix 0.6.2: the sim's `felix-client` and `felix-wire` pins, the dev stack and CI images.
+- The log's busiest minute is under the 10 KB/s goal. A 20,000-resident city now writes 9.6 KB/s in the evening rush
+  (was 17.1) and 7.8 KB/s in the morning (was 13.8), and averages 4.8 KB/s a day (was 8.1). Tick records have
+  a new layout, kind 4: ids, counts and ticks are varints, times in an event are deltas from the record's tick, an
+  `arrived` and the `activity` after it are one entry, and `left` no longer carries the vehicle (the JSON `left`
+  event has no `vehicle`, `progress` or `route` fields). A tick with nothing in it is 16 bytes, not 31. Kind 1 is
+  refused, so a log written before this cannot be read; the dev stack keeps no state between runs. Spreading the
+  keyframes over the hour was measured and does not lower the busiest minute, so they stay on the hour (design.md,
+  "Log size").
+- `report_load` also prints the day mean at 20,000 residents and a denser harbor city, and a test holds the busiest
+  minute under 10 KB/s.
 
 ### The page
 
