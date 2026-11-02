@@ -11,6 +11,12 @@
   applied commands), so a command sent while the sim was down runs when it comes back and none runs twice. A new city now
   reads its command stream from the start. The epoch in the tick header stays the same across a restart.
 
+### Added
+
+- Moments: a **Share this moment** button copies a link such as `/?at=<tick>&cam=<x,z,distance,azimuth,polar>#harbor`
+  that opens the city at that tick from that camera view (`?cam` is new). `H` is photo mode and hides every control.
+  A page left alone for 60 seconds turns the camera slowly (`?attract=<seconds>`, `0` turns it off).
+
 ### Changed
 
 - Built on Felix 0.6.2: the sim's `felix-client` and `felix-wire` pins, the dev stack and CI images.
