@@ -1,0 +1,1 @@
+- The check that the past plays forward and joins live waits until the frames around the join are drawn instead of a fixed 1.5 s, so a software renderer at a few frames a second no longer fails it.
