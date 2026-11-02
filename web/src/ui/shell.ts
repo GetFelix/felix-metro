@@ -11,6 +11,8 @@ import { toast } from './toast';
 
 export interface Shell {
   readonly isOpen: boolean;
+  /** The row of icon buttons under the clock, for a control that belongs beside the settings button. */
+  readonly tools: HTMLElement;
   openSettings(): void;
   openKeys(): void;
   close(): void;
@@ -73,7 +75,10 @@ export function createShell(quality: Quality, stats: StatsPanel): Shell {
   button.setAttribute('aria-expanded', 'false');
   button.setAttribute('aria-controls', 'sheet');
   button.innerHTML = GEAR;
-  document.querySelector('.corner')!.append(button);
+  const tools = document.createElement('div');
+  tools.className = 'tools';
+  tools.append(button);
+  document.querySelector('.corner')!.append(tools);
 
   const scrim = document.createElement('div');
   scrim.className = 'scrim';
@@ -151,6 +156,7 @@ export function createShell(quality: Quality, stats: StatsPanel): Shell {
     get isOpen() {
       return sheet.isOpen;
     },
+    tools,
     openSettings,
     openKeys,
     close: sheet.close,

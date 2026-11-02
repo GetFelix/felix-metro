@@ -59,6 +59,7 @@ export const SHORTCUTS: readonly ShortcutGroup[] = [
     title: 'Anywhere',
     rows: [
       { keys: [['H']], action: 'Hide every control for a clean view; press H or Esc to bring them back' },
+      { keys: [['M']], action: 'Turn the sound on or off' },
       { keys: [['C']], action: 'Show or hide the city stats' },
       { keys: [['?']], action: 'Show this list' },
       { keys: [['Esc']], action: 'Close a menu or panel' },
