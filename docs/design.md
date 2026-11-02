@@ -118,7 +118,7 @@ not needed at the target scale and is left out.
 - **Speed changes the tick rate, not the tick.** Pause, 1×, 2× and 4× step at 0, 4, 8 and 16 Hz. A tick always covers the same city time, so the tick number stays a linear clock and seeking and interpolation never need to know the speed. The log costs the same per city day at any speed; only its rate per real second changes.
 - **Speed belongs to the city, not the viewer.** It is set on the sim, written in every tick header, and changed with a `speed` event, so a seek can turn wall time into ticks across speed changes. A viewer's playback speed while scrubbing is separate and local.
 - **A speed change takes effect between ticks.** The sim reads the requested speed after every district has answered a tick, so the next tick's header carries the new speed and each district's record for it holds a `speed` event; no other tick has one. Changing to 0 commits that tick as the last one (header speed 0), then the clock stops: no records are written while paused and the city clock does not move. A resume continues at the next tick, due at once and at the new rate from then on, with no catch-up burst. Only 0, 4, 8 and 16 are accepted. Seeking goes by tick number and offset, and nothing in `core` reads the speed.
-- **A new city starts with a day behind it.** On its first start, when no district has a record, the sim commits `SIM_WARMUP_HOURS` of ticks (40 by default, so live begins at 16:00 on day 2) as fast as the broker takes them, then runs at its normal speed. Each district has its own committer that sends one record at a time at the offset the stepping already knows, so the expected-offset fence and the per-district order hold, and a district may run up to 256 ticks ahead of another. The warm-up ticks did not happen in real time, so their `wall_us` is spread back from the moment the warm-up began at the speed the city runs at (a tick every 250 ms at 4 Hz), which keeps wall time and tick consistent with the live ticks after them. A restart over a log with records never warms up again, and neither does a city that starts paused. The log-rate goals are about the live rate; the warm-up is one burst of the same records at startup (a city day and a half, well inside the stream's retention) and `report_load` steps the world without the runner, so it is unaffected.
+- **A new city starts with a day behind it.** On its first start, when no district has a record, the sim commits `SIM_WARMUP_HOURS` of ticks (40 by default, so live begins at 16:00 on day 2) as fast as the broker takes them, then runs at its normal speed. Each district has its own committer that sends one record at a time at the offset the stepping already knows, so the expected-offset fence and the per-district order hold, and a district may run up to 256 ticks ahead of another. The warm-up ticks did not happen in real time, so their `wall_us` is spread back from the moment the warm-up began at the speed the city runs at (a tick every 250 ms at 4 Hz), which keeps wall time and tick consistent with the live ticks after them. A restart over a log with records never warms up again, and neither does a city that starts paused or a chapter city (see Chapters). The log-rate goals are about the live rate; the warm-up is one burst of the same records at startup (a city day and a half, well inside the stream's retention) and `report_load` steps the world without the runner, so it is unaffected.
 - **A restart carries on from the log.** A sim started over a city that has records resumes at the next tick, with everything built and everyone where they were. See [Restart](#restart).
 - **The operator sets it** with `SIM_TICKS_PER_SECOND` when a new city starts (a restarted city keeps its own speed) and a loopback-only HTTP endpoint on the sim (`PUT /cities/<name>/speed`). A builder's `speed` command from the command stream does the same, and a nonzero one resumes a paused city.
 - **The tick number is the city's clock.** Every record carries it. "The city at 08:15 on day 3" is a tick number, and the city at a tick is every district rewound to that tick.
@@ -439,7 +439,7 @@ about 15 minutes, 71% of the shore's residents live away from factories and a sh
   how far short it fell: a 24 minute commute against a 12 minute demand scores 50. Below 60 the faction is unhappy for
   the day.
 - **Recall.** A faction unhappy for 3 days in a row recalls the mayor. A day it is not unhappy sets its count back to
-  zero. The sim only records this: the city keeps running, and a chapter decides what a recall costs. A day with
+  zero. The sim only records this: the city keeps running, and the page decides what a recall costs (a chapter counts it as a loss). A day with
   nothing to judge (nobody commuted, or no shops) upsets no one.
 - **The event.** District 0 writes one `council` event on every keyframe tick, holding the last scored day's demands,
   measures, satisfaction and unhappy-day counts, and the open day's running totals. `days` says how many days have been
@@ -476,10 +476,10 @@ notice that on the next scored day, which is what makes the limits a trade.
   12 and starts no cooldown. A policy that changed less than a city day ago (5,760 ticks) is refused with result 11.
   The cooldown is per policy, so changing one does not hold the others. A refusal changes nothing.
 - **The event.** A `policy` command that applies records the new settings in a `policy` event in district 0, and every
-  keyframe tick carries the same event once any policy has changed (a city that never changed one writes none). It holds each value and the tick of its last change, so the cooldown survives a
+  keyframe tick carries the same event once a policy differs from how the city opened (a city that never changed one writes none). It holds each value and the tick of its last change, so the cooldown survives a
   restart. The page reads the newest one.
 - **Restart.** The restart takes the policies from the newest keyframe tick, then applies any `policy` event after
-  it before stepping. A log from before policies starts with the usual hours and no limits.
+  it before stepping. A log with no `policy` event has the policies the city opened with: the usual hours and no limits, or a chapter's opening (see Chapters).
 - **In the schedule.** Shop hours move only the leave tick of a shopkeeper's workday (`Resident::leave_tick`), so the
   schedules themselves, which come from the seed, are not rewritten. A shopkeeper kept late waits at work; a restart
   that finds one there recomputes the wait from the policy, not from when the keyframe was taken, so lowering the hours
@@ -492,6 +492,33 @@ The page lists the policies under the factions in the same folded panel, each wi
 again from.
 
 Cost to the log: nothing until a policy is first changed, then one `policy` event of a few bytes per keyframe tick (one per hour of city time).
+
+### Chapters
+
+A chapter is a city with a story: a seed whose city opens with something wrong and a goal to reach by a deadline. The
+table is `CHAPTERS` in `core/src/chapter.rs`, so the sim that plays the opening and the page that judges the goals read
+the same numbers. The page asks core for the chapter of the city it opened (`chapter(seed)` in the wasm build); a city
+that is not a chapter has none and shows no goals.
+
+| Chapter | City           | Opens with                         | Days | Commute goal |
+| ------- | -------------- | ---------------------------------- | ---- | ------------ |
+| Pier    | `pier`, 2 by 2 | Avenue limit 40%, street limit 60% | 3    | 64 ticks     |
+
+- **The opening.** `Policy::opening(seed)` is the policy a city starts with: the usual one, or the chapter's. A
+  `policy` event is written once the policies differ from the opening, so a city that has not changed anything writes
+  none, and a restart that finds none reads the opening, not the usual policy. A restart that read the usual one would
+  quietly give a chapter its limits back.
+- **No warm-up.** A chapter's first tick is the sim's first tick, so the three days are the player's. The sim skips the
+  warm-up for a seed with a chapter.
+- **The goals.** Judged by the page from the `council` event and the funds at the tick on screen: the commuters'
+  measure of the last scored day is at most the commute goal, no standing has been unhappy for the council's patience,
+  and funds are above zero. Nothing is judged before a day is scored. A recall or an empty account loses at once;
+  the other goals are judged once `days` have been scored. The page judges the latest scored day, not a frozen result: a chapter lost on day 3 reads as won if a later day meets the goals, and the reverse, and scrubbing back shows the chapter as it stood then. The
+  page lists them under the factions, with the day or the outcome beside the heading.
+- **Tested against the sim.** `web/src/chapter-fixture.json` holds the chapter table and the council and funds that the
+  sim reaches after three days with the limits left alone and with both raised. The sim's test rewrites it
+  (`METRO_WRITE_FIXTURE=1 cargo test -p felix-metro-sim the_chapter_fixture`) and fails when it is stale; the page's tests
+  judge both runs from it.
 
 ### Commands and the registry
 

@@ -4,6 +4,7 @@
 //! Everything is integer arithmetic, so a city generated from a seed is the
 //! same on every platform.
 
+pub mod chapter;
 pub mod city;
 pub mod kinds;
 pub mod names;
@@ -15,6 +16,7 @@ pub mod schedule;
 #[cfg(target_arch = "wasm32")]
 pub mod wasm;
 
+pub use chapter::{CHAPTERS, Chapter, chapter_for};
 pub use city::{
     BuiltRoad, City, District, Door, GenerateError, Lot, MAX_ROAD_LENGTH, RoadError, RoadPiece,
     RoadTile, Segment, SegmentClass, Zone,

@@ -1,5 +1,6 @@
 // How the page shows the council: what each faction asks for, how the city is doing by it, and the recall countdown.
-// The mayor's policies sit under it.
+// A chapter's goals and the mayor's policies sit under it.
+import type { GoalsView } from './goals';
 import type { PolicyRow } from './policy';
 
 /** The council event of a record: factions in the order commuters, residents, shops. */
@@ -121,6 +122,36 @@ function policyList(rows: PolicyRow[]): HTMLElement {
   return list;
 }
 
+function goalsList(view: GoalsView): HTMLElement {
+  const list = document.createElement('ul');
+  list.className = 'goals';
+  const first = document.createElement('li');
+  const head = document.createElement('div');
+  head.className = 'faction-head';
+  const title = document.createElement('b');
+  title.textContent = 'Goals';
+  const status = document.createElement('span');
+  status.textContent = view.status;
+  status.className = view.verdict;
+  head.append(title, status);
+  first.append(head);
+  list.append(first);
+  for (const row of view.rows) {
+    const li = document.createElement('li');
+    li.className = row.state;
+    const text = document.createElement('div');
+    text.textContent = row.text;
+    li.append(text);
+    if (row.now !== null) {
+      const small = document.createElement('small');
+      small.textContent = `Now ${row.now}`;
+      li.append(small);
+    }
+    list.append(li);
+  }
+  return list;
+}
+
 /** The one line the council shows while folded away. */
 export function councilSummary(view: CouncilView): string {
   if (view.recall) return recallText(view.recall);
@@ -135,13 +166,14 @@ export function councilSummary(view: CouncilView): string {
 /**
  * Draws the council into `root`, replacing what it held. It is a folded line the player can open, so it does not
  * push the controls below it off a short screen. A redraw updates it in place and keeps it as the player left it; the first
- * draw opens it only if `openFirst`.
+ * draw opens it only if `openFirst`. `goals` is the chapter's, for a city that has one.
  */
 export function renderCouncil(
   root: HTMLElement,
   view: CouncilView,
   openFirst: boolean,
   policies: PolicyRow[] = [],
+  goals: GoalsView | null = null,
 ): void {
   const previous = root.firstElementChild as HTMLDetailsElement | null;
   const rows = view.factions.map((f) => {
@@ -173,9 +205,15 @@ export function renderCouncil(
     // Keep the summary element so a focused summary stays focused through a redraw.
     previous.querySelector('summary > span')?.replaceWith(line);
     previous.querySelector('ul')?.replaceWith(list);
-    const shown = previous.querySelector('.policies');
-    if (policies.length === 0) shown?.remove();
-    else if (shown) shown.replaceWith(policyList(policies));
+    // Goals come before policies, so a goals list that appears later goes in ahead of them.
+    const shownPolicies = previous.querySelector('.policies');
+    const shownGoals = previous.querySelector('.goals');
+    if (goals === null) shownGoals?.remove();
+    else if (shownGoals) shownGoals.replaceWith(goalsList(goals));
+    else if (shownPolicies) previous.insertBefore(goalsList(goals), shownPolicies);
+    else previous.append(goalsList(goals));
+    if (policies.length === 0) shownPolicies?.remove();
+    else if (shownPolicies) shownPolicies.replaceWith(policyList(policies));
     else previous.append(policyList(policies));
     return;
   }
@@ -189,6 +227,7 @@ export function renderCouncil(
   summary.addEventListener('click', () => {
     details.dataset.touched = '1';
   });
+  if (goals) details.append(goalsList(goals));
   if (policies.length > 0) details.append(policyList(policies));
   root.replaceChildren(details);
 }

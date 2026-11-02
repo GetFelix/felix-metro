@@ -195,7 +195,7 @@ refused in the page with its reason, and the architect takes it away with two ta
 | 5   | Branching timelines | Planned                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | 6   | Scale and failover  | In progress: a restarted sim resumes from its log; 20,000 residents, 16 districts and broker loss are open                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | 7   | Self-hosting        | Planned                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| 8   | A first chapter     | In progress: the sim resumes from its log after a restart (nothing built is lost, no tick repeated or missing, commands run once); the city has funds (taxes and upkeep each day, a price on building, shown on the page, also for the moment you scrub to); the council's three factions are scored each city day and shown with their demands and a recall countdown; the mayor can set shop hours and speed limits for avenues and streets, each once a city day (a `policy` command); goals and investigations are planned (see [docs/game.md](docs/game.md)) |
+| 8   | A first chapter     | In progress: the sim resumes from its log after a restart (nothing built is lost, no tick repeated or missing, commands run once); the city has funds (taxes and upkeep each day, a price on building, shown on the page, also for the moment you scrub to); the council's three factions are scored each city day and shown with their demands and a recall countdown; the mayor can set shop hours and speed limits for avenues and streets, each once a city day (a `policy` command); the first chapter, `pier`, opens with slow speed limits and lists its goals under the council (see [docs/game.md](docs/game.md)); investigations are planned |
 
 What runs today: the sim, which picks up where it left off after a restart, the dev stack and a browser page that shows a city live, with
 cars and walkers moving in time with the sim and the sun following the tick. They are drawn as instances
@@ -352,7 +352,7 @@ The first run builds the sim and the web app, which takes a few minutes. It star
 Felix (a control plane and one broker as a cluster of one, so a city's stream can
 have a shard per district), a stand-in sign-in provider, the
 [gateway](https://github.com/GetFelix/felix-gateway), the sim and the web app, with the
-cities `harbor` and `pinecrest` (and `lakeside`, which the sim holds back, see below). It returns once a probe has seen a tick on every
+cities `harbor` and `pinecrest` (and `lakeside` and `pier`, which the sim holds back, see below). It returns once a probe has seen a tick on every
 district of both cities arrive through the gateway, and prints the web app's address,
 <http://127.0.0.1:8088>. The stack keeps no state between runs: `dev/up.sh` starts it
 over each time. Stop it with `docker compose -f dev/compose.yml down --volumes`
@@ -377,6 +377,16 @@ and unlisted until you start it:
 
 ```sh
 dev/city.sh lakeside
+```
+
+`pier` is held back the same way. It is the first chapter: it opens with slow speed limits, the council lists its
+goals, and it starts at its first tick so the three days to meet them are yours. Start it with `dev/city.sh pier`,
+open `/#pier`, and run `dev/speed.sh pier 16` to get through the three days in 18 minutes. The page has no control for
+policies yet, so change the speed limits from a terminal (needs Node 22; sign in as the builder at <http://127.0.0.1:8088/?as=mayor#pier> to watch):
+
+```sh
+node dev/policy.mjs pier avenue 100
+node dev/policy.mjs pier street 100
 ```
 
 A page opened at a city the gateway refuses (`/#nowhere`) still shows the list. It reads
