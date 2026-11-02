@@ -21,6 +21,10 @@
   second before the first was drawn) was drawn twice, and only the older drawing was tracked, so the other stayed in
   the scene for good. A burst of 101 swaps on one lot left 100 stray objects; the construction check now runs that
   burst and wants none.
+- The city list no longer depends on `harbor`. A page opened at a city the gateway refuses read the list through a
+  hardcoded `harbor`, so the picker was empty whenever that city was missing or closed to the person. It now joins
+  `lobby`, which `dev/seed.mjs` creates for this and nothing else. A stack started before this change has no lobby, so
+  its picker is empty for a refused city until it is restarted with `dev/up.sh`. The dev-stack check opens `/#nowhere` and wants the cities listed.
 
 ### Tools
 
