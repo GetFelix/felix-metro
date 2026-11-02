@@ -22,12 +22,14 @@ and play forward from there.
 >   and a whoosh when you go back in time. It is off until you turn it on (see [Sound](#sound)).
 > - Builders change the city through its command stream: the sim applies `build` and `demolish`, each building rises
 >   in a scaffold or falls in dust, and `dev/builder-bot.mjs` grows a neighbourhood on each city's development area.
+> - The page has its own building tools: the build and demolish buttons under the clock (or `B` and `X`) put a building
+>   on the cleared ground and take it down, for a sign-in that may build, in the live city (see [Building](#building)).
 > - The sim resumes a city from its log after a restart.
 > - A share button under the settings button copies a link to the moment and view on screen; `H` hides every control for
 >   a clean picture, and a page left alone for a minute turns slowly (see [Moments](#moments)).
 > - Click a car or walker to follow them: the camera tracks them and a card shows their name, what they are doing
 >   and their day (see [Following a resident](#following-a-resident)).
-> - Not built yet: the page's own building tools.
+> - Not built yet: placing roads and zones.
 >
 > The [style frame](prototype/style-frame.html) shows the look. The plan is in
 > [docs/design.md](docs/design.md) and the work is tracked in
@@ -44,7 +46,7 @@ and play forward from there.
 - Drag the timeline back to any moment the log holds and see the city exactly as it was
 - Let go and watch it play forward and catch up to live, or rewind an evening and watch it run backwards
 - Follow one resident or car through their day
-- Place roads, zones and buildings, with every change recorded with who made it
+- Place roads, zones and buildings, with every change recorded with who made it (buildings and demolishing work today, see [Building](#building); roads and zones do not yet)
 - Fork the city at a past moment and compare the two timelines side by side
 
 ## Felix features it uses
@@ -115,6 +117,46 @@ The page has an optional ambient sound. It is off until you turn it on: nothing 
 The sound is made in the browser with the Web Audio API, so there are no audio files to download. The button is not
 shown with `?ui=0` or `?capture`. [docs/ui.md](docs/ui.md#sound) explains how it works.
 
+## Building
+
+A builder changes the city from the page. The buttons under the clock are **Build** and **Demolish**, and each has a key.
+
+| Key        | What it does                                                        |
+| ---------- | ------------------------------------------------------------------- |
+| `B`        | Pick the build tool, or put it away                                 |
+| `X`        | Pick the demolish tool, or put it away                              |
+| `R`        | Turn the building a quarter turn (it faces its street until you do) |
+| `[` or `,` | Choose the previous building                                        |
+| `]` or `.` | Choose the next building                                            |
+| `Esc`      | Put the tool away                                                   |
+
+With a tool picked, a panel under the buttons lists the buildings to choose from (houses, commercial buildings,
+skyscrapers and factories) and a ghost of the building follows the pointer, snapped to the lot under it. The ghost is
+cyan where the building fits and red where it does not. Click, or tap on a touch screen, to place it. A touch demolish takes two taps, one to pick the building and one to confirm. A demolish
+shows a box round the building under the pointer. The panel then says what became of the command, in plain words:
+`Built.`, `Taken down.`, or why the city turned it down. The building itself rises in its scaffold when the sim
+applies the command, like any other.
+
+Building is limited to the cleared ground: the development area every city sets aside, where no resident goes. These
+are the sim's own rules, which the page checks too, so a click the sim would turn down is turned away at once. The buttons are off, with a
+short note saying why, when:
+
+- the page has no live city (`?live=0`, a city opened at a moment with `?at`, or no gateway), or you are looking at an
+  earlier moment. Go back to live;
+- the sign-in may only watch. The stand-in sign-in of the dev stack signs in as `viewer`, who cannot build; open
+  `/?as=mayor#harbor` in a new tab to sign in as `mayor`, who can. The `?as` parameter only picks which login the dev
+  stack's stand-in identity provider gives you. It grants nothing, and a real provider ignores it. A tab that is already
+  signed in keeps its token, so use a new tab to change who you are;
+- the connection to the city is down.
+
+The tools do not exist under `?ui=0` or `?capture`. Roads and zones are not built here: a road changes the graph that
+every route and the page's own copy of the city are built from, and a zone has no record in the log yet. They are the
+next step; [docs/design.md](docs/design.md#commands-and-the-registry) lists what the sim needs.
+
+`web/scripts/check-placement.mjs` checks the tools in CI against the dev stack: a `mayor` page using the mouse and an
+`architect` page using touch build on different lots at once and each sees both buildings, two builds on one lot
+leave one building and tell the loser why, and a page held at an earlier moment has the tools off until Back to live.
+
 ## Status
 
 | M   | Milestone           | State                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
@@ -123,7 +165,7 @@ shown with `?ui=0` or `?capture`. [docs/ui.md](docs/ui.md#sound) explains how it
 | 1   | A live city         | Done                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | 2   | Time travel         | In progress: keyframes, seeking, the timeline scrubber, rewind then follow, and backward playback with speeds built, smoothness not yet measured                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | 3   | Follow a life       | In progress: click a car or walker to follow them, with a card for their day and a `?follow=` link; ambient sound built; city stats at any tick built; markers for notable events are not built yet                                                                                                                                                                                                                                                                                                                                                               |
-| 4   | Build               | In progress: the sim applies build, demolish and speed commands and records who sent them and who built what, and the page animates a building going up (scaffold) or coming down (dust) over 8 ticks, backwards when you rewind, and says who built a building when you point at it; placement tools in the page, roads and zones are not built yet                                                                                                                                                                                                              |
+| 4   | Build               | In progress: the sim applies build, demolish and speed commands and records who sent them and who built what, and the page animates a building going up (scaffold) or coming down (dust) over 8 ticks, backwards when you rewind, and says who built a building when you point at it; build and demolish tools in the page; roads and zones are not built yet                                                                                                                                                                                                     |
 | 5   | Branching timelines | Planned                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | 6   | Scale and failover  | In progress: a restarted sim resumes from its log; 20,000 residents, 16 districts and broker loss are open                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | 7   | Self-hosting        | Planned                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
@@ -137,8 +179,8 @@ city. If the connection drops, a `Reconnecting…` pill shows, the city keeps mo
 the page reads what it missed from the log and carries on in order. If retention has
 already dropped what it missed, it restarts that district from the newest keyframe left.
 A city the gateway refuses (a misspelled name, or no access) shows a message instead of
-retrying. The city name in the top left opens a list of every city. The clock's digits roll as time moves, the button under it opens the settings sheet, and the `?` key opens the key list. The page's own
-building tools are not built yet; a command published to the city's command stream by any client with a
+retrying. The city name in the top left opens a list of every city. The clock's digits roll as time moves, the button under it opens the settings sheet, and the `?` key opens the key list. The page's
+own [building tools](#building) place and demolish buildings; a command published to the city's command stream by any client with a
 builder's token is applied by the sim and shows up in the page, rising over 8 ticks of city time inside a scaffold (a demolished building scales down in a puff of dust). Rewind through it and it comes down again; the low quality tier skips the scaffold and the dust.
 
 ## Who built what
@@ -289,7 +331,7 @@ over each time. Stop it with `docker compose -f dev/compose.yml down --volumes`
 (`podman compose` the same).
 
 Open <http://127.0.0.1:8088/#harbor>: the page signs in as `viewer` at the stand-in
-provider, follows the city through the gateway and draws its residents driving and
+provider (open it in a new tab with `?as=mayor`, as in <http://127.0.0.1:8088/?as=mayor#harbor>, to sign in as the builder instead; see [Building](#building)), follows the city through the gateway and draws its residents driving and
 walking in time with the sim, with the sun following the tick. A new city
 first commits a day and a half of ticks in a few seconds (`SIM_WARMUP_HOURS`, 40 by default),
 so it opens in the late afternoon of its second day with a day behind it to scrub through and
@@ -438,7 +480,8 @@ dev/speed.sh harbor      # show it
 ```
 
 `dev/seed.mjs` sets up the tenant, each city's streams and `lobby`, and the roles that
-`viewer` (watch) and `mayor` (watch and build) sign in with. `sim/ci/` runs the same
+`viewer` (watch) and `mayor` (watch and build) sign in with. `METRO_BUILDERS=mayor,architect dev/up.sh` makes a
+second sign-in a builder too, which CI uses to test two builders at once. `sim/ci/` runs the same
 seed against a broker for the sim's integration test.
 
 ## Documentation

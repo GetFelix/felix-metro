@@ -40,8 +40,8 @@ interface SpeedEvent {
   type: 'speed';
   ticksPerSecond: number;
 }
-/** A builder's command as the sim applied or refused it; `principal` is the sender's hash, 16 hex digits. */
-interface CommandEvent {
+/** What became of a builder's command: `result` 0 is applied, anything else a refusal (core/src/record.rs). */
+export interface CommandEvent {
   type: 'command';
   principal: string;
   name: string;
@@ -218,6 +218,8 @@ export class CityState {
   onLot: ((lot: number, building: Building | null) => void) | null = null;
   /** Told when a voyage is replaced or ends, just before its journey is freed. */
   onVoyageEnd: ((voyage: Voyage) => void) | null = null;
+  /** Told of every `command` event the records carry, to answer a command this page sent. Only the live state sets it. */
+  onCommand: ((event: CommandEvent) => void) | null = null;
   /** Told what became of every record handed to {@link apply}, for checking the order a district was followed in. */
   onRecord: ((district: number, tick: number, result: 'applied' | 'seen' | 'gap') => void) | null = null;
 
@@ -307,6 +309,7 @@ export class CityState {
         by = null;
       } else if (e.type === 'command') {
         by = e.result === APPLIED ? { principal: e.principal, name: e.name } : null;
+        this.onCommand?.(e);
       } else if (e.type === 'author') {
         for (const [lot, tick] of e.lots) this.authors.set(lot, { tick, principal: e.principal, name: e.name });
       } else if (e.type === 'road') {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { authorizeUrl, challengeFor } from './auth';
+import { authorizeUrl, challengeFor, userFrom } from './auth';
 
 const oidc = { issuer: 'http://127.0.0.1:9400', client_id: 'felix-metro', scopes: 'openid profile' };
 
@@ -32,5 +32,15 @@ describe('authorizeUrl', () => {
     expect(at('http://127.0.0.1:9400').searchParams.get('sub')).toBe('viewer');
     expect(at('http://localhost:9400').searchParams.get('sub')).toBe('viewer');
     expect(at('https://login.example.com').searchParams.has('sub')).toBe(false);
+  });
+});
+
+describe('userFrom', () => {
+  it('signs in as the viewer unless the address names someone', () => {
+    expect(userFrom('')).toBe('viewer');
+    expect(userFrom('?tier=low')).toBe('viewer');
+    expect(userFrom('?as=')).toBe('viewer');
+    expect(userFrom('?tier=low&as=mayor')).toBe('mayor');
+    expect(userFrom('?as= architect ')).toBe('architect');
   });
 });

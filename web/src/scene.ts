@@ -20,6 +20,7 @@ import { createFleet, parts, type InstancedFleet } from './fleet';
 import { ConstructionFx, type LotAccess } from './construction-fx';
 import { showClock } from './ui/clock';
 import { radialTexture as radial } from './instanced';
+import { tintGhost } from './placement-ghost';
 
 // Seeded so the frame is identical on every load.
 let seed = 7;
@@ -119,6 +120,11 @@ export async function createCity(
   const kindOn = new Map<number, number>();
   let buildingOn: (id: number) => THREE.Object3D | null = () => null;
   let ambient: Ambient | null = null;
+  let previewBuilding: (
+    id: number | null,
+    building: { kind: number; rotation: number } | null,
+    fits: boolean,
+  ) => void = () => {};
   let lots: LotAccess = { objects: () => [], ghosts: () => [], setGhost: () => {}, centre: () => [0, 0] };
   let pickLotDrawn: (ray: Ray) => number | null = () => null;
   /** The Felix tower is drawn apart from the other lots, with its crown. */
@@ -391,20 +397,22 @@ export async function createCity(
       facingTurns: number,
       rnd: () => number,
       first: boolean,
-      ghost = false,
+      /** Where to keep the drawing instead of the lot's own, for a stand-in or a preview. */
+      apart: Map<number, Drawn> | null = null,
     ) {
       const mine: Drawn = { jobs: [], objects: [], building: null };
       const put = (...args: Parameters<typeof place>) => {
         const job = place(...args);
         mine.jobs.push(job);
         void job.then((o) => mine.objects.push(o));
-        jobs.push(job);
+        // A preview is redrawn as the pointer moves; the page does not wait on it to load.
+        if (!apart) jobs.push(job);
         return job;
       };
       const putBuilding = (...args: Parameters<typeof place>) => void put(...args).then((o) => (mine.building = o));
       const choose = <T>(a: readonly T[]): T => a[Math.floor(rnd() * a.length)]!;
-      (ghost ? ghostObjects : lotObjects).set(lot.id, mine);
-      if (!ghost) kindOn.set(lot.id, kind);
+      (apart ?? lotObjects).set(lot.id, mine);
+      if (!apart) kindOn.set(lot.id, kind);
       const x = wx(lot.x),
         z = wx(lot.z);
       if (site.has(lot.id) && (kind === NO_BUILDING || kind >= TREE_FIRST)) {
@@ -427,7 +435,7 @@ export async function createCity(
       const look = lotLook(pack, model);
       const rotY = facingAngle(facingTurns);
       const lit = rnd() < 0.75 ? choose([0.6, 1, 1.4]) : 0;
-      if (paved && !ghost) put('roads', 'tile-low', x, z);
+      if (paved && !apart) put('roads', 'tile-low', x, z);
       if (first && lot.id === c.tower) return; // drawn below with its crown
       if (look === 'skyscraper') {
         putBuilding(pack, model, x, z, rotY, 0.7, lit ? 0.3 : 0, Math.floor(rnd() * 6));
@@ -489,9 +497,28 @@ export async function createCity(
         if (!building || !lot) return;
         let n = 0;
         const rnd = () => unitHash(id * 64 + building.kind, n++);
-        drawLot(lot, building.kind, building.rotation, rnd, false, true);
+        drawLot(lot, building.kind, building.rotation, rnd, false, ghostObjects);
       },
       centre: (id) => [wx(c.lots[id]!.x), wx(c.lots[id]!.z)],
+    };
+    // What a builder's tool would put on a lot: the building drawn as a tinted ghost, kept apart from the lot's own.
+    const previewObjects = new Map<number, Drawn>();
+    let previewLot: number | null = null;
+    previewBuilding = (id, building, fits) => {
+      if (previewLot !== null) {
+        for (const job of previewObjects.get(previewLot)?.jobs ?? []) void job.then((o) => scene.remove(o));
+        previewObjects.delete(previewLot);
+        previewLot = null;
+      }
+      const lot = c.lots[id ?? -1];
+      if (id === null || !building || !lot) return;
+      previewLot = id;
+      let n = 0;
+      const rnd = () => unitHash(id * 64 + building.kind, n++);
+      drawLot(lot, building.kind, building.rotation, rnd, false, previewObjects);
+      const mine = previewObjects.get(id)!;
+      // A later preview takes this one away before its models load; tinting what is already gone does no harm.
+      for (const job of mine.jobs) void job.then((o) => tintGhost(o, fits));
     };
 
     // The lot a ray first meets: only the lots along its way down are tested against their meshes.
@@ -838,5 +865,7 @@ export async function createCity(
     setLot: (id: number, b: Building | null) => setLotDrawn(id, b),
     /** The lot the ray first meets, or `null`. Only the generated city has lots to meet. */
     pickLot: (ray: Ray) => pickLotDrawn(ray),
+    /** Show the building a builder's tool would put on lot `id` as a ghost, or none with null; `fits` tints it. */
+    previewBuilding: (...args: Parameters<typeof previewBuilding>) => previewBuilding(...args),
   };
 }
