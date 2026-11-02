@@ -21,6 +21,11 @@ the ones already there.
 - **Get a hint on a first visit.** When the timeline first appears, a line above it says "Drag the timeline to go
   back in time". It goes away on your first click, key press or scroll, or after a few seconds, and it is not
   shown again in that browser.
+- **Share a moment.** The link button under the settings button copies a link that opens the city at the moment on
+  screen, from the same camera view. [Moments](../README.md#moments) shows the link and how it is read.
+- **Hide the controls.** `H` hides every control, message and the frame times, for a clean picture. `H` or `Esc`
+  brings them back. It does nothing while a field has focus or the settings sheet is open.
+- **Leave it on a wall.** After a minute with no mouse, touch or key the camera turns slowly. Any input stops it.
 - **Reach everything with the keyboard.** Every control can be focused with `Tab` and used with `Enter`,
   `Space` or the arrow keys. The focused control gets a cyan ring. With an earlier moment on screen, `Space` plays
   or pauses it, unless a button or field has focus, in which case it does that control's own job. `J`, `K` and `L`
@@ -33,6 +38,7 @@ These page parameters change the overlay:
 | `?tier=low`      | Forces a quality for this visit (`low`, `medium` or `high`). It overrides the saved choice |
 | `?ui=0`          | Hides the overlay: no chips, no settings button, no `?` key and no hint                    |
 | `?capture&trace` | The same as `?ui=0` for the controls and the hint, since a clip must draw as is            |
+| `?attract=30`    | Seconds with no input before the camera turns on its own (60 by default, `0` for never)    |
 | `?live=0`        | Draws the city with no gateway; the timeline never appears, so there is no hint            |
 | `?hud`           | Shows frame times under the Felix Metro chip, for tuning                                   |
 
@@ -41,16 +47,17 @@ These page parameters change the overlay:
 The overlay is plain markup in `web/index.html`, styled by CSS files and wired up by TypeScript. There is no UI
 framework. Each part has one file of each kind:
 
-| Part                             | Code                                                        | Styles                    |
-| -------------------------------- | ----------------------------------------------------------- | ------------------------- |
-| Colours, spacing, glass, focus   |                                                             | `web/src/ui/kit.css`      |
-| Felix Metro chip and city picker | `web/src/ui/picker.ts`                                      | `web/src/ui/brand.css`    |
-| Loading screen                   | `web/src/ui/loader.ts`                                      | `web/src/ui/loader.css`   |
-| Clock, LIVE pill, past row       | `web/src/ui/clock.ts`, `web/src/ui/status.ts`               | `web/src/ui/clock.css`    |
-| Timeline bar                     | `web/src/timeline.ts`                                       | `web/src/ui/timeline.css` |
-| Settings sheet and key list      | `web/src/ui/shell.ts`, `settings.ts`, `keys.ts`, `sheet.ts` | `web/src/ui/sheet.css`    |
-| Hint and messages                | `web/src/ui/hint.ts`, `web/src/ui/toast.ts`                 | `web/src/ui/toast.css`    |
-| Frame times (`?hud`)             | `web/src/ui/hud.ts`                                         | `web/src/ui/kit.css`      |
+| Part                             | Code                                                               | Styles                    |
+| -------------------------------- | ------------------------------------------------------------------ | ------------------------- |
+| Colours, spacing, glass, focus   |                                                                    | `web/src/ui/kit.css`      |
+| Felix Metro chip and city picker | `web/src/ui/picker.ts`                                             | `web/src/ui/brand.css`    |
+| Loading screen                   | `web/src/ui/loader.ts`                                             | `web/src/ui/loader.css`   |
+| Clock, LIVE pill, past row       | `web/src/ui/clock.ts`, `web/src/ui/status.ts`                      | `web/src/ui/clock.css`    |
+| Timeline bar                     | `web/src/timeline.ts`                                              | `web/src/ui/timeline.css` |
+| Settings sheet and key list      | `web/src/ui/shell.ts`, `settings.ts`, `keys.ts`, `sheet.ts`        | `web/src/ui/sheet.css`    |
+| Share button, photo mode         | `web/src/ui/share.ts`, `web/src/ui/photo.ts`, `web/src/moments.ts` | `web/src/ui/photo.css`    |
+| Hint and messages                | `web/src/ui/hint.ts`, `web/src/ui/toast.ts`                        | `web/src/ui/toast.css`    |
+| Frame times (`?hud`)             | `web/src/ui/hud.ts`                                                | `web/src/ui/kit.css`      |
 
 `index.html` links the CSS files in that order, so a later file can override an earlier one. Linking them from
 the page, rather than importing them from TypeScript, means the overlay is styled before any script runs.
@@ -209,7 +216,8 @@ node scripts/check-ui.mjs http://localhost:5173/ /tmp/ui
 
 `check-ui.mjs` drives the page with the keyboard (open the sheet, pick a quality, read the key list, `Esc`),
 checks that the hint is shown once and never under `?ui=0` or `?capture`, that the clock rolls and holds still
-with reduced motion, and that nothing overflows or collides at 360px, even with the city picker's arrow showing
+with reduced motion, that `H` hides every control, that `?cam` starts the camera where a link says, that attract
+mode turns the camera and stops on a mouse move, and that nothing overflows or collides at 360px, even with the city picker's arrow showing
 and the Reconnecting pill. It writes screenshots of the shell, the
 sheet, the key list and the hint, by day and night, at 1280px and 360px wide, into the folder you name. Look at
 them: the checks do not know whether the page looks right.

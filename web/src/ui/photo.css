@@ -1,0 +1,11 @@
+/* Photo mode shows the city and nothing else. */
+body.photo .chip,
+body.photo .corner,
+body.photo .toasts,
+body.photo .notice,
+body.photo .loader,
+body.photo .hud,
+body.photo .scrim,
+body.photo .sheet {
+  display: none !important;
+}

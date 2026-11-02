@@ -3,6 +3,10 @@ import { createCamera, startIntro, type CameraRig } from './camera';
 import { cityBounds } from './camera-math';
 import { createHud } from './ui/hud';
 import { hintDue } from './ui/hint';
+import { ATTRACT_RATE, createAttract } from './attract';
+import { momentLink } from './moments';
+import { createPhoto } from './ui/photo';
+import { createShare } from './ui/share';
 import { isPlayKey } from './ui/keys';
 import { parseParams, type Tier } from './params';
 import { createPost, passesFor } from './post';
@@ -291,6 +295,8 @@ async function main() {
     live: wantLive,
     gateway,
     at,
+    cam,
+    attract: attractSeconds,
     trace,
     capture,
   } = parseParams(returned?.search ?? location.search, returned?.hash ?? location.hash);
@@ -402,6 +408,8 @@ async function main() {
     ? createCamera(renderer.domElement, span * 1.2, new THREE.Vector3(), cityBounds(city.tiles))
     : createCamera(renderer.domElement);
   if (hooks) window.__camera = controls;
+  // A shared view replaces the opening drift.
+  const sharedView = cam !== null && controls.setState(cam, { ease: false });
   const drawn: ReadonlyMap<number, Building> = new Map(state?.built);
   const { scene, construction, cars, people, glows, setTime, setShadows, fleet, setLot } = await createCity(
     renderer,
@@ -761,6 +769,7 @@ async function main() {
         // Nothing live feeds a page opened at a moment; opening it again without one is the way back.
         const url = new URL(location.href);
         url.searchParams.delete('at');
+        url.searchParams.delete('cam');
         location.assign(url);
         return;
       }
@@ -1071,6 +1080,8 @@ async function main() {
     if (hooks) window.__metro = metroHooks;
   }
   let intro: ReturnType<typeof startIntro> | null = null;
+  /** Set when attract mode is on: turns the camera a frame's worth once the page has sat untouched. */
+  let turnWhenIdle: ((now: number, dt: number) => void) | null = null;
   /** The tick the clip script wants drawn, or null to let the clock steer. */
   let captureTick: number | null = null;
   /** Seconds of video the next captured frame moves a playback on; the playback's own clock is not used. */
@@ -1093,7 +1104,10 @@ async function main() {
     for (const p of people) p.mixer.update(dt);
     // The camera first, so the fleet leaves out what this frame's view cannot see.
     if (capture) camera.lookAt(controls.target);
-    else controls.update();
+    else {
+      turnWhenIdle?.(now, Math.min(0.05, frameMs / 1000));
+      controls.update();
+    }
     fleet?.view(camera);
     if (state && traffic && liveInfo) {
       // The clock runs on real time even when frames are slow, so it stays with the sim.
@@ -1258,7 +1272,27 @@ async function main() {
   move(cars, 0, true);
   move(people, 0, false);
   const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
-  if (city && !still && frozenHour === null && !reduced && !capture)
+  if (shell) {
+    createPhoto(() => shell.isOpen);
+    // Nothing to share where no gateway feeds the page: the link opens a past tick through it.
+    if (wantLive && (hasLive || pastTick !== null))
+      createShare(() => {
+        const tick = scrubTarget ?? liveInfo?.tick;
+        if (tick === undefined || Number.isNaN(tick)) return null;
+        // The clock coasts past the newest record while the connection is down; the log has nothing there to open.
+        return momentLink(location.href, state ? Math.min(tick, state.latest) : tick, controls.state());
+      });
+  }
+  if (city && !still && !reduced && !capture && attractSeconds > 0) {
+    const idle = createAttract(performance.now(), attractSeconds);
+    const poke = () => idle.poke(performance.now());
+    for (const type of ['pointerdown', 'pointermove', 'keydown', 'wheel', 'touchstart', 'visibilitychange'])
+      addEventListener(type, poke, { passive: true });
+    turnWhenIdle = (now, dt) => {
+      if (!intro && idle.active(now)) controls.drift(ATTRACT_RATE * dt);
+    };
+  }
+  if (city && !still && frozenHour === null && !reduced && !capture && !sharedView)
     intro = startIntro(camera, controls, performance.now());
   if (capture) {
     controls.enabled = false;
