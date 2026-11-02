@@ -19,8 +19,8 @@ export type Session = History & { close?(): void };
 /** Opens the sessions a seeker reads over; may be called again after they were closed. */
 export type OpenSessions = () => Promise<readonly Session[]>;
 
-/** Records kept per district, by offset: two city hours, the neighbourhood a scrub stays in. */
-const RECORDS_PER_DISTRICT = 2 * TICKS_PER_HOUR;
+/** Records kept per district, by offset: three city hours, the one on screen and the two beside it that are read ahead. */
+const RECORDS_PER_DISTRICT = 3 * TICKS_PER_HOUR;
 /** Keyframes kept per district, by hour: four city days of 24 hours. */
 const KEYFRAMES_PER_DISTRICT = 4 * 24;
 /** A search that has not found its record in this many reads is not converging; the log is not what was assumed. */
@@ -220,6 +220,29 @@ export class Seeker {
     } finally {
       unlink();
       if (this.current === mine) this.current = null;
+    }
+  }
+
+  /**
+   * {@link seek}, except that it neither cancels a seek running nor is cancelled by a newer one: for reading ahead of
+   * need, such as the hour before the one a rewind is in.
+   */
+  async peek(tick: number, options: SeekOptions = {}): Promise<SeekResult> {
+    const mine = new AbortController();
+    const unlink = link(options.signal, mine);
+    try {
+      return await this.using(() => this.run(tick, mine.signal));
+    } finally {
+      unlink();
+    }
+  }
+
+  /** {@link peek} for the records alone, which stay cached; a failure is dropped, since nothing waits on it. */
+  async prefetch(tick: number, signal?: AbortSignal): Promise<void> {
+    try {
+      await this.peek(tick, { signal });
+    } catch {
+      // The same tick is read again, and the error shown, if it is ever asked for.
     }
   }
 

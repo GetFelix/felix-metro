@@ -231,6 +231,63 @@ describe('seek', () => {
     expect(s.stats.hits).toBeGreaterThan(0);
   });
 
+  describe('reading ahead', () => {
+    const ranges = (h: FakeHistory) => h.reads.filter(([, from, end]) => end > from + 1).length;
+
+    it('does not cancel a seek running', async () => {
+      const s = seeker(new FakeHistory(2, ticks(1000)));
+      const seek = s.seek(500);
+      const ahead = s.peek(300);
+      await expect(ahead).resolves.toMatchObject({ tick: 300 });
+      await expect(seek).resolves.toMatchObject({ tick: 500 });
+    });
+
+    it('is not cancelled by a newer seek', async () => {
+      const h = new FakeHistory(2, ticks(1000));
+      const s = seeker(h);
+      let open = () => {};
+      h.gate = new Promise<void>((r) => (open = r));
+      const ahead = s.peek(300);
+      const seek = s.seek(700);
+      open();
+      await expect(ahead).resolves.toMatchObject({ tick: 300 });
+      await expect(seek).resolves.toMatchObject({ tick: 700 });
+    });
+
+    it('leaves what it read cached, so the seek that follows reads no range', async () => {
+      const h = new FakeHistory(2, ticks(1000));
+      const s = seeker(h);
+      await s.prefetch(479);
+      const read = ranges(h);
+      expect(read).toBeGreaterThan(0);
+      expect((await s.seek(479)).tick).toBe(479);
+      expect(ranges(h)).toBe(read);
+    });
+
+    it('keeps the hour on screen and the two beside it', async () => {
+      const h = new FakeHistory(2, ticks(1000));
+      const s = seeker(h);
+      for (const tick of [479, 719, 959]) await s.prefetch(tick);
+      const read = ranges(h);
+      await s.seek(479);
+      expect(ranges(h)).toBe(read);
+    });
+
+    it('drops a failure, since nothing waits on it', async () => {
+      const h = new FakeHistory(2, ticks(500));
+      await expect(seeker(h).prefetch(5000)).resolves.toBeUndefined();
+    });
+
+    it('stops when its signal does', async () => {
+      const h = new FakeHistory(2, ticks(1000));
+      const s = seeker(h);
+      const stop = new AbortController();
+      stop.abort();
+      await s.prefetch(479, stop.signal);
+      expect(ranges(h)).toBe(0);
+    });
+  });
+
   it('asks for the newest record once for seeks close together', async () => {
     const h = new FakeHistory(2, ticks(1000));
     const s = seeker(h);

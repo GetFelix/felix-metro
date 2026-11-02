@@ -324,6 +324,11 @@
       .past #play {
         margin-right: 8px;
       }
+      .past .rate {
+        margin-right: 8px;
+        color: var(--cyan);
+        font-variant-numeric: tabular-nums;
+      }
       .past button:hover {
         background: rgba(255, 96, 56, 0.3);
       }
@@ -468,7 +473,8 @@
     <div class="chip clock">
       <span id="day">Day 3</span><b id="clock">18:30</b><i class="pill hidden" id="pill">LIVE</i
       ><span class="past hidden" id="past"
-        ><button type="button" id="play">Play</button><span id="past-ago"></span><span aria-hidden="true"> · </span
+        ><button type="button" id="play">Play</button><span id="past-rate" class="rate" hidden></span
+        ><span id="past-ago"></span><span aria-hidden="true"> · </span
         ><button type="button" id="back-live">Back to live</button></span
       >
     </div>

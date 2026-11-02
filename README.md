@@ -7,7 +7,7 @@ A 3D city simulator that runs in the browser, built on
 is stored in durable Felix streams, so you can scrub back to any earlier moment
 and play forward from there.
 
-> **Status:** a live city runs end to end. The sim steps it, the browser draws it live, and a city picker switches between cities. Opening the city at an earlier moment works (`/?at=<tick>#harbor` draws it there, paused); the timeline bar scrubs the city back through the hours it still holds (it spans at least one city day, with the part after the live head dimmed; drag the handle, or step with `←` and `→`, `Shift` for an hour); Space plays forward from there at the city's speed and Back to live races to the live city and joins it with no gap and no reload. Builders change the city through its command stream: the sim applies `build` and `demolish`, each building rises in a scaffold or falls in dust, and `dev/builder-bot.mjs` grows a neighbourhood on each city's development area. Following a resident and the page's own building tools are not built yet. The [style frame](prototype/style-frame.html) shows the look. The plan is in
+> **Status:** a live city runs end to end. The sim steps it, the browser draws it live, and a city picker switches between cities. Opening the city at an earlier moment works (`/?at=<tick>#harbor` draws it there, paused); the timeline bar scrubs the city back through the hours it still holds (it spans at least one city day, with the part after the live head dimmed; drag the handle, or step with `←` and `→`, `Shift` for an hour); Space plays forward from there at the city's speed, `J` and `L` rewind and speed up (see [Playing the past](#playing-the-past)), and Back to live races to the live city and joins it with no gap and no reload. Builders change the city through its command stream: the sim applies `build` and `demolish`, each building rises in a scaffold or falls in dust, and `dev/builder-bot.mjs` grows a neighbourhood on each city's development area. Following a resident and the page's own building tools are not built yet. The [style frame](prototype/style-frame.html) shows the look. The plan is in
 > [docs/design.md](docs/design.md) and the work is tracked in
 > [milestones](https://github.com/GetFelix/felix-metro/milestones).
 
@@ -19,7 +19,7 @@ and play forward from there.
 
 - Watch a generated city go about its day in 3D: residents commute, shop and go home, and the sun rises and sets. Rush hour at 08:00 and 17:15 puts about 23 to 29 cars and 24 to 36 walkers on the streets of the busiest district, and about 70 cars and 70 walkers across the harbor city at 2 by 2 (522 residents; `cargo run --release -p felix-metro-core --example density -- harbor 2` prints the counts). The log is estimated at about 8 KB/s averaged over a day at 20,000 residents (`design.md` has the arithmetic); the measured harbor city of 522 residents in 4 districts averages 656 B/s, and scaled to 20,000 residents in 16 districts the busiest minute of the rush peaks near 17 KB/s, from the hourly snapshots of each district landing together, which #95 tracks (`cargo test -p felix-metro-sim --release report_load -- --ignored --nocapture` measures it).
 - Drag the timeline back to any moment the log holds and see the city exactly as it was
-- Let go and watch it play forward and catch up to live
+- Let go and watch it play forward and catch up to live, or rewind an evening and watch it run backwards
 - Follow one resident or car through their day
 - Place roads, zones and buildings, with every change recorded with who made it
 - Fork the city at a past moment and compare the two timelines side by side
@@ -50,13 +50,31 @@ To show an earlier moment, the browser reads each district's nearest keyframe
 and the events after it, up to that moment. To play forward, it subscribes from
 there. [docs/design.md](docs/design.md) has the details.
 
+## Playing the past
+
+Once the timeline has taken the city back to an earlier moment, three keys play it. They work like the shuttle keys of
+a video editor: `L` goes faster forward, `J` goes slower or backward, and `K` stops.
+
+| Key     | What it does                                                                                                 |
+| ------- | ------------------------------------------------------------------------------------------------------------ |
+| `L`     | Play forward at 1x. Each press after that doubles the speed, up to 8x. While rewinding, it slows the rewind. |
+| `J`     | Rewind at 1x. Each press after that doubles the speed, up to 8x. While playing forward, it slows the play.   |
+| `K`     | Stop. Space starts again at the speed you left.                                                              |
+| `Space` | Play or pause, as before.                                                                                    |
+
+Speeds run 8x, 4x, 2x, 1x backward, then stop, then 0.5x, 1x, 2x, 4x, 8x forward, and 1x is the city's own speed. The
+status line next to the Play button names any speed other than 1x forward, such as `4x` or `Rewind 2x`. Pressing `J`
+on the live city steps back 15 minutes and starts rewinding from there. Rewinding stops at the oldest moment the log
+still holds, with a note. The keys are ignored while you type in a field or hold Ctrl, Cmd or Alt. They need a live
+connection, so a page opened with `?at` cannot play or rewind.
+
 ## Status
 
 | M   | Milestone           | State                                                                                                                                                                                                                                                                         |
 | --- | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 0   | The look, locked    | In progress: style frame, assets, daylight, post-processing and quality tiers done; instanced traffic, the UI shell and camera controls open                                                                                                                                  |
 | 1   | A live city         | Done                                                                                                                                                                                                                                                                          |
-| 2   | Time travel         | In progress: keyframes, seeking, the timeline scrubber and rewind then follow done                                                                                                                                                                                            |
+| 2   | Time travel         | In progress: keyframes, seeking, the timeline scrubber, rewind then follow, and backward playback with speeds done                                                                                                                                                               |
 | 3   | Follow a life       | Planned                                                                                                                                                                                                                                                                       |
 | 4   | Build               | In progress: the sim applies build, demolish and speed commands and records who sent them, and the page animates a building going up (scaffold) or coming down (dust) over 8 ticks, backwards when you rewind; placement tools in the page, roads and zones are not built yet |
 | 5   | Branching timelines | Planned                                                                                                                                                                                                                                                                       |

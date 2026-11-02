@@ -1,11 +1,12 @@
-// Playing the city forward from a moment in the past until it is the live city. A state folded to a past tick takes
-// each district's records from the one after the seek's offset, at the pace of the city's clock, and hands over to the
-// live state when the playhead reaches its tip.
+// Playing the city from a moment in the past. Forward, a state folded to a past tick takes each district's records from
+// the one after the seek's offset, at the pace of the city's clock, and hands over to the live state when the playhead
+// reaches its tip. Backward, the state is refolded from the hour's keyframe to each tick the playhead passes.
 import type { CityState, TickRecord } from './city';
 import { TICKS_PER_HOUR, type TickClock } from './clock';
 import { pastEnd, type Gateway } from './gateway';
 import { parse } from './live';
-import type { SeekResult } from './seek';
+import { Hour, hourStart } from './rewind';
+import { fold, SeekError, type SeekResult } from './seek';
 
 const STREAM = 'events';
 
@@ -34,6 +35,9 @@ const MIN_CLOSING_TPS = 8;
 
 /** The most wall-clock seconds one frame moves an ordinary playback, so a stalled tab does not leap. A catch-up is not capped. */
 const MAX_PLAY_DT = 1;
+
+/** The least time between two refolds of a rewind, so a fast one does not fold on every step and the state trails by a few ticks. */
+const FOLD_MS = 30;
 
 /** How often the playback moves on by itself, so the head does not wait for a frame to be drawn. */
 const PUMP_MS = 40;
@@ -163,14 +167,21 @@ export interface PlaybackOptions {
   onFail?(err: Error): void;
   /** Called by {@link Playback.close}, to end the session the pumps listen on. */
   release?(): void;
+  /** What a rewind needs: an empty state to refold into, and to be told when it replaces the one on screen. */
+  fresh?(): CityState;
+  onState?(next: CityState, tick: number): void;
+  /** The records from the keyframe of the hour holding `tick` up to it. */
+  hourAt?(tick: number): Promise<SeekResult>;
+  /** The oldest tick a rewind can reach. */
+  oldest?(): number;
+  /** Told when a rewind has gone as far back as the log holds, and stopped. */
+  onEdge?(tick: number): void;
 }
 
-/** A past state being played forward. */
+/** A past state being played, forward or backward. */
 export class Playback {
-  /** The tick on screen, a fraction; never more than the newest tick every district has. */
+  /** The tick on screen, a fraction; going forward, never more than the newest tick every district has. */
   head: number;
-  /** Multiples of the city's own speed. */
-  rate = 1;
   paused = false;
   /** Racing to the live tip rather than playing at the city's speed. */
   catchingUp = false;
@@ -184,6 +195,19 @@ export class Playback {
   /** A catch-up's playhead, which runs ahead of `head` while records are still arriving. */
   private pace: number;
   private pumps: Pump[] = [];
+  private source: Source | null = null;
+  private fail: (err: Error) => void;
+  private closed = false;
+  private _rate = 1;
+  /** Where each district's records go on from: the offset and tick of the last one the state holds. */
+  private cursor: { offset: number; tick: number }[];
+  /** The hour on screen, for refolding; and the one before it once fetched or being fetched. */
+  private hour: Hour;
+  private earlier: Hour | null = null;
+  private fetching = false;
+  /** The oldest tick a rewind may reach, raised when the log is found not to hold more. */
+  private floor = 0;
+  private foldedAt = -Infinity;
   private timer: ReturnType<typeof setInterval> | null = null;
   private lastStep = performance.now();
   /** performance.now() when the playback began, when it got its session, and when it first applied a record. */
@@ -196,29 +220,56 @@ export class Playback {
   /** With no `source` the playback has no records yet: a catch-up still advances the tick drawn until {@link attach}. */
   constructor(
     source: Source | null,
-    readonly state: CityState,
-    private readonly from: SeekResult,
+    /** The state on screen; a rewind replaces it, telling {@link PlaybackOptions.onState}. */
+    public state: CityState,
+    from: SeekResult,
     private readonly options: PlaybackOptions,
   ) {
     this.head = this.shown = this.pace = from.tick;
+    this.cursor = from.districts.map((d) => ({ offset: d.offset, tick: from.tick }));
+    this.hour = Hour.from(from);
+    this.fail = (err) => {
+      this.failure ??= err;
+      this.options.onFail?.(err);
+    };
     if (source) this.attach(source);
   }
 
   get attached(): boolean {
-    return this.pumps.length > 0;
+    return this.source !== null;
+  }
+
+  /** Multiples of the city's own speed; negative plays the past backwards. */
+  get rate(): number {
+    return this._rate;
+  }
+
+  /** A negative rate is ignored when the playback was given no way to refold. */
+  set rate(rate: number) {
+    if (rate < 0 && !(this.options.fresh && this.options.onState && this.options.hourAt)) return;
+    const was = this._rate;
+    this._rate = rate;
+    if (rate < 0 === was < 0) return;
+    if (rate < 0) {
+      for (const p of this.pumps) p.close();
+      this.pumps = [];
+      this.fetchEarlier();
+    } else {
+      this.openPumps();
+    }
   }
 
   /** Start taking records from `source`, from the seek's offsets. */
   attach(source: Source): void {
     if (this.attached) return;
-    const fail = (err: Error) => {
-      this.failure ??= err;
-      this.options.onFail?.(err);
-    };
-    this.pumps = this.from.districts.map(
-      (d, i) => new Pump(source, i, { offset: d.offset, tick: this.from.tick }, this.options.tail, fail),
-    );
+    this.source = source;
     this.marks.attached = performance.now();
+    if (this._rate >= 0) this.openPumps();
+  }
+
+  private openPumps(): void {
+    if (!this.source) return;
+    this.pumps = this.cursor.map((c, i) => new Pump(this.source!, i, c, this.options.tail, this.fail));
     for (const p of this.pumps) p.refill();
   }
 
@@ -245,6 +296,7 @@ export class Playback {
 
   /** Race to the live tip in about {@link CATCH_UP_SECONDS}, however far back the playhead is. */
   catchUp(): void {
+    if (this._rate < 0) this.rate = 1;
     const gap = Math.max(0, this.options.tail() - this.head);
     this.closing = Math.max(MIN_CLOSING_TPS, gap / CATCH_UP_SECONDS);
     this.catchingUp = true;
@@ -256,7 +308,7 @@ export class Playback {
    * (read afresh each time), plus a steady gain on it, so a tip that keeps moving is still reached.
    */
   private speed(): number {
-    const own = Math.max(1, this.state.speed) * this.rate;
+    const own = Math.max(1, this.state.speed) * Math.abs(this._rate);
     if (!this.catchingUp) return own;
     return Math.min(MAX_CATCH_UP_TPS, own + this.closing);
   }
@@ -274,6 +326,7 @@ export class Playback {
   /** Move the playhead on `dt` seconds and take the records it has come to. */
   advance(dt: number): void {
     if (this.failure) return;
+    if (this._rate < 0) return this.rewind(dt);
     // A catch-up keeps to wall-clock time: a slow frame covers the ticks it owes, or the race takes longer on a slow device.
     const step = this.catchingUp ? dt : Math.min(dt, MAX_PLAY_DT);
     const base = this.catchingUp ? Math.max(this.head, this.pace) : this.head;
@@ -292,7 +345,7 @@ export class Playback {
   private apply(limit: number): void {
     for (const pump of this.pumps) {
       while (pump.queue.length > 0 && pump.queue[0]!.record.tick <= limit) {
-        const { record } = pump.queue.shift()!;
+        const { offset, record } = pump.queue.shift()!;
         // A restarted sim numbers its ticks from the start again, below the playhead, which cannot follow it.
         const had = this.state.epochOf(record.district);
         if (had >= 0 && record.epoch > had) {
@@ -310,13 +363,95 @@ export class Playback {
           this.options.onFail?.(this.failure);
           return;
         }
+        this.cursor[record.district] = { offset, tick: record.tick };
+        this.hour.add(record.district, offset, record);
       }
       pump.refill();
     }
   }
 
+  /**
+   * Move the playhead back `dt` seconds and refold the state to it. The state is rebuilt from the hour's keyframe, so
+   * it is exact at any tick; the hour before is fetched ahead, and the playhead waits at the keyframe if it is not here.
+   */
+  private rewind(dt: number): void {
+    // A stop settles the state on the tick drawn, which a throttled refold may have left a few ticks off.
+    if (this.paused)
+      return void (this.enter(Math.floor(this.head)) && this.refold(Math.floor(this.head) + APPLY_AHEAD, true));
+    const floor = Math.max(this.floor, this.options.oldest?.() ?? 0);
+    const goal = Math.max(floor, this.head - Math.min(dt, MAX_PLAY_DT) * Math.max(1, this.state.speed) * -this._rate);
+    let at = goal;
+    if (!this.enter(Math.floor(goal))) {
+      // The hour before is not here: run on to this one's keyframe and wait there.
+      const start = this.hour.start;
+      if (start === null || this.head <= start) return;
+      at = Math.max(goal, start);
+    }
+    this.refold(Math.floor(at) + APPLY_AHEAD);
+    this.head = this.shown = at;
+    if (at <= floor) {
+      this.paused = true;
+      this.options.onEdge?.(floor);
+    }
+  }
+
+  /** Make the hour holding `tick` the one on hand; false while it is still being fetched. */
+  private enter(tick: number): boolean {
+    if (this.hour.covers(tick)) return true;
+    if (this.earlier?.covers(tick)) {
+      this.hour = this.earlier;
+      this.earlier = null;
+      this.fetchEarlier();
+      return true;
+    }
+    this.fetchEarlier(tick);
+    return false;
+  }
+
+  /** Fetch the hour before the one on hand, or the one holding `tick` when that is wanted at once. */
+  private fetchEarlier(tick?: number): void {
+    if (this.fetching || this.closed || !this.options.hourAt) return;
+    const next = tick ?? (this.hour.start ?? hourStart(this.head)) - 1;
+    const floor = Math.max(this.floor, this.options.oldest?.() ?? 0);
+    if (next < floor || next < 0 || (tick === undefined && this.earlier?.covers(next))) return;
+    this.fetching = true;
+    this.options.hourAt(next).then(
+      (seek) => {
+        this.fetching = false;
+        if (!this.closed) this.earlier = Hour.from(seek);
+      },
+      (err) => {
+        this.fetching = false;
+        if (this.closed) return;
+        // Retention has taken the hour: a rewind stops where the log now begins.
+        if (err instanceof SeekError && err.reason === 'unretained') this.floor = err.nearest ?? this.hour.start ?? 0;
+        else this.fail(err instanceof Error ? err : new Error(String(err)));
+      },
+    );
+  }
+
+  /** Fold the state to `tick` of the hour on hand, unless it is there or, without `force`, was folded a moment ago. */
+  private refold(tick: number, force = false): void {
+    const seek = this.hour.at(tick);
+    if (!seek || seek.tick === this.state.latest) return;
+    const now = performance.now();
+    if (!force && now - this.foldedAt < FOLD_MS) return;
+    try {
+      const next = this.options.fresh!();
+      fold(next, seek);
+      this.state = next;
+    } catch (err) {
+      this.fail(err instanceof Error ? err : new Error(String(err)));
+      return;
+    }
+    this.foldedAt = now;
+    this.cursor = seek.districts.map((d) => ({ offset: d.offset, tick: seek.tick }));
+    this.options.onState!(this.state, seek.tick);
+  }
+
   /** Stop listening. The state keeps what was applied. */
   close(): void {
+    this.closed = true;
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
     for (const p of this.pumps) p.close();
