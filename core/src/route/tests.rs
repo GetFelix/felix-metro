@@ -117,14 +117,54 @@ fn a_jam_moves_the_route_and_slows_the_trip() {
     assert!(moved > 0, "no jammed route went around");
 }
 
+fn segment(class: SegmentClass) -> Segment {
+    Segment {
+        id: 0,
+        a: 0,
+        b: 1,
+        class,
+        length: 4,
+        speed: class.speed(),
+        street: 0,
+    }
+}
+
 #[test]
 fn jam_slows_a_segment_but_never_below_the_floor() {
     let counts = [0u16, 6, 3000];
     let cong = Congestion::new(&counts);
-    assert_eq!(cong.percent(0, 4), 100);
-    assert_eq!(cong.percent(1, 4), 66);
-    assert_eq!(cong.percent(2, 4), MIN_PERCENT);
-    assert_eq!(cong.percent(9, 4), 100);
+    let street = segment(SegmentClass::Street);
+    assert_eq!(cong.percent(0, &street), 100);
+    assert_eq!(cong.percent(1, &street), 66);
+    assert_eq!(cong.percent(2, &street), MIN_PERCENT);
+    assert_eq!(cong.percent(9, &street), 100);
+}
+
+#[test]
+fn a_speed_limit_caps_its_class_and_leaves_the_other_alone() {
+    let counts = [0u16, 6];
+    let cong = Congestion::new(&counts).with_limits(50, 80);
+    let (avenue, street) = (segment(SegmentClass::Avenue), segment(SegmentClass::Street));
+    assert_eq!(cong.percent(0, &avenue), 50);
+    assert_eq!(cong.percent(0, &street), 80);
+    // A jam slower than the limit still rules.
+    assert_eq!(cong.percent(1, &street), 66);
+}
+
+#[test]
+fn a_limited_city_takes_longer_to_drive_across() {
+    let city = City::generate("harbor", 2).unwrap();
+    let slow = Congestion::FREE.with_limits(40, 40);
+    let mut slower = 0;
+    for (a, b) in pairs(&city, 100) {
+        let (free, limited) = (
+            route(&city, a, b, 0, &Congestion::FREE).unwrap(),
+            route(&city, a, b, 0, &slow).unwrap(),
+        );
+        assert!(limited.arrive() >= free.arrive());
+        slower += u32::from(limited.arrive() > free.arrive() && limited.mode == Mode::Drive);
+    }
+    assert!(slower > 0, "some trip drives");
 }
 
 #[test]

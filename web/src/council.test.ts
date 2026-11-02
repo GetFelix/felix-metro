@@ -120,7 +120,14 @@ class Fake {
   }
   querySelector(selector: string): Fake | null {
     if (selector === 'summary > span') return this.all('summary')[0]?.children.find((c) => c.tag === 'span') ?? null;
+    if (selector.startsWith('.')) return this.allBy((c) => c.className === selector.slice(1))[0] ?? null;
     return this.all(selector)[0] ?? null;
+  }
+  remove() {
+    this.parent!.children = this.parent!.children.filter((c) => c !== this);
+  }
+  allBy(match: (c: Fake) => boolean): Fake[] {
+    return this.children.flatMap((c) => [...(match(c) ? [c] : []), ...c.allBy(match)]);
   }
   all(tag: string): Fake[] {
     return this.children.flatMap((c) => [...(c.tag === tag ? [c] : []), ...c.all(tag)]);
@@ -173,5 +180,36 @@ describe('renderCouncil', () => {
     root.all('summary')[0]!.click();
     fitCouncil(root as unknown as HTMLElement, true);
     expect(root.all('details')[0]?.open).toBe(false);
+  });
+});
+
+describe('renderCouncil policies', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('lists the policies under the factions with when each can change again', () => {
+    vi.stubGlobal('document', { createElement: (tag: string) => new Fake(tag) });
+    const root = new Fake('div');
+    const rows = [
+      { name: 'Shop hours', value: '2 h later', again: 'Day 2, 17:30' },
+      { name: 'Street speed limit', value: 'No limit', again: null },
+    ];
+    renderCouncil(root as unknown as HTMLElement, councilView(event(2, calm), 1), true, rows);
+    const lists = root.all('ul');
+    expect(lists).toHaveLength(2);
+    const [first, second] = lists[1]!.children;
+    expect(first?.all('small')[0]?.textContent).toBe('Can change again from Day 2, 17:30');
+    expect(second?.all('small')).toHaveLength(0);
+  });
+
+  it('redraws the policy list in place and drops it when there are none', () => {
+    const root = new Fake('div');
+    vi.stubGlobal('document', { createElement: (tag: string) => new Fake(tag) });
+    const el = root as unknown as HTMLElement;
+    const view = councilView(event(2, calm), 1);
+    renderCouncil(el, view, false, [{ name: 'Shop hours', value: 'Usual', again: null }]);
+    renderCouncil(el, view, false, [{ name: 'Shop hours', value: '2 hours later', again: '9:00' }]);
+    expect(root.all('details')[0]?.children.filter((c) => c.className === 'policies')).toHaveLength(1);
+    renderCouncil(el, view, false, []);
+    expect(root.all('details')[0]?.children.filter((c) => c.className === 'policies')).toHaveLength(0);
   });
 });

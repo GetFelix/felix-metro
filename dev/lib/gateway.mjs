@@ -31,6 +31,9 @@ export const RESULT_NAMES = {
   7: "unsupported",
   8: "in-use",
   9: "busy",
+  10: "no-funds",
+  11: "cooldown",
+  12: "unchanged",
   16: "bad-fork-name",
   17: "fork-too-deep",
   18: "fork-tick",
@@ -173,6 +176,8 @@ export const demolish = (lot) => {
   b.writeUInt32LE(lot, 1);
   return b;
 };
+/** A `policy` command: `kind` 0 shop hours, 1 avenue limit, 2 street limit. */
+export const policy = (kind, value) => Buffer.from([7, kind, value]);
 /** A `fork` command: the last tick to keep, and the fork's name. */
 export const fork = (tick, name) => {
   const text = Buffer.from(name);

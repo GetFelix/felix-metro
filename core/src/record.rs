@@ -84,6 +84,11 @@ pub const REFUSED_FORK_TRIMMED: u8 = 20;
 /// `fork` of a city whose root already has the most forks the sim allows.
 pub const REFUSED_FORK_LIMIT: u8 = 21;
 
+/// `policy` command result: the same policy changed less than a cooldown ago.
+pub const REFUSED_COOLDOWN: u8 = 11;
+/// `policy` command that sets a policy to the value it already has.
+pub const REFUSED_UNCHANGED: u8 = 12;
+
 /// `ledger` event reasons.
 /// A city day's taxes in, and road and building upkeep out.
 pub const LEDGER_DAY: u8 = 0;
@@ -101,6 +106,17 @@ pub const FACTION_RESIDENTS: usize = 1;
 pub const FACTION_BUSINESS: usize = 2;
 /// How many factions there are.
 pub const FACTIONS: usize = 3;
+
+/// Policies, in the order a `policy` event lists them.
+/// Hours the shops stay open past their usual close, 0 to 3. Shopkeepers go home that much later, and
+/// each shop pays that much more business tax.
+pub const POLICY_SHOP_HOURS: usize = 0;
+/// The speed limit on avenues, in percent of their speed, 30 to 100.
+pub const POLICY_AVENUE_LIMIT: usize = 1;
+/// The speed limit on streets, in percent of their speed, 30 to 100.
+pub const POLICY_STREET_LIMIT: usize = 2;
+/// How many policies there are.
+pub const POLICIES: usize = 3;
 
 /// Why a record could not be read.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -320,6 +336,21 @@ pub enum Event {
         standings: [Standing; FACTIONS],
         tally: Tally,
     },
+    /// The city's policies as they stand, in the order of [`POLICIES`]. District
+    /// 0 writes it when a `policy` command changes one and on every keyframe
+    /// tick once any has changed, so a sim that restarts reads the values and their cooldowns.
+    Policy {
+        settings: [PolicySetting; POLICIES],
+    },
+}
+
+/// One policy's value and when it last changed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PolicySetting {
+    /// The policy's value, in the units of its kind.
+    pub value: u8,
+    /// The tick of the last change, or `None` if it has never changed.
+    pub changed: Option<u32>,
 }
 
 /// One faction's standing after the last scored day. The units of `demand`
@@ -434,6 +465,11 @@ pub enum Command {
     Fork {
         tick: u32,
         name: String,
+    },
+    /// Sets policy `kind` (a `POLICY_` index) to `value`.
+    Policy {
+        kind: u8,
+        value: u8,
     },
 }
 

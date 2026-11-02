@@ -26,7 +26,7 @@ fn name(rng: &mut Rng) -> String {
 
 fn event(rng: &mut Rng) -> Event {
     let resident = rng.next_u64() as u32;
-    match rng.below(16) {
+    match rng.below(17) {
         0 => Event::Trip {
             resident,
             vehicle: rng.below(6) as u8,
@@ -100,6 +100,12 @@ fn event(rng: &mut Rng) -> Event {
             tick: rng.next_u64() as u32,
             name: name(rng),
             principal: rng.next_u64(),
+        },
+        15 => Event::Policy {
+            settings: std::array::from_fn(|_| PolicySetting {
+                value: rng.below(101) as u8,
+                changed: (rng.below(3) > 0).then(|| rng.next_u64() as u32),
+            }),
         },
         _ => Event::Council {
             days: rng.below(400) as u32,
@@ -193,7 +199,7 @@ fn command_record(rng: &mut Rng) -> CommandRecord {
     CommandRecord {
         id: rng.next_u64() as u32,
         name: name(rng),
-        command: match rng.below(6) {
+        command: match rng.below(7) {
             0 => Command::PlaceRoad {
                 a: lot,
                 b: rng.next_u64() as u32,
@@ -210,6 +216,10 @@ fn command_record(rng: &mut Rng) -> CommandRecord {
             3 => Command::Demolish { lot },
             4 => Command::Speed {
                 ticks_per_second: rng.below(33) as u8,
+            },
+            5 => Command::Policy {
+                kind: rng.below(3) as u8,
+                value: rng.below(101) as u8,
             },
             _ => Command::Fork {
                 tick: lot,
