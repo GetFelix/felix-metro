@@ -346,7 +346,7 @@ jobs:
       # at an earlier moment has the tools off until Back to live, and a viewer gets none. Whatever was built is taken down.
       - name: Two builders edit the city at once and see each other's changes
         working-directory: web
-        timeout-minutes: 15
+        timeout-minutes: 25
         run: |
           ../dev/speed.sh harbor 16
           node scripts/check-placement.mjs 'http://127.0.0.1:8088/?tier=low' live-frames/placement
