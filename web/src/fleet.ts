@@ -10,6 +10,8 @@ import { bakeWalk, walkMaterial, walkPhase, type WalkClock } from './walk';
 /** A car's lights, in the car's own space (2.5 long, +Z forward) and the sizes they are drawn at. */
 const HEADLIGHTS = [-0.45, 0.45].map((x) => ({ at: new THREE.Vector3(x, 0.55, 1.35), size: 0.9 }));
 const TAILLIGHTS = [-0.45, 0.45].map((x) => ({ at: new THREE.Vector3(x, 0.6, -1.35), size: 0.7 }));
+/** Tiles of room round what is placed that still counts as in view: a car's shadow, and the frame the camera lags. */
+const CULL_MARGIN = 1.5;
 const BEAM_SIZE: [number, number] = [2.2, 3.4];
 const BEAM_AT = new THREE.Matrix4()
   .makeTranslation(0, 0.05, 3.0)
@@ -102,6 +104,16 @@ export function createFleet(scene: THREE.Scene, p: FleetParts): InstancedFleet {
   // occlusion passes, which draw everything with one material, would see them in the bind pose.
   const glows: THREE.Object3D[] = [headLights.mesh, tailLights.mesh, beams.mesh, ...people.flat().map((b) => b.mesh)];
 
+  const frustum = new THREE.Frustum();
+  const view = new THREE.Matrix4();
+  const around = new THREE.Sphere(new THREE.Vector3(), CULL_MARGIN);
+  let culling = false;
+  const inView = (x: number, y: number, z: number) => {
+    if (!culling) return true;
+    around.center.set(x, y, z);
+    return frustum.intersectsSphere(around);
+  };
+
   const car = new THREE.Matrix4();
   const placed = new THREE.Matrix4();
   const point = new THREE.Vector3();
@@ -126,13 +138,19 @@ export function createFleet(scene: THREE.Scene, p: FleetParts): InstancedFleet {
   }
 
   const fleet: Fleet = {
+    view(camera) {
+      culling = camera !== null;
+      if (!camera) return;
+      camera.updateMatrixWorld();
+      frustum.setFromProjectionMatrix(view.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
+    },
     begin(dt) {
       for (const b of batches) b.clear();
       walked = (walked + dt / cycle) % 1;
       clock.value = walked;
     },
     car(kind, x, y, z, heading, size) {
-      if (size <= 0) return;
+      if (size <= 0 || !inView(x, y, z)) return;
       const set = cars[(kind - 1) % cars.length]!;
       const scale = p.carScale * size;
       pose(car, x, y, z, heading, scale);
@@ -144,7 +162,7 @@ export function createFleet(scene: THREE.Scene, p: FleetParts): InstancedFleet {
       placed.multiplyMatrices(car, BEAM_AT).toArray(beams.matrices, beams.next() * 16);
     },
     person(resident, x, y, z, heading, size) {
-      if (size <= 0) return;
+      if (size <= 0 || !inView(x, y, z)) return;
       const set = people[resident % people.length]!;
       pose(car, x, y, z, heading, p.personScale * size);
       const phase = walkPhase(resident);

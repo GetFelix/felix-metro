@@ -2,11 +2,13 @@
 // N. The draw calls of a frame must not grow with the number of movers: that is what instancing is for.
 // Usage: node scripts/check-traffic.mjs <traffic-load.html url> [tier] [counts, comma separated]
 //   TRAFFIC_FRAMES=30 sets the frames timed per count. TRAFFIC_MAX_EXTRA_CALLS bounds the calls N adds over the first N.
+//   TRAFFIC_WAIT_MS bounds how long a page may take to draw its frames (default 5 minutes).
 import { chromium } from 'playwright';
 
 const [pageUrl, tier = 'high', counts = '0,40,100,200,400'] = process.argv.slice(2);
 if (!pageUrl) throw new Error('usage: check-traffic.mjs <traffic-load.html url> [tier] [counts]');
 const FRAMES = Number(process.env.TRAFFIC_FRAMES ?? '30');
+const WAIT_MS = Number(process.env.TRAFFIC_WAIT_MS ?? '300000');
 const MAX_EXTRA =
   process.env.TRAFFIC_MAX_EXTRA_CALLS === undefined ? null : Number(process.env.TRAFFIC_MAX_EXTRA_CALLS);
 
@@ -23,7 +25,7 @@ async function measure(n) {
   await page.goto(`${pageUrl}?n=${n}&tier=${tier}&frames=${FRAMES}`, { waitUntil: 'load', timeout: 120_000 });
   await page.waitForFunction(() => window.__ready === true || document.body.dataset.error, null, {
     polling: 200,
-    timeout: 600_000,
+    timeout: WAIT_MS,
   });
   const failed = await page.evaluate(() => document.body.dataset.error);
   if (failed) errors.push(failed);

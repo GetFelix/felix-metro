@@ -1,4 +1,5 @@
 // Cars and walkers for the voyages the log describes: where each one is at a fractional tick, handed to a fleet to draw.
+import type * as THREE from 'three';
 import type { Voyage } from './city';
 
 /** Tiles from the road's centre line to a car's lane and to a walker's pavement. */
@@ -59,6 +60,8 @@ export function poseBetween(
  * what was placed, with nothing kept from the update before.
  */
 export interface Fleet {
+  /** Leave out what the camera cannot see, or draw everything when `camera` is null. Applies to later placements. */
+  view(camera: THREE.Camera | null): void;
   /** Start a round of placements. `dt` seconds is how far the walkers' legs move on. */
   begin(dt: number): void;
   /** Place a car of vehicle kind `kind` (1 to 6). `size` is 1 at full size and 0 at nothing. */
@@ -90,6 +93,9 @@ export class Traffic {
   private readonly from = [0, 0];
   private readonly to = [0, 0];
   private readonly pose: Pose = { x: 0, z: 0, heading: 0 };
+  /** A voyage was released since the fleet last drew, so it still shows one that has ended. */
+  private stale = false;
+  private updating = false;
 
   /** Voyages left undrawn by the last update because `cap` were already drawn. */
   capped = 0;
@@ -106,7 +112,7 @@ export class Traffic {
     private readonly lots: readonly LotAt[] = [],
   ) {}
 
-  /** Voyages drawn right now. */
+  /** Voyages holding a place right now. One shrunk to nothing at a lot's door still counts, though nothing is drawn. */
   get drawn(): number {
     return this.slots.size;
   }
@@ -122,6 +128,12 @@ export class Traffic {
     // A resident's next trip can be asked to stand down while the one before it is still drawn.
     if (!slot || slot.voyage !== voyage) return;
     this.slots.delete(voyage.resident);
+    if (!this.updating) this.stale = true;
+  }
+
+  /** Draw again if a voyage was released since the last update, for a frame that has no update of its own. */
+  sync(): void {
+    if (this.stale) this.draw(0);
   }
 
   /** Place every voyage under way at tick `tick`, a fraction, and move walkers' legs on by `dt` seconds. */
@@ -129,6 +141,7 @@ export class Traffic {
     const whole = Math.floor(tick);
     const f = tick - whole;
     this.capped = 0;
+    this.updating = true;
     for (const v of voyages) {
       if (tick < v.depart || tick >= v.journey.arrive()) {
         this.release(v);
@@ -177,6 +190,12 @@ export class Traffic {
       slot.z = pose.z;
       slot.heading = heading;
     }
+    this.updating = false;
+    this.draw(dt);
+  }
+
+  private draw(dt: number): void {
+    this.stale = false;
     this.fleet.begin(dt);
     for (const [resident, s] of this.slots) {
       if (s.car) this.fleet.car(s.vehicle, s.x, s.y, s.z, s.heading, s.size);

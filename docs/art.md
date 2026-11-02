@@ -184,53 +184,61 @@ time, not on the city's tick, so a paused city still walks; `?still` freezes the
 
 What differs from drawing a cloned model for each:
 
-- Instances are not culled one by one. A mesh draws every instance it was given, and the ones off screen cost vertex
-  work. Each mesh starts with room for 64 instances and doubles when it fills.
-- Walkers are left out of the depth pass behind the distance blur and the ambient occlusion pass, with the lights. Those
-  passes draw everything with one material, which would draw a walker in its bind pose and leave a halo.
+- The fleet drops a car or walker that is more than 1.5 tiles outside the camera's view (`Fleet.view`), so what is off
+  screen costs nothing. The 1.5 tiles keep a car's shadow, and the frame the camera lags behind the cars, from
+  popping. What is inside the view is not culled one by one: every instance a mesh holds is drawn. Each mesh starts with
+  room for 64 instances and doubles when it fills.
+- Walkers cast no shadow, and they are left out of the depth pass behind the distance blur and the ambient occlusion
+  pass, with the lights. Those passes draw everything with one material, which would draw a walker in its bind pose and
+  leave a halo. Cars are in both passes, as before.
+- A voyage that ends stops being drawn at the next `Traffic.sync` or update, so a frame with no tick still drops it.
 - The style frame (`?layout=frame`) still places cloned models, so it keeps matching `prototype/style-frame.html`
   pixel for pixel.
 
 ### What it costs
 
 `web/traffic-load.html` draws the generated city at 2 by 2 through the real post chain with N cars and walkers going
-back and forth along its roads, and `web/scripts/check-traffic.mjs` prints what a frame cost for several N:
+back and forth along its roads, using every car kind and every walker model, and `web/scripts/check-traffic.mjs`
+prints what a frame cost for several N:
 
 ```
 cd web && npm run build && npx vite preview --port 4173 &
 node scripts/check-traffic.mjs http://127.0.0.1:4173/traffic-load.html high 0,100,400,800
 ```
 
-The numbers below are medians of 20 frames at 1280 by 720 in headless Chromium on SwiftShader, which draws with the
-CPU, on an Apple M4 Max shared with other jobs. Draw calls and triangles are exact; milliseconds move with the load on
-the machine. "Submit" is the time the page spent in its own code and in WebGL calls for a frame, which is what draw
-calls cost on a real GPU; "frame" waits for SwiftShader to finish drawing, which instancing does not speed up.
+It is a dev page, built into `dist` next to `models.html` and `construction.html`, and nothing links to it.
+
+The numbers below are in headless Chromium on SwiftShader, which draws with the CPU, at 1280 by 720, on an Apple M4 Max
+shared with other jobs. Draw calls are exact. "Submit" is the median ms over 20 frames the page spent in its own code
+and in WebGL calls, which is what draw calls cost on a real GPU. "Frame" waits for SwiftShader to finish drawing, which
+instancing does not speed up. It moved by as much as 50% between two runs of the same build with other jobs running, so
+the table gives the best of two runs.
 
 | Tier | Movers | Draw calls before | Draw calls after | Submit ms before | Submit ms after | Frame ms before | Frame ms after |
 |---|---|---|---|---|---|---|---|
-| high | 0 | 6,270 | 6,270 | 7.2 | 7.8 | 469 | 470 |
-| high | 100 | 8,043 | 6,381 | 10.0 | 7.8 | 526 | 525 |
-| high | 400 | 13,671 | 6,381 | 19.0 | 7.9 | 711 | 690 |
-| high | 800 | 20,871 | 6,381 | 32.5 | 8.1 | 982 | 912 |
-| medium | 0 | 4,240 | 4,240 | 5.0 | 5.3 | 267 | 264 |
-| medium | 80 | 5,214 | 4,319 | 6.5 | 5.4 | 296 | 297 |
-| medium | 160 | 6,176 | 4,319 | 8.0 | 5.5 | 328 | 330 |
-| medium | 400 | 9,174 | 4,319 | 12.3 | 5.5 | 428 | 415 |
-| low | 0 | 1,216 | 1,216 | 2.3 | 2.5 | 107 | 107 |
-| low | 40 | 1,449 | 1,247 | 2.8 | 2.5 | 112 | 113 |
-| low | 80 | 1,685 | 1,247 | 3.2 | 2.6 | 118 | 118 |
-| low | 400 | 3,572 | 1,247 | 6.6 | 2.8 | 167 | 163 |
+| high | 0 | 6,270 | 6,270 | 7.1 | 7.7 | 468 | 470 |
+| high | 100 | 8,049 | 6,489 | 11.1 | 8.8 | 526 | 525 |
+| high | 400 | 13,665 | 6,489 | 19.6 | 8.9 | 704 | 690 |
+| high | 800 | 20,862 | 6,489 | 32.3 | 8.9 | 982 | 912 |
+| medium | 0 | 4,240 | 4,240 | 5.4 | 6.0 | 267 | 264 |
+| medium | 80 | 5,214 | 4,395 | 7.2 | 6.2 | 296 | 297 |
+| medium | 160 | 6,180 | 4,395 | 8.9 | 5.8 | 328 | 330 |
+| medium | 400 | 9,170 | 4,395 | 13.6 | 5.7 | 428 | 412 |
+| low | 0 | 1,216 | 1,216 | 2.5 | 2.7 | 107 | 107 |
+| low | 40 | 1,449 | 1,273 | 3.0 | 2.7 | 112 | 113 |
+| low | 80 | 1,685 | 1,275 | 3.6 | 2.8 | 118 | 118 |
+| low | 400 | 3,571 | 1,275 | 6.8 | 2.7 | 167 | 161 |
 
-The 0 rows are the city alone: its buildings, roads and trees are still one object each. With movers, the draw calls
-rise by a fixed 111 on high, 79 on medium and 31 on low (the meshes of the models, in each pass the tier runs), and
-stay there from 100 movers to 800. The frame time that SwiftShader needs is about the same before and after, within
-the noise of a shared machine: it is the triangles that cost it.
+The 0 rows are the city alone: its buildings, roads and trees are still one object each. Before, every mover added about
+18 draw calls. Now the first movers add a fixed 219 on high, 155 on medium and 59 on low (a mesh for each part of each
+car model and each walker model, and the lights, in every pass the tier runs), and more movers add none. The frame time
+SwiftShader needs is the same before and after within the noise, because the CPU rasterizer pays for triangles and not
+for calls. The "before" numbers come from a build of the commit before this change (`a049c20`) with the same page and the old
+call into `Traffic`, which is not kept in the repository; it added about 7,400 draw calls for 400 movers.
 
 SwiftShader says nothing about a GPU's fill rate or vertex rate, so it cannot say how many cars a laptop GPU can draw.
-What it does show is that the draw calls and the page's own time no longer grow with the number of movers, which is
-what the old caps were guarding. A rush hour of 800 on the high tier still adds the triangles of 800 cars and walkers
-for each pass that draws them (shadow, ambient occlusion and distance blur included), and that is what the caps on the
-lower tiers now bound.
+What it shows is that the draw calls and the page's own time no longer grow with the number of movers, which is what
+the old limits guarded. What still grows is the triangles each mover adds in each pass that draws it.
 
 ## Quality tiers
 
@@ -245,11 +253,13 @@ picture degrades before the frame rate does.
 
 \* The `rigs` flag is set only on high. Rigged pedestrians arrive with #6; until then nothing reads it.
 
-Past the limit, a voyage is left undrawn until one that is drawn arrives; `window.__live.capped` counts what is left out (in a dev build, or under `?trace`).
-The limits are about twice what they were before cars and walkers were instanced (see [what it costs](#what-it-costs)):
-the draw calls they were set against are gone, and what remains is the triangles each mover adds, which a laptop
-GPU draws far faster than SwiftShader does. A device that is too slow with a limit steps down a tier as before, and a
-lower tier has a lower limit.
+Past the limit, a voyage is left undrawn until one that is drawn arrives. `window.__live.capped` counts what is left
+out (in a dev build, or under `?trace`).
+
+The limits are twice what they were before cars and walkers were instanced, because the draw calls they were set
+against are gone. They are not measured against a GPU. On SwiftShader the extra movers cost about +11 ms on low with 80
+(from 107 ms with none, +10%) and +66 ms on medium with 160 (from 264 ms, +25%). A device that is too slow with a limit
+steps down a tier as before, and a lower tier has a lower limit. High has no limit.
 
 `web/src/quality.ts` chooses the tier. It starts on high and measures frame
 times for the first 3 seconds after the city is ready, ignoring the first 5

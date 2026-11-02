@@ -93,6 +93,11 @@ describe('walkMaterial', () => {
     expect(source.onBeforeCompile.toString()).not.toContain('walkTexels');
   });
 
+  it('refuses a material with a normal map, whose tangents it would drop', () => {
+    const mapped = new THREE.MeshStandardMaterial({ normalMap: new THREE.Texture() });
+    expect(() => walkMaterial(mapped, bake, clock)).toThrow(/normal map/);
+  });
+
   it('holds the bake as a texture a vertex id and a frame pick a texel of', () => {
     expect(texture.image).toMatchObject({ width: 3, height: 8 });
     expect(texture.magFilter).toBe(THREE.NearestFilter);

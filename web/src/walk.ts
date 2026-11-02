@@ -95,7 +95,7 @@ uniform float walkAt;
 float walkFrame;
 ivec3 walkPick() {
   float at = fract(walkAt + phase) * walkFrames;
-  float whole = floor(at);
+  float whole = min(floor(at), walkFrames - 1.0);
   walkFrame = at - whole;
   return ivec3(int(vertexId + 0.5), int(whole), int(mod(whole + 1.0, walkFrames)));
 }
@@ -110,6 +110,8 @@ vec3 walkFetch(ivec3 pick, int rowBase) {
  * `phase`. Every walker's material shares one shader, and holds its own texture.
  */
 export function walkMaterial(source: THREE.MeshStandardMaterial, bake: WalkBake, clock: WalkClock) {
+  // The normal chunk replaced below also builds the tangent a normal map reads, so a map would need that done here.
+  if (source.normalMap) throw new Error('walkMaterial does not support a normal map');
   const texture = new THREE.DataTexture(bake.texels, bake.vertices, bake.frames * 2, THREE.RGBAFormat, THREE.FloatType);
   texture.minFilter = texture.magFilter = THREE.NearestFilter;
   texture.needsUpdate = true;

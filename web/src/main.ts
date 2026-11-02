@@ -1004,6 +1004,10 @@ async function main() {
     move(cars, dt, true);
     move(people, dt, false);
     for (const p of people) p.mixer.update(dt);
+    // The camera first, so the fleet leaves out what this frame's view cannot see.
+    if (capture) camera.lookAt(controls.target);
+    else controls.update();
+    fleet?.view(camera);
     if (state && traffic && liveInfo) {
       // The clock runs on real time even when frames are slow, so it stays with the sim.
       const played = playFrame?.(still ? 0 : frameMs / 1000) ?? null;
@@ -1035,8 +1039,8 @@ async function main() {
         });
       }
     }
-    if (capture) camera.lookAt(controls.target);
-    else controls.update();
+    // A frame with no tick has no update to draw a voyage that just ended away.
+    traffic?.sync();
     if (paint) post!.render(controls.target);
     for (const done of frameWaiters.splice(0)) done();
     // A live state the page has left keeps taking records; let its finished trips go.

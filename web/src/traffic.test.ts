@@ -56,6 +56,7 @@ function fleet() {
   const placed: Placed[] = [];
   const seen = { rounds: 0, dt: NaN, open: false };
   const f: Fleet = {
+    view() {},
     begin(dt) {
       placed.length = 0;
       seen.rounds++;
@@ -206,6 +207,31 @@ describe('Traffic', () => {
     traffic.update(5, 0, trips);
     expect(traffic.drawn).toBe(800);
     expect(placed).toHaveLength(800);
+  });
+
+  it('stops drawing a released voyage on the next sync, though no update follows', () => {
+    const { f, placed } = fleet();
+    const traffic = new Traffic(f, 0);
+    const a = voyage(1, 2, 0, 10);
+    const b = voyage(2, 2, 0, 10);
+    traffic.update(5, 0, [a, b]);
+    expect(placed).toHaveLength(2);
+    traffic.sync();
+    expect(placed).toHaveLength(2);
+    traffic.release(a);
+    traffic.sync();
+    expect(placed.map((p) => p.id)).toEqual([2]);
+  });
+
+  it('does not draw again for a release inside an update, which draws at its end', () => {
+    const { f, seen } = fleet();
+    const traffic = new Traffic(f, 0);
+    const a = voyage(1, 2, 0, 10);
+    traffic.update(5, 0, [a]);
+    traffic.update(12, 0, [a]);
+    expect(seen.rounds).toBe(2);
+    traffic.sync();
+    expect(seen.rounds).toBe(2);
   });
 
   it('draws no more than its cap, counts the rest, and draws them as room is made', () => {

@@ -185,6 +185,58 @@ describe('the fleet’s cars', () => {
   });
 });
 
+describe('the fleet’s view', () => {
+  /** A camera at (0, 8, 8) looking at the origin. */
+  const camera = () => {
+    const c = new THREE.PerspectiveCamera(28, 16 / 9, 0.1, 200);
+    c.position.set(0, 8, 8);
+    c.lookAt(0, 0, 0);
+    c.updateMatrixWorld();
+    return c;
+  };
+
+  it('leaves out a car and a walker the camera cannot see, with room to spare for the next frame', () => {
+    const { crowd } = make();
+    crowd.fleet.view(camera());
+    crowd.fleet.begin(0);
+    crowd.fleet.car(1, 0, 0, 0, 0, 1);
+    crowd.fleet.car(1, 60, 0, 0, 0, 1);
+    crowd.fleet.car(1, 0, 0, 40, 0, 1);
+    crowd.fleet.person(1, 0, 0, 0, 0, 1);
+    crowd.fleet.person(2, -60, 0, 0, 0, 1);
+    crowd.fleet.end();
+    expect(crowd.counts()).toMatchObject({ cars: 1, people: 1, lights: 4 });
+  });
+
+  it('keeps one just past the edge of the picture, so a pan does not show it late', () => {
+    const { crowd } = make();
+    const c = camera();
+    // The picture's right edge on the ground, found by walking out until the point leaves the view.
+    let edge = 0;
+    for (let x = 0; x < 40; x += 0.05) {
+      const p = new THREE.Vector3(x, 0, 0).project(c);
+      if (Math.abs(p.x) > 1) break;
+      edge = x;
+    }
+    crowd.fleet.view(c);
+    crowd.fleet.begin(0);
+    crowd.fleet.car(1, edge + 1, 0, 0, 0, 1);
+    crowd.fleet.car(1, edge + 4, 0, 0, 0, 1);
+    crowd.fleet.end();
+    expect(crowd.counts().cars).toBe(1);
+  });
+
+  it('draws everything when there is no view', () => {
+    const { crowd } = make();
+    crowd.fleet.view(camera());
+    crowd.fleet.view(null);
+    crowd.fleet.begin(0);
+    crowd.fleet.car(1, 500, 0, 0, 0, 1);
+    crowd.fleet.end();
+    expect(crowd.counts().cars).toBe(1);
+  });
+});
+
 describe('the fleet’s walkers', () => {
   it('stand where the walker was put, at the size given', () => {
     const { crowd } = make();

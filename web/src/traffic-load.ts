@@ -2,7 +2,8 @@
 // drawn through the real post chain, with the draw calls and frame times of the frames it drew. Read by
 // scripts/check-traffic.mjs.
 //   ?n=200 movers (half cars, half walkers)  ?tier=high|medium|low  ?t=12 hour  ?frames=30  ?shadows=0
-//   ?close=car|walker puts the camera beside one, to look at it
+//   ?show=1 draws one car and one walker standing outside the city, close up, once, for a picture to compare;
+//   ?walk=0.3 is how many seconds the walkers' clock has run, ?t= the hour
 import * as THREE from 'three';
 import init, { generate } from './core/felix_metro_core.js';
 import { parseCity } from './layout';
@@ -59,6 +60,9 @@ function shuttle(x0: number, z0: number, alongX: boolean, reach: number, speed: 
   };
 }
 
+/** Walkers' resident numbers start here, a multiple of the number of walker models, so they take every model in turn. */
+const WALKER_IDS = 1_200_000;
+
 async function main() {
   const params = new URLSearchParams(location.search);
   const n = Number(params.get('n') ?? '100');
@@ -89,12 +93,15 @@ async function main() {
   const rand = () => ((seed = (seed * 16807) % 2147483647) - 1) / 2147483646;
   const roads = city.roads;
   const voyages: Voyage[] = [];
+  // Cars cycle through every kind, and walkers through every model: a resident gets the model its number picks.
+  let cars = 0;
+  let walkers = 0;
   for (let i = 0; i < n; i++) {
     const road = roads[Math.floor(rand() * roads.length)]!;
     const walker = i % 2 === 1;
     voyages.push({
-      resident: i,
-      vehicle: walker ? 0 : 1 + (i % 6),
+      resident: walker ? WALKER_IDS + walkers++ : i,
+      vehicle: walker ? 0 : 1 + (cars++ % 6),
       depart: 0,
       journey: shuttle(road.x, road.z, rand() < 0.5, 6, walker ? 0.15 : 0.35),
     });
@@ -102,26 +109,39 @@ async function main() {
 
   const target = controls.target;
   camera.lookAt(target);
-  const close = params.get('close');
   let tick = 100;
   const step = () => {
     tick += 0.25;
     traffic.update(tick, 1 / 60, voyages);
   };
-  step();
 
-  if (close) {
-    const one = traffic
-      .where()
-      .filter((w) => w.car === (close === 'car'))
-      .sort((a, b) => Math.hypot(a.x, a.z) - Math.hypot(b.x, b.z))[0];
-    if (one) {
-      target.set(one.x, 0.1, one.z);
-      const d = close === 'car' ? 1.6 : 0.9;
-      camera.position.set(one.x + 0.45 * d, 0.8 * d, one.z + 0.45 * d);
-      camera.lookAt(target);
-    }
+  if (params.has('show')) {
+    // A car and a walker side by side on the grass past the city's east edge, still, for a picture.
+    const [sx, sz] = (params.get('show') || '1').includes(',')
+      ? params.get('show')!.split(',').map(Number)
+      : [city.tiles + 1, city.tiles / 2];
+    const at = sz!;
+    const stand = (resident: number, vehicle: number, x: number): Voyage => ({
+      resident,
+      vehicle,
+      depart: 0,
+      journey: { ...shuttle(x, at, true, 1, 0), positionAt: (_t, out) => ((out[0] = x * 1000), (out[1] = at * 1000)) },
+    });
+    const here = [stand(1, 2, sx! - 0.25), stand(WALKER_IDS + 5, 0, sx! + 0.3)];
+    traffic.update(100, Number(params.get('walk') ?? '0'), here);
+    const where = traffic.where();
+    const middle = (where[0]!.x + where[1]!.x) / 2;
+    target.set(middle, 0.12, where[0]!.z);
+    camera.position.set(middle + 0.6, 0.5, where[0]!.z + 1.7);
+    camera.lookAt(target);
+    fleet!.view(camera);
+    traffic.update(100, 0, here);
+    post.render(target);
+    window.__ready = true;
+    return;
   }
+  fleet!.view(camera);
+  step();
 
   const gl = renderer.getContext();
   const pixel = new Uint8Array(4);
