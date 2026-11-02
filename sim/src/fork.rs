@@ -339,26 +339,18 @@ async fn copy_district<L: Log>(
     Ok(())
 }
 
-/// The offset the next record of `district` lands at, found by probing, since
-/// a log has no tail to ask for.
+/// The offset the next record of `district` lands at. A read past the end of
+/// a Felix log is an error, so this walks forward from the newest keyframe
+/// (committed with its record, so it is in the log) to the empty page at the tail.
 async fn tail<L: Log>(log: &L, district: u16) -> Result<u64> {
-    if log.read(district, 0).await?.is_none() {
-        return Ok(0);
+    let mut next = log.keyframe(district).await?.unwrap_or(0);
+    loop {
+        let page = log.read_from(district, next, PAGE).await?;
+        let Some((last, _)) = page.last() else {
+            return Ok(next);
+        };
+        next = last + 1;
     }
-    let (mut held, mut gone) = (0u64, 1u64);
-    while log.read(district, gone).await?.is_some() {
-        held = gone;
-        gone = gone.checked_mul(2).context("a log of that length")?;
-    }
-    while gone - held > 1 {
-        let middle = held + (gone - held) / 2;
-        if log.read(district, middle).await?.is_some() {
-            held = middle;
-        } else {
-            gone = middle;
-        }
-    }
-    Ok(gone)
 }
 
 /// A fork that can never be made, so trying again would only repeat the error.

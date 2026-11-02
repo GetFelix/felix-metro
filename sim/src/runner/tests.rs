@@ -168,9 +168,9 @@ impl Log for Memory {
             .into());
         }
         let shards = self.shards.lock().unwrap();
-        Ok(shards
-            .get(&district)
-            .and_then(|shard| shard.get(offset as usize).cloned()))
+        let shard = shards.get(&district);
+        past_the_tail(offset, shard.map_or(0, Vec::len))?;
+        Ok(shard.and_then(|shard| shard.get(offset as usize).cloned()))
     }
 
     async fn keyframe(&self, district: u16) -> Result<Option<u64>> {
@@ -180,6 +180,7 @@ impl Log for Memory {
     async fn read_from(&self, district: u16, offset: u64, max: u32) -> Result<Vec<(u64, Vec<u8>)>> {
         let offset = offset.max(self.floor(district));
         let shards = self.shards.lock().unwrap();
+        past_the_tail(offset, shards.get(&district).map_or(0, Vec::len))?;
         Ok(shards.get(&district).map_or_else(Vec::new, |shard| {
             shard
                 .iter()
@@ -201,6 +202,19 @@ impl Log for Memory {
             .filter_map(|(at, payload)| Incoming::from_payload(payload, Some(at as u64)))
             .collect())
     }
+}
+
+/// Felix answers a read at the tail with nothing and one past it with an error.
+fn past_the_tail(offset: u64, len: usize) -> Result<()> {
+    if offset > len as u64 {
+        return Err(felix_client::SubscribeCursorError {
+            reason: felix_wire::CursorErrorReason::InFuture,
+            requested: offset,
+            available: len as u64,
+        }
+        .into());
+    }
+    Ok(())
 }
 
 fn city() -> City {
