@@ -1,4 +1,4 @@
-// What moves the camera, as data: the page reads the keyboard from the first table. The key list in the UI is to read both.
+// What moves the camera, as data: the page reads the keyboard from the first table. The key list in the UI (`web/src/ui/keys.ts`) is built from both.
 
 /** What a key does. The first group is held down to keep moving; `reset` happens once per press. */
 export type CameraAction =

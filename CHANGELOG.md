@@ -14,9 +14,24 @@
 ### Changed
 
 - Built on Felix 0.6.2: the sim's `felix-client` and `felix-wire` pins, the dev stack and CI images.
+- The overlay's styles moved from `web/index.html` into `web/src/ui/*.css`, and the picker, loading screen and frame-time
+  display into `web/src/ui/`. `docs/ui.md` describes the kit, the motion rules and the wording rules.
 
 ### The page
 
+- A settings sheet, opened from the button under the clock. Quality is Automatic, High, Medium or Low; Automatic
+  forgets a saved tier and judges frame times again from High (`Quality.setAutomatic()`).
+- A key list, opened with `?` or from the settings sheet. It is data (`SHORTCUTS` in `web/src/ui/keys.ts`), so a new key
+  adds a row, and it is ignored while typing in a text field.
+- A tip on a first visit, "Drag the timeline to go back in time", shown once the timeline is on screen and gone on the first
+  interaction. It is never shown with `?ui=0` or `?capture`.
+- The clock's digits roll when they change, and hold still with `prefers-reduced-motion`.
+- On a phone, the past row (Play, how long ago, Back to live) moves under the Felix Metro chip instead of covering it.
+- The hour slider shows a focus ring when it is reached with the keyboard.
+- The clock moves under the Felix Metro chip on a phone while the pill says Reconnecting, since the two overlapped at 360px.
+- Space plays or pauses an earlier moment from the timeline too, and does nothing while the settings sheet is open.
+- Brand tints in the overlay's CSS are tokens in `kit.css` (`--coral-wash`, `--amber-wash`, `--violet-glow`, `--cyan-glow`).
+- Short messages, such as "That moment is no longer kept.", now sit above the timeline in the page's glass style.
 - Camera controls. Left-drag turns and tilts, right-drag or Shift-drag slides, the wheel and a pinch zoom toward the
   point under the pointer, one finger turns and two fingers slide on a touch screen, and `W` `A` `S` `D`, `Q` `E`,
   `+` `-` and `0` do the same from the keyboard (`0` goes back to the opening view). The point the camera looks at
@@ -37,6 +52,8 @@
 
 ### Tools
 
+- `web/scripts/check-ui.mjs` drives the overlay with the keyboard and takes day and night screenshots at 1280 and 360
+  pixels wide. CI runs it as its own job, `overlay controls`.
 - The builder bot with `--rebuild` handles a demolish that gets no answer. The sim may have applied it, so the bot
   goes on to the build. If that is refused it builds the old kind back and logs an `orphan` line (`restored: null` if
   the restore gets no answer either).
