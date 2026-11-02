@@ -93,6 +93,11 @@ canvas {
 .corner .chip {
   position: static;
 }
+/* The buttons under the clock sit in a row. */
+.tools {
+  display: flex;
+  gap: var(--space-2);
+}
 .icon-button {
   display: grid;
   place-items: center;
@@ -115,4 +120,10 @@ canvas {
 .choice:has(input:focus-visible) {
   outline: 2px solid var(--cyan);
   outline-offset: 2px;
+}
+
+/* The speaker shows waves while the sound is on and a cross while it is off. */
+#sound-button[aria-pressed='true'] .mute,
+#sound-button[aria-pressed='false'] .waves {
+  display: none;
 }
