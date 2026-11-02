@@ -75,6 +75,26 @@ impl Metro {
         })
     }
 
+    /// How many residents the city has; their numbers run from 0.
+    pub fn population(&self) -> u32 {
+        self.places.population()
+    }
+
+    /// Resident `resident` as JSON (see [`crate::Resident::to_json`]), or
+    /// `undefined` when the city has no such resident.
+    pub fn profile(&mut self, resident: u32) -> Option<String> {
+        let (city, places) = (&self.city, &self.places);
+        self.residents
+            .entry(resident)
+            .or_insert_with(|| {
+                (resident < places.population())
+                    .then(|| crate::Resident::new(city, places, resident))
+                    .flatten()
+            })
+            .as_ref()
+            .map(|r| r.to_json(city))
+    }
+
     /// Replaces the roads builders added with `roads`: four numbers for each, in
     /// segment order: segment id, node a, node b, and 1 if it has been removed.
     /// A trip already made keeps the city it was made in. Throws when the roads

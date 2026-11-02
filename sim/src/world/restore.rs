@@ -10,7 +10,7 @@ use felix_metro_core::record::{
 };
 use felix_metro_core::{BuiltRoad, City, Mode, TICKS_PER_DAY};
 
-use super::{Person, State, World, activity_kind, count_car};
+use super::{Council, Person, State, World, activity_kind, count_car};
 
 /// A `trip` or `replan` event, which holds what a keyframe's vehicle does not:
 /// when the trip left (or was moved) and the whole route.
@@ -26,8 +26,8 @@ pub(crate) struct Departure {
 impl World {
     /// The world as it stood at the end of tick `at`, which `frames` (one
     /// keyframe per district, taken at `at`) describe. `balances` is each
-    /// district's share of the account then, and `departures` the latest `trip`
-    /// event of every resident who was on the road.
+    /// district's share of the account then, `council` the council's state, and
+    /// `departures` the latest `trip` event of every resident who was on the road.
     ///
     /// Stepping the result gives the records the original would have, as long
     /// as the builds after `at` are applied to it first. A keyframe does not
@@ -38,6 +38,7 @@ impl World {
         at: u32,
         frames: &[Keyframe],
         balances: &[i64],
+        council: Council,
         departures: &HashMap<u32, Departure>,
     ) -> Result<World> {
         let mut world = World::new(city);
@@ -64,6 +65,7 @@ impl World {
             .context("the keyframes' roads do not fit this city")?;
         world.roads_changed();
         world.accounts = balances.to_vec();
+        world.council = council;
         ensure!(
             frames.len() == world.districts(),
             "{} keyframes for {} districts",

@@ -11,7 +11,7 @@ use felix_metro_core::record::{
 use felix_metro_core::{City, Mode};
 
 use super::*;
-use crate::world::Departure;
+use crate::world::{Council, Departure};
 use crate::world::{DistrictTick, State};
 use felix_metro_core::TICKS_PER_HOUR;
 
@@ -475,8 +475,8 @@ fn a_replan_keeps_the_kind_of_trip_and_none_happens_without_a_removal() {
     assert!(world.removed.is_empty());
 }
 
-/// What the world is rebuilt from at keyframe tick `at`: each district's keyframe, the balances, and the latest `trip`
-/// or `replan` of everyone, as a restart reads them back from the log.
+/// What the world is rebuilt from at keyframe tick `at`: each district's keyframe, the balances, the council and the
+/// latest `trip` or `replan` of everyone, as a restart reads them back from the log.
 fn restore_at(ticks: &[Vec<DistrictTick>], at: u32) -> World {
     let frames: Vec<_> = ticks[at as usize]
         .iter()
@@ -534,7 +534,12 @@ fn restore_at(ticks: &[Vec<DistrictTick>], at: u32) -> World {
             }
         }
     }
-    World::restore(harbor(), at, &frames, &balances, &departures).unwrap()
+    let council = ticks[at as usize][0]
+        .events
+        .iter()
+        .find_map(Council::from_event)
+        .unwrap();
+    World::restore(harbor(), at, &frames, &balances, council, &departures).unwrap()
 }
 
 #[test]

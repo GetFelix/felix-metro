@@ -933,6 +933,7 @@ export async function createCity(
     setTime,
     setShadows,
     fleet: crowd?.fleet ?? null,
+    pick: crowd?.pick.bind(crowd) ?? null,
     setLot: (id: number, b: Building | null) => setLotDrawn(id, b),
     /** Draw the road tiles as core lays them, the generated ones and the builders', in place of what is drawn. */
     setRoads: (roads: readonly Road[]) => setRoadsDrawn(roads),

@@ -130,6 +130,20 @@ describe('CityState', () => {
     expect([...state.active()].map((v) => v.depart)).toEqual([14]);
   });
 
+  it('finds the trip a resident is on at a tick by the resident number, from whichever district told of it', () => {
+    const state = new CityState(city, trips, 2);
+    // Resident 1 leaves from district 0; their next trip arrives in a record of district 1.
+    state.apply(record(0, 5, [trip(1, 5)]));
+    state.apply(record(1, 5, [trip(1, 14)]));
+    expect(state.voyageAt(1, 4)).toBeUndefined();
+    expect(state.voyageAt(1, 5)?.depart).toBe(5);
+    // The earlier trip is replaced in the map but still on the road until it arrives.
+    expect(state.voyageAt(1, 13)?.depart).toBe(5);
+    expect(state.voyageAt(1, 16)?.depart).toBe(14);
+    expect(state.voyageAt(1, 24)).toBeUndefined();
+    expect(state.voyageAt(2, 8)).toBeUndefined();
+  });
+
   it('refuses a record that skips a tick and takes it once the gap is filled', () => {
     const state = new CityState(city, trips, 2);
     expect(state.apply(record(0, 5))).toBe('applied');
@@ -228,6 +242,16 @@ describe('CityState', () => {
       ]),
     );
     expect(state.funds).toBe(4900);
+  });
+
+  it('keeps the newest council event', () => {
+    const state = new CityState(city, trips, 2);
+    expect(state.council).toBeNull();
+    const standing = { demand: 48, measure: 62, satisfaction: 77, unhappyDays: 0 };
+    const council = (days: number) => ({ type: 'council' as const, days, patience: 3, standings: [standing] });
+    state.apply(record(0, 240, [council(0)]));
+    state.apply(record(0, 241, [council(1)]));
+    expect(state.council?.days).toBe(1);
   });
 
   const roadwork = (segment: number, change: number, a = 1, b = 2): TickEvent => ({
@@ -346,6 +370,18 @@ describe('CityState', () => {
       expect([...state.active()]).toHaveLength(2);
       state.apply(record(0, 7, [replan(1)]));
       expect([...state.active()].map((v) => v.depart)).toEqual([7]);
+    });
+
+    it('keeps the resident on the road until the new route arrives', () => {
+      const metro: Trips = {
+        trip: (_resident, _vehicle, depart) => new FakeJourney(depart + 10),
+        replan: (_resident, _vehicle, depart) => new FakeJourney(depart + 20),
+      };
+      const state = new CityState(city, metro, 2);
+      state.apply(record(0, 5, [trip(1, 5)]));
+      state.apply(record(0, 6, [replan(1)]));
+      expect(state.onRoad(20).cars).toBe(1);
+      expect(state.onRoad(26).cars).toBe(0);
     });
 
     it('counts a replan core cannot place, and draws nothing for it', () => {

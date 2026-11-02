@@ -3,3 +3,4 @@ dist
 package-lock.json
 frames
 src/core
+src/stats-fixture.json

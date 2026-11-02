@@ -1,6 +1,7 @@
 // The city as the log tells it: what each district's records add up to. Buildings are the generated city's plus the
 // ones `built` and `demolished` events and keyframes change; trips are handed on to whatever draws them.
 import { WINDOW, progress } from './construction';
+import type { CouncilEvent } from './council';
 import type { City } from './layout';
 
 /** A building kind that means the lot is empty. */
@@ -39,6 +40,10 @@ interface ReplanEvent {
   node: number;
   route: [number, number][];
 }
+interface ArrivedEvent {
+  type: 'arrived';
+  resident: number;
+}
 interface SpeedEvent {
   type: 'speed';
   ticksPerSecond: number;
@@ -64,6 +69,7 @@ interface BalanceEvent {
 /** The events this page acts on; the rest of what a record carries is ignored. */
 export type TickEvent =
   | TripEvent
+  | ArrivedEvent
   | BuildingEvent
   | RoadworkEvent
   | ReplanEvent
@@ -71,6 +77,7 @@ export type TickEvent =
   | CommandEvent
   | LedgerEvent
   | BalanceEvent
+  | CouncilEvent
   | { type: 'other' };
 
 export interface TickRecord {
@@ -81,9 +88,22 @@ export interface TickRecord {
   speed: number;
   keyframeOffset: number;
   wallUs: number;
-  /** `roads` rows are `[segment, change, a, b]`, for every road a builder added in the district, live or removed. */
-  keyframe: { buildings: [number, number, number][]; roads?: [number, number, number, number][] } | null;
+  keyframe: {
+    buildings: [number, number, number][];
+    /** `[segment, change, a, b]` for every road a builder added in the district, live or removed. */
+    roads?: [number, number, number, number][];
+    /** The district's residents. One on the road has a `vehicle`, the kind of car or 0 on foot. */
+    residents?: readonly { id: number; vehicle?: number }[];
+  } | null;
   events: TickEvent[];
+}
+
+/** A resident on the road from one tick to another, as the stats count them. */
+interface Spell {
+  vehicle: number;
+  from: number;
+  /** Infinity until the tick the resident arrives is known. */
+  to: number;
 }
 
 /** A trip made into something that can be placed at a tick. Freed by whoever stops using it. */
@@ -193,6 +213,8 @@ export class CityState {
    * and a `ledger` moves it, so a state folded from a keyframe and the records after it has the funds of its tick.
    */
   private readonly shares: (number | null)[];
+  /** Where the council's factions stand, from the newest `council` event, or `null` before one. */
+  council: CouncilEvent | null = null;
   /** Trips the log described that no record has said arrived, by resident. */
   readonly voyages = new Map<number, Voyage>();
   /** Voyages a resident's next trip replaced before they arrived; still drawn until they do. */
@@ -201,6 +223,21 @@ export class CityState {
   unplaced = 0;
   /** Told when a builder's road is added or taken away. */
   onRoads: (() => void) | null = null;
+  /** The residents on the road, by resident; kept until the page draws past their arrival. */
+  private readonly spells = new Map<number, Spell[]>();
+  /**
+   * Arrivals that found no spell to end, by resident. A district's records can be folded before another's, and the
+   * arrival is in the destination's district while the keyframe naming the traveller is in the district they were in;
+   * the keyframe then finds its arrival here.
+   */
+  private readonly orphans = new Map<number, number[]>();
+  /** Each district's newest keyframe: its tick and how many residents it held. */
+  private readonly held: ({ tick: number; residents: number } | null)[];
+  /**
+   * The city's residents, once every district has a keyframe from one tick. A keyframe lists only the residents in its
+   * own district, and they cross borders, so the districts' counts add up only when they are of one tick.
+   */
+  population: number | null = null;
   /** Told when a lot's building changes, with `null` for the generated one. */
   onLot: ((lot: number, building: Building | null) => void) | null = null;
   /** Told when a voyage is replaced or ends, just before its journey is freed. */
@@ -217,6 +254,7 @@ export class CityState {
   ) {
     this.ticks = Array<number>(districts).fill(-1);
     this.epochs = Array<number>(districts).fill(-1);
+    this.held = Array<{ tick: number; residents: number } | null>(districts).fill(null);
     this.shares = Array<number | null>(districts).fill(null);
   }
 
@@ -264,12 +302,16 @@ export class CityState {
     this.epochs[d] = record.epoch;
     this.ticks[d] = record.tick;
     this.speed = record.speed;
-    if (record.keyframe) this.keyframe(d, record.keyframe.buildings, record.keyframe.roads ?? [], fresh);
+    if (record.keyframe) {
+      this.keyframe(d, record.keyframe.buildings, record.keyframe.roads ?? [], fresh);
+      if (record.keyframe.residents) this.restore(d, record.tick, record.keyframe.residents);
+    }
     for (const e of record.events) {
       if (e.type === 'trip') {
         const t = e;
         syncRoads(this.trips, this.builtRoads());
         const journey = this.trips.trip(t.resident, t.vehicle, t.depart, Uint32Array.from(t.route.flat()));
+        this.depart(t.resident, { vehicle: t.vehicle, from: t.depart, to: journey?.arrive() ?? Infinity });
         if (!journey) {
           this.unplaced++;
           continue;
@@ -279,6 +321,8 @@ export class CityState {
         this.voyages.set(t.resident, { resident: t.resident, vehicle: t.vehicle, depart: t.depart, journey });
       } else if (e.type === 'replan') {
         this.replan(e, record.tick);
+      } else if (e.type === 'arrived') {
+        this.arrive(e.resident, record.tick);
       } else if (e.type === 'built' || e.type === 'demolished') {
         this.mark(e, record.tick, this.rising, this.falling);
         this.set(
@@ -296,6 +340,8 @@ export class CityState {
         if (share !== null && share !== undefined) this.shares[d] = share + e.earned - e.spent;
       } else if (e.type === 'balance') {
         this.shares[d] = e.amount;
+      } else if (e.type === 'council') {
+        this.council = e;
       }
     }
     this.prune(d);
@@ -322,6 +368,9 @@ export class CityState {
       return;
     }
     this.voyages.set(e.resident, { resident: e.resident, vehicle: e.vehicle, depart: tick, journey });
+    // The trip is still under way and now arrives when the new route does.
+    const spell = this.spells.get(e.resident)?.find((s) => s.from <= tick && s.to > tick);
+    if (spell) spell.to = journey.arrive();
   }
 
   /**
@@ -402,14 +451,106 @@ export class CityState {
     for (let d = 0; d < this.ticks.length; d++) if (this.ticks[d]! >= 0) this.prune(d);
   }
 
+  // A trip event says when a resident left and, through its journey, when they arrive. A keyframe also lists whoever is
+  // on the road, including trips that left before the state's first record, which have no event to fold.
+  private restore(district: number, tick: number, residents: readonly { id: number; vehicle?: number }[]): void {
+    this.held[district] = { tick, residents: residents.length };
+    if (this.held.every((h) => h?.tick === tick)) this.population = this.held.reduce((n, h) => n + h!.residents, 0);
+    for (const r of residents) {
+      if (r.vehicle === undefined) continue;
+      const list = this.spells.get(r.id);
+      if (!list?.some((s) => s.from <= tick && tick < s.to))
+        this.add(r.id, { vehicle: r.vehicle, from: tick, to: Infinity });
+    }
+  }
+
+  private arrive(resident: number, tick: number): void {
+    const list = this.spells.get(resident) ?? [];
+    let closed = false;
+    for (const s of list) {
+      if (s.to === Infinity) {
+        s.to = tick;
+        closed = true;
+      }
+    }
+    if (closed || list.some((s) => s.to === tick)) return;
+    const waiting = this.orphans.get(resident);
+    if (waiting) waiting.push(tick);
+    else this.orphans.set(resident, [tick]);
+  }
+
+  // The keyframe of another district can name a trip before its event is folded, as an open spell that starts later
+  // than the departure; the event completes it.
+  private depart(resident: number, spell: Spell): void {
+    const open = this.spells.get(resident)?.find((s) => s.to === Infinity && s.from >= spell.from);
+    if (open) Object.assign(open, spell);
+    else this.add(resident, spell);
+  }
+
+  private add(resident: number, spell: Spell): void {
+    if (spell.to === Infinity) {
+      const waiting = this.orphans.get(resident);
+      const next = waiting?.filter((t) => t > spell.from).sort((a, b) => a - b)[0];
+      if (next !== undefined) {
+        spell.to = next;
+        waiting!.splice(waiting!.indexOf(next), 1);
+      }
+    }
+    const list = this.spells.get(resident);
+    if (list) list.push(spell);
+    else this.spells.set(resident, [spell]);
+  }
+
+  /**
+   * The residents on the road at `tick`: those who have left by then and not yet arrived, in a car or on foot. The
+   * state can hold trips from a few ticks after `tick`, which are not counted. A trip that arrived before the last
+   * {@link retire} is forgotten, so `tick` should not be earlier than that.
+   */
+  onRoad(tick: number): { cars: number; walkers: number } {
+    let cars = 0;
+    let walkers = 0;
+    for (const list of this.spells.values()) {
+      for (const s of list) {
+        if (s.from > tick || s.to <= tick) continue;
+        if (s.vehicle === 0) walkers++;
+        else cars++;
+      }
+    }
+    return { cars, walkers };
+  }
+
   /** Every voyage to draw: those under way and those a later trip replaced that have yet to arrive. */
   *active(): Iterable<Voyage> {
     yield* this.finishing;
     yield* this.voyages.values();
   }
 
+  /**
+   * The trip `resident` is on at `tick`, or undefined when they are indoors. The resident number is the only key: a
+   * trip into another district is the same resident's, so it is found wherever the log put it.
+   */
+  voyageAt(resident: number, tick: number): Voyage | undefined {
+    const on = (v: Voyage) => v.resident === resident && v.depart <= tick && tick < v.journey.arrive();
+    const current = this.voyages.get(resident);
+    if (current && on(current)) return current;
+    return this.finishing.find(on);
+  }
+
   /** Forget voyages that have arrived by `tick`. */
   retire(tick: number): void {
+    // In place: this runs every frame.
+    for (const [resident, list] of this.spells) {
+      let kept = 0;
+      for (const s of list) if (s.to > tick) list[kept++] = s;
+      if (kept === 0) this.spells.delete(resident);
+      else list.length = kept;
+    }
+    for (const [resident, waiting] of this.orphans) {
+      let kept = 0;
+      for (const t of waiting) if (t > tick) waiting[kept++] = t;
+      if (kept === 0) this.orphans.delete(resident);
+      else waiting.length = kept;
+    }
     for (const [resident, v] of this.voyages) {
       if (v.journey.arrive() <= tick) {
         this.voyages.delete(resident);

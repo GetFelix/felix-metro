@@ -5,14 +5,37 @@ import { whyNot } from '../placement';
 import { BUILD_LABEL, DEMOLISH_LABEL, HINTS, ROAD_LABEL, ROAD_SECOND } from './build-bar';
 import { HINT_TEXT } from './hint';
 import { SHORTCUTS } from './keys';
+import { archetypeLabel, doing, type Activity, type Archetype } from '../follow';
+import { STOP_LABEL } from './follow-card';
 import { SHARE_COPIED, SHARE_LABEL, SHARE_NONE } from './share';
 import { CHOICES } from './settings';
+import { GROUPS } from '../stats';
 import { UNAVAILABLE_TEXT } from './sound';
 
 // docs/ui.md sets the copy rules: plain words, none of the system's own, and no em dashes.
 const JARGON = /\b(logs?|streams?|offsets?|ticks?|shards?|keyframes?|districts?)\b/i;
 
+// What the follow card says: the kinds of resident, and what each activity reads as indoors, on foot and by car.
+const activities: Activity[] = ['home', 'work', 'school', 'shop', 'leisure'];
+const kinds: Archetype[] = ['office', 'shift', 'shopkeeper', 'student', 'retiree', 'night'];
+const said = activities.flatMap((activity) => {
+  const day = {
+    id: 0,
+    name: '',
+    archetype: 'office' as const,
+    home: 0,
+    vehicle: 1,
+    blocks: [{ activity, lot: 1, leave: 9 }],
+  };
+  return [0, 5000]
+    .map((tick) => doing(day, tick, null).text)
+    .concat(doing(day, 0, { car: true, to: 1 }).text, doing(day, 0, { car: false, to: 1 }).text);
+});
+
 const words = [
+  STOP_LABEL,
+  ...kinds.map(archetypeLabel),
+  ...said,
   HINT_TEXT,
   UNAVAILABLE_TEXT,
   SHARE_LABEL,
@@ -29,6 +52,7 @@ const words = [
   ...[1, 2, 3, 4, 5, 7, 8, 9, 10, 20, 21, 22, 23, 24, 99].map((code) => refusal(code)),
   ...families().flatMap((f) => [f.title, ...f.choices.map((c) => c.label)]),
   whyNot({ link: null, atTip: () => true, wantsLive: true }) ?? '',
+  ...GROUPS.map((g) => g.label),
   ...CHOICES.flatMap((c) => [c.label, c.hint]),
   ...SHORTCUTS.flatMap((g) => [g.title, g.when ?? '', ...g.rows.map((r) => r.action)]),
 ];

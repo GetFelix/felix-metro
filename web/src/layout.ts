@@ -12,6 +12,8 @@ export interface Lot {
   facing: number;
   /** The segment the lot's door is on, or null for filler ground with no door, where no resident ever goes. */
   doorSegment: number | null;
+  /** The business's name, or null for a lot without one. */
+  name?: string | null;
 }
 export interface Road {
   x: number;

@@ -430,7 +430,277 @@ for (const [size, tag] of [
   await context.close();
 }
 
-// 11. The building tools without a live city: the buttons are there and off, each says why, and no key picks a tool. What
+// 12. The stats panel: off until asked for, toggled by C or the settings sheet, remembered, hidden in photo mode, and clear
+// of the other controls at both widths. With no gateway there is no folded city, so only the buildings have numbers.
+{
+  const { context, page } = await open('tier=low&still&t=12', DESKTOP);
+  const text = (name) => page.locator(`#stats [data-stat=${name}]`).innerText();
+  check(!(await visible(page, '#stats')), 'the stats panel is off on a first visit');
+  await page.keyboard.press('c');
+  check(await visible(page, '#stats'), 'C shows the stats panel');
+  // The panel is drawn from a frame, and a software-rendered frame can take seconds: wait for the figures.
+  await page
+    .waitForFunction(() => document.querySelector('#stats [data-stat=homes]').textContent !== '', null, {
+      polling: 100,
+      timeout: 120_000,
+    })
+    .catch(() => {});
+  const homes = Number((await text('homes')).replace(/,/g, ''));
+  check(homes > 0, `the panel counts the homes of the generated city (${homes})`);
+  check((await text('population')) === '-', 'the residents are not known without a gateway');
+  await page.keyboard.press('c');
+  check(!(await visible(page, '#stats')), 'C hides it again');
+  await page.keyboard.press('c');
+  await page.keyboard.press('?');
+  await page.keyboard.press('c');
+  check(await visible(page, '#stats'), 'C does nothing under an open sheet');
+  await page.keyboard.press('Escape');
+  await page.evaluate(() => window.__ui.openSettings());
+  const box = page.locator('#sheet [data-stats]');
+  check(await box.isChecked(), 'the settings sheet shows the panel as on');
+  await box.uncheck();
+  check(!(await visible(page, '#stats')), 'the settings switch hides the panel');
+  await box.check();
+  await page.keyboard.press('Escape');
+  check(await visible(page, '#stats'), 'the settings switch shows the panel');
+  const keyed = await page.locator('[data-keys] kbd', { hasText: /^C$/ }).count();
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForFunction(() => window.__ready === true, null, { polling: 100, timeout: 180_000 });
+  check(keyed > 0, 'the key list names C');
+  check(await visible(page, '#stats'), 'the panel stays on for the next visit');
+  await page.keyboard.press('h');
+  check(!(await visible(page, '#stats')), 'H hides the panel with the other controls');
+  await page.keyboard.press('h');
+  await context.close();
+}
+for (const [size, tag] of [
+  [DESKTOP, '1280'],
+  [PHONE, '360'],
+  [{ width: 740, height: 360 }, '740x360'],
+]) {
+  const { context, page } = await open('tier=low&still&t=12', size);
+  await page.keyboard.press('c');
+  await page.evaluate(() => {
+    document.getElementById('pill').classList.remove('hidden');
+    document.getElementById('chevron').classList.remove('hidden');
+  });
+  await settle(page, 100);
+  const rects = await page.evaluate(() =>
+    Object.fromEntries(
+      ['#stats', '.brand', '.corner', '#timeline'].map((s) => {
+        const { left, right, top, bottom } = document.querySelector(s).getBoundingClientRect();
+        return [s, { left, right, top, bottom }];
+      }),
+    ),
+  );
+  const meets = (a, b) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+  for (const other of ['.brand', '.corner', '#timeline'])
+    check(!meets(rects['#stats'], rects[other]), `the stats panel clears ${other} at ${tag}px`);
+  const r = rects['#stats'];
+  check(
+    r.left >= 0 && r.right <= size.width && r.top >= 0 && r.bottom <= size.height,
+    `the panel is on screen at ${tag}px`,
+  );
+  check(
+    !(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)),
+    `the panel overflows nothing at ${tag}px`,
+  );
+  await page.screenshot({ path: join(out, `stats-day-${tag}.png`) });
+  await context.close();
+}
+{
+  const { context, page } = await open('tier=low&still&t=12&ui=0', DESKTOP);
+  await page.keyboard.press('c');
+  check((await page.locator('#stats').count()) === 0, 'there is no stats panel or C key under ?ui=0');
+  await context.close();
+}
+
+// 11. Following a resident from a link: the card shows who they are and their day, the camera goes to their building,
+// Esc and a pan let go, and turning and zooming do not. With no log the resident is placed by their schedule at the
+// hour on the slider, so this runs without a gateway; picking a moving car is checked against the live stack.
+// Frames are slow under software GL, so each step waits on the page's state (the card shown or hidden, a number of
+// frames drawn) and never on a fixed time.
+const cardIs = (page, shown) =>
+  page.waitForFunction((on) => document.getElementById('follow').hidden !== on, shown, {
+    polling: 50,
+    timeout: 60_000,
+  });
+const frames = (page, n = 3) =>
+  page.evaluate(async (count) => {
+    for (let i = 0; i < count; i++) await new Promise((done) => requestAnimationFrame(done));
+  }, n);
+const followFrom = async (page, resident) => {
+  await page.evaluate((r) => window.__following.start(r), resident);
+  await cardIs(page, true);
+};
+{
+  const { context, page } = await open('tier=low&still&t=12&follow=3&attract=0', DESKTOP);
+  await cardIs(page, true);
+  // The camera eases in on a spring; the goal it heads for is set on the first frame.
+  await page.waitForFunction(() => window.__camera.state().distance <= 14.01, null, { polling: 50, timeout: 60_000 });
+  const card = '#follow';
+  const text = (selector) => page.locator(`${card} ${selector}`).innerText();
+  check(await visible(page, card), '?follow= shows the resident’s card');
+  check((await text('[data-name]')).trim().length > 2, 'the card names the resident');
+  check(
+    /^(Office|Shift|Night) worker$|^(Shopkeeper|Student|Retiree)$/.test((await text('[data-kind]')).trim()),
+    'the card says what kind of resident they are',
+  );
+  check(
+    (await text('[data-doing]')).trim().length > 3,
+    `the card says what they are doing (${await text('[data-doing]')})`,
+  );
+  const rows = await page.locator(`${card} [data-day] li`).count();
+  check(rows >= 2, `the card lists their day (${rows} blocks)`);
+  check(
+    (await page.locator(`${card} [data-day] li[aria-current]`).count()) === 1,
+    'one block is marked as the one they are in',
+  );
+  check(
+    /^\d\d:\d\d$/.test((await page.locator(`${card} [data-day] time`).first().innerText()).replace('until ', '')),
+    'each block says when they leave',
+  );
+  check((await page.evaluate(() => window.__following.resident())) === 3, 'the page knows who is followed');
+  const camera = await page.evaluate(() => window.__camera.state());
+  check(camera.distance <= 14.01, `the camera came in close (${camera.distance})`);
+  check(camera.x !== 0 || camera.z !== 0, `the camera went to their building (${camera.x}, ${camera.z})`);
+  await page.screenshot({ path: join(out, 'follow-day-1280.png') });
+
+  // Turning and zooming keep the follow; the camera stays on them.
+  const view = () => page.evaluate(() => window.__camera.state());
+  await page.mouse.move(640, 360);
+  await page.mouse.down();
+  await page.mouse.move(700, 380, { steps: 4 });
+  await page.mouse.up();
+  await page.mouse.wheel(0, -200);
+  await frames(page);
+  const turned = await view();
+  check(turned.azimuth !== camera.azimuth, 'a left drag still turns the view');
+  check(await visible(page, card), 'turning and zooming keep following');
+  check(
+    Math.hypot(turned.x - camera.x, turned.z - camera.z) < 0.05,
+    'the camera is still on them after turning and zooming',
+  );
+
+  // A click that is not on a car or walker does nothing.
+  await page.mouse.click(300, 600);
+  await frames(page);
+  check(await visible(page, card), 'a click on empty ground leaves the follow alone');
+
+  // Photo mode hides the card, and its Esc is its own.
+  await page.keyboard.press('h');
+  await frames(page);
+  check(!(await visible(page, card)), 'photo mode hides the card');
+  await page.keyboard.press('Escape');
+  await frames(page);
+  check(await visible(page, card), 'Esc leaves photo mode and keeps following');
+
+  await page.keyboard.press('Escape');
+  await cardIs(page, false).catch(() => {});
+  check(!(await visible(page, card)), 'Esc stops following');
+  check((await page.evaluate(() => window.__following.resident())) === null, 'nobody is followed after Esc');
+  const left = await view();
+  await frames(page, 4);
+  const still = await view();
+  check(still.x === left.x && still.z === left.z, 'the camera stays where it was when the follow ends');
+  await context.close();
+}
+{
+  const { context, page } = await open('tier=low&still&t=12&attract=0', DESKTOP);
+  const card = '#follow';
+  check(!(await visible(page, card)), 'no card until someone is followed');
+  check(await page.evaluate(() => window.__following.start(5)), 'the page can follow a resident it is told of');
+  await cardIs(page, true).catch(() => {});
+  check(await visible(page, card), 'the card shows');
+  await page.locator(`${card} [data-stop]`).click();
+  await cardIs(page, false).catch(() => {});
+  check(!(await visible(page, card)), 'the card’s button stops following');
+  // From the keyboard, the card's button stops it and focus goes to a control, not the page; a region always in the page says who.
+  await followFrom(page, 5);
+  check(
+    /^Following .+\.$/.test(await page.locator('body > [role=status].sr-only').first().textContent()),
+    'a live region says who is followed',
+  );
+  await page.focus(`${card} [data-stop]`);
+  await page.keyboard.press('Enter');
+  await cardIs(page, false).catch(() => {});
+  check(!(await visible(page, card)), 'Enter on the card’s button stops following');
+  check((await active(page)) === 'settings-button', 'focus goes to a control when the card goes');
+  check(
+    (await page.locator('body > [role=status].sr-only').first().textContent()) === '',
+    'the live region is cleared',
+  );
+  for (const [what, act] of [
+    [
+      'a right drag',
+      async () => {
+        await page.mouse.move(640, 360);
+        await page.mouse.down({ button: 'right' });
+        await page.mouse.move(700, 380, { steps: 4 });
+        await page.mouse.up({ button: 'right' });
+      },
+    ],
+    [
+      'a shift drag',
+      async () => {
+        await page.keyboard.down('Shift');
+        await page.mouse.move(640, 360);
+        await page.mouse.down();
+        await page.mouse.move(700, 380, { steps: 4 });
+        await page.mouse.up();
+        await page.keyboard.up('Shift');
+      },
+    ],
+    ['a pan key', async () => page.keyboard.press('w')],
+    ['the reset key', async () => page.keyboard.press('0')],
+  ]) {
+    await followFrom(page, 5);
+    await act();
+    await cardIs(page, false).catch(() => {});
+    check(!(await visible(page, card)), `${what} lets go`);
+  }
+  // The key list names the gesture.
+  await page.keyboard.press('?');
+  const groups = await page.locator('[data-keys] h3').allTextContents();
+  check(groups.includes('Following'), 'the key list has a Following group');
+  await context.close();
+}
+{
+  // A resident the city does not have is said so, and the page carries on as it was.
+  const { context, page } = await open('tier=low&still&t=12&follow=99999999', DESKTOP);
+  check(!(await visible(page, '#follow')), 'a resident who does not exist gets no card');
+  await page.waitForSelector('.toast', { timeout: 60_000 }).catch(() => {});
+  check(
+    /no resident 99999999/.test(await page.locator('.toast').first().innerText()),
+    'the page says there is no such resident',
+  );
+  await context.close();
+}
+{
+  // Attract mode goes on turning the view round the one being followed, and a phone has room for the card.
+  const { context, page } = await open('tier=low&t=12&follow=3&attract=2', DESKTOP);
+  await cardIs(page, true);
+  await settle(page, 2500);
+  const first = await page.evaluate(() => window.__camera.state().azimuth);
+  const turned = await page
+    .waitForFunction((was) => window.__camera.state().azimuth !== was, first, { polling: 100, timeout: 120_000 })
+    .then(
+      () => true,
+      () => false,
+    );
+  check(turned, 'attract mode still turns the view');
+  check(await visible(page, '#follow'), 'and the follow is kept');
+  await context.close();
+  const phone = await open('tier=low&still&t=12&follow=3&attract=0', PHONE);
+  await cardIs(phone.page, true);
+  await frames(phone.page);
+  const box = await phone.page.locator('#follow').boundingBox();
+  check(box && box.x >= 0 && box.x + box.width <= PHONE.width, 'the card fits on a phone');
+  await phone.page.screenshot({ path: join(out, 'follow-day-360.png') });
+  await phone.context.close();
+}
+
+// 12. The building tools without a live city: the buttons are there and off, each says why, and no key picks a tool. What
 // they do on a live city is check-placement.mjs, which needs the dev stack.
 for (const size of [DESKTOP, PHONE]) {
   const { context, page } = await open('tier=low&still&t=12', size);

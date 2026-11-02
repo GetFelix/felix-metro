@@ -18,6 +18,7 @@ describe('parseParams', () => {
       at: null,
       cam: null,
       attract: 60,
+      follow: null,
       trace: false,
       capture: false,
     });
@@ -44,6 +45,14 @@ describe('parseParams', () => {
       hud: true,
       slow: 40,
     });
+  });
+
+  it('reads the resident to follow, and nothing from what is not a resident number', () => {
+    expect(parseParams('?follow=412').follow).toBe(412);
+    expect(parseParams('?follow=0').follow).toBe(0);
+    expect(parseParams('').follow).toBeNull();
+    for (const bad of ['', 'x', '-1', '1.5', '1e3', '12abc', '0x10', '1234567890'])
+      expect(parseParams(`?follow=${bad}`).follow, bad).toBeNull();
   });
 
   it('keeps the overlay for any ui value but 0', () => {

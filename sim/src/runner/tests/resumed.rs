@@ -237,10 +237,11 @@ async fn what_builders_built_is_still_there_after_a_restart() {
 }
 
 /// The account is rebuilt from a keyframe and the prices and days after it. The build lands mid-hour, so a restart
-/// at 300 or 470 reads its price from the log, and one at 5600 or 5770 reads it from a keyframe.
+/// at 300 or 470 reads its price from the log, and one at 5600 or 5770 reads it from a keyframe. 6100 restarts
+/// from the first keyframe after a scored day, where the council has a score and a part-day tally to restore.
 #[tokio::test(start_paused = true)]
 async fn the_account_is_the_same_after_a_restart_on_either_side_of_a_day() {
-    const TOTAL: u32 = 5900;
+    const TOTAL: u32 = 6300;
     let lot = free_lot(&World::new(harbor()));
     let build = Command::Build {
         lot,
@@ -278,7 +279,7 @@ async fn the_account_is_the_same_after_a_restart_on_either_side_of_a_day() {
     assert!(before < 100_000, "the build cost something: {before}");
     assert!(after > before, "the day's taxes outran its upkeep");
 
-    for stop in [300, 470, 5600, 5770] {
+    for stop in [300, 470, 5600, 5770, 6100] {
         let log = Memory::healthy();
         run(log.clone(), 250, None).await.unwrap();
         run(log.clone(), stop, Some(build.clone())).await.unwrap();

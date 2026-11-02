@@ -6,6 +6,9 @@ import { hintDue } from './ui/hint';
 import { ATTRACT_RATE, createAttract } from './attract';
 import { momentLink } from './moments';
 import { PHOTO_CLASS, createPhoto } from './ui/photo';
+import { createFollowCard, isFollowKey, isStopKey } from './ui/follow-card';
+import { Following } from './follow';
+import { bindTap } from './tap';
 import { createShare } from './ui/share';
 import { isPlayKey } from './ui/keys';
 import { parseParams, type Tier } from './params';
@@ -30,6 +33,8 @@ import { agoText, createGuess, createTimeline, moveRange, stepTick, clampTick, t
 import { createLoader, type Loader } from './ui/loader';
 import { createPicker } from './ui/picker';
 import { createShell, type Shell } from './ui/shell';
+import { createStatsPanel, type StatsPanel } from './ui/stats';
+import { createStats, type CityStats } from './stats';
 import { createSound } from './ui/sound';
 import { createSoundscape } from './soundscape';
 import { intoThePast, startsRewind, whooshDue } from './soundscape-mix';
@@ -38,6 +43,7 @@ import { createBuildBar } from './ui/build-bar';
 import { Placement, type CommandLink } from './placement';
 import { createPlacementView } from './placement-view';
 import { note, toast } from './ui/toast';
+import { councilView, fitCouncil, renderCouncil, TALL_SCREEN, type CouncilEvent } from './council';
 import { money } from './money';
 import { displayName } from './registry';
 import { Traffic } from './traffic';
@@ -67,6 +73,8 @@ declare global {
       /** Put the camera low beside the first car drawn. */
       closeUp(): boolean;
     };
+    /** The city stats for the state and tick on screen, as the panel shows them. */
+    __stats?: () => CityStats | null;
     /** What became of each record the page took, as `[district, tick, result]`; only under ?trace. */
     __trace?: [number, number, string][];
     /** The seek behind a page opened with ?at: the tick shown, and the ms to find and fold the city, and the ms after that to its first frame. */
@@ -197,6 +205,15 @@ declare global {
       screenOfTile(x: number, z: number): { x: number; y: number } | null;
       /** Put the camera over a map tile. */
       focusTile(x: number, z: number): void;
+    };
+    /** Following a resident, for the CI checks and the console; absent where there is no city. */
+    __following?: {
+      /** The resident followed, or null. */
+      resident(): number | null;
+      start(resident: number): boolean;
+      stop(): void;
+      /** Where a car or walker drawn now is on the screen, in CSS pixels, or null when it is not drawn. */
+      screenOf(resident: number): { x: number; y: number } | null;
     };
     /** The settings sheet, key list and first-visit tip, for the CI check and the console; null when the overlay is off. */
     __ui?: Shell;
@@ -329,6 +346,9 @@ function signature(built: ReadonlyMap<number, Building>): string {
 /** Connections history is read over: two sessions keep eight reads in flight, and the gateway allows eight a person. */
 const HISTORY_SESSIONS = 2;
 
+/** How far from the middle of the view, in pixels, `F` looks for someone to follow. */
+const KEY_PICK_PX = 160;
+
 /** Districts on a side when `?districts` does not say. */
 const DEFAULT_DISTRICTS = 2;
 
@@ -348,6 +368,7 @@ async function main() {
     gateway,
     at,
     cam,
+    follow: followParam,
     attract: attractSeconds,
     trace,
     capture,
@@ -369,7 +390,9 @@ async function main() {
   let apply: (tier: Tier) => void = () => {};
   const quality = createQuality({ url: urlTier, still, onChange: (t) => apply(t) });
   // The capture job needs the page as it draws, with nothing to dismiss, so it gets no controls and no tip.
-  const shell = ui && !capture && layout === 'city' ? createShell(quality) : null;
+  const stats: StatsPanel | null =
+    ui && !capture && layout === 'city' ? createStatsPanel(() => shell?.isOpen ?? false) : null;
+  const shell: Shell | null = stats ? createShell(quality, stats) : null;
   // The sound has no audio context until its button is first used, and none at all without the button.
   const soundscape = createSoundscape();
   const sound = shell
@@ -423,6 +446,8 @@ async function main() {
   let timelineFrame: ((tick: number) => void) | null = null;
   /** Keeps the building tools in step with the pointer and the page; set when there are tools. */
   let placementFrame: (() => void) | null = null;
+  /** Whether a building tool is in hand, when a click on the city is the tool's and not a follow's. */
+  let toolHeld: () => boolean = () => false;
   /** Resolves when no scrub seek is waiting or running; the clip job draws a frame only after it. */
   let scrubSettled: () => Promise<void> = async () => {};
   /** Moves a playback on and says which tick it draws, or null when nothing is playing. */
@@ -487,6 +512,9 @@ async function main() {
   // A shared view replaces the opening drift.
   const sharedView = cam !== null && controls.setState(cam, { ease: false });
   const drawn: ReadonlyMap<number, Building> = new Map(state?.built);
+  /** The city's residents as core describes them, made when first asked: a page with no log and no follow never builds it. */
+  let residentsMetro: Metro | null = null;
+  const residents = () => (residentsMetro ??= new Metro(seed, districts));
   const {
     scene,
     construction,
@@ -497,6 +525,7 @@ async function main() {
     setTime,
     setShadows,
     fleet,
+    pick,
     setLot,
     setRoads,
     lots,
@@ -549,6 +578,25 @@ async function main() {
     state.onVoyageEnd = (v) => traffic.release(v);
     hour = cityTime(Math.max(0, state.latest - 1)).hour;
   }
+  // The tick on screen, as the numbers of the stats panel are read for: null before the first frame has one.
+  const readStats = city ? createStats(city) : null;
+  const statsNow = (): CityStats | null => {
+    if (!readStats) return null;
+    const tick = liveInfo?.tick;
+    const folded = state && tick !== undefined && !Number.isNaN(tick);
+    return readStats(folded ? state : null, folded ? Math.floor(tick) : 0);
+  };
+  let statsAt = 0;
+  // Drawn at once when switched on, so the panel is never up empty while a slow first frame is awaited.
+  const showStats = () => {
+    const read = statsNow();
+    if (read) stats?.show(read);
+  };
+  stats?.onChange((on) => {
+    statsAt = 0;
+    if (on) showStats();
+  });
+  if (hooks) window.__stats = statsNow;
   hour = frozenHour ?? (state ? hour : parseFloat(slider.value));
   slider.value = String(hour);
   slider.addEventListener('input', () => {
@@ -574,6 +622,8 @@ async function main() {
   const fundsChip = document.getElementById('funds-chip')!;
   const fundsText = document.getElementById('funds')!;
   let fundsShown: number | null = null;
+  const councilChip = document.getElementById('council-chip')!;
+  let councilShown: CouncilEvent | null = null;
   let liveInfo: NonNullable<Window['__live']> | null = null;
   if (state && traffic) {
     liveInfo = {
@@ -595,7 +645,7 @@ async function main() {
     if (hooks) window.__live = liveInfo;
   }
   if (state && traffic && city) {
-    const metro = new Metro(seed, districts);
+    const metro = residents();
     const summary = (s: CityState) => ({ ticks: [...s.ticks], buildings: s.built.size, sig: signature(s.built) });
     /** Draw `next` in place of the state on screen, which is let go; the live one keeps filling in the background. */
     const swap = (next: CityState, tick: number | null) => {
@@ -1211,6 +1261,7 @@ async function main() {
         return roadMetro.roadCheck(a, b);
       },
     });
+    toolHeld = () => placement.tool !== null;
     const bar = createBuildBar(shell.tools, placement, () => shell.isOpen);
     if (liveState) liveState.onCommand = (e) => placement.result(e.id, e.result);
     const view = liveState
@@ -1286,6 +1337,85 @@ async function main() {
       };
     }
   }
+  const dom = renderer.domElement;
+  const card = shell ? createFollowCard(() => following?.stop()) : null;
+  const following = city
+    ? new Following({
+        profile: (resident) => residents().profile(resident),
+        lots: city.lots,
+        half: (city.tiles - 1) / 2,
+        rig: controls,
+        positionOf: (voyage, tick, into) => traffic?.positionOf(voyage, tick, into) ?? null,
+        pin: (resident) => {
+          if (traffic) traffic.pinned = resident;
+        },
+        show: (view) => card?.show(view),
+      })
+    : null;
+  /** What a follow asks each frame, made once: the trip a resident is on in the state on screen, which a seek replaces. */
+  const voyageAt = (resident: number, at: number) => state?.voyageAt(resident, at);
+  const noVoyage = () => undefined;
+  /** Follow `resident`, or say there is no such one. */
+  const startFollow = (resident: number, keepView = false): boolean => {
+    const ok = following?.start(resident, keepView) ?? false;
+    if (!ok) note(`There is no resident ${resident} in this city.`);
+    return ok;
+  };
+  if (following && !capture) {
+    // Moving the view lets go; turning and zooming do not, so a follow can be looked at from any side.
+    controls.addEventListener('steer', () => following.stop());
+    // Capture phase, to see photo mode, the sheet and the city menu before they close themselves on the same key.
+    addEventListener(
+      'keydown',
+      (e) => {
+        if (following.resident === null) return;
+        const menuOpen = !document.getElementById('cities')?.classList.contains('hidden');
+        if (isStopKey(e, document.body.classList.contains(PHOTO_CLASS), shell?.isOpen ?? false, menuOpen))
+          following.stop();
+      },
+      true,
+    );
+    if (pick) {
+      const find = (at: { x: number; y: number }, slack: number) =>
+        pick(camera, at.x, at.y, { width: dom.clientWidth, height: dom.clientHeight }, slack);
+      // A click needs a pointer, so F is the way from the keyboard: whoever is nearest the middle of the view.
+      addEventListener('keydown', (e) => {
+        if (!isFollowKey(e, e.target as HTMLElement | null, shell?.isOpen ?? false)) return;
+        e.preventDefault();
+        const hit = find({ x: 0, y: 0 }, KEY_PICK_PX);
+        if (hit) startFollow(hit.resident);
+        else note('There is nobody near the middle of the view to follow.');
+      });
+      bindTap(dom, {
+        tap: ({ at, touch }) => {
+          if (toolHeld()) return;
+          const hit = find(at, touch ? 28 : 16);
+          if (hit) startFollow(hit.resident);
+        },
+        hover: (at) => {
+          if (toolHeld()) return;
+          dom.style.cursor = at && find(at, 16) ? 'pointer' : '';
+        },
+      });
+    }
+    if (hooks) {
+      const corner = new THREE.Vector3();
+      window.__following = {
+        resident: () => following.resident,
+        start: (resident) => startFollow(resident),
+        stop: () => following.stop(),
+        screenOf(resident) {
+          const at = traffic?.where().find((w) => w.resident === resident);
+          if (!at) return null;
+          camera.updateMatrixWorld();
+          corner.set(at.x, 0.1, at.z).project(camera);
+          return { x: ((corner.x + 1) / 2) * dom.clientWidth, y: ((1 - corner.y) / 2) * dom.clientHeight };
+        },
+      };
+    }
+  }
+  // A link that names a resident opens with the camera on them, and keeps the view it carries.
+  const followed = followParam !== null && !capture && startFollow(followParam, sharedView);
   let intro: ReturnType<typeof startIntro> | null = null;
   /** Set when attract mode is on: turns the camera a frame's worth once the page has sat untouched. */
   let turnWhenIdle: ((now: number, dt: number) => void) | null = null;
@@ -1332,6 +1462,7 @@ async function main() {
         // which lots are going up or coming down at this tick.
         ambient?.drive(ambientTick);
         traffic.update(tick, still ? 0 : dt, state.active());
+        following?.frame(tick, voyageAt);
         state.settle(tick);
         construction.update(tick, state.rising, state.falling);
         ambient?.decorate(ambientTick);
@@ -1349,6 +1480,16 @@ async function main() {
           fundsChip.classList.toggle('short', funds !== null && funds < 0);
           if (funds !== null) fundsText.textContent = money(funds);
         }
+        if (state.council !== councilShown) {
+          councilShown = state.council;
+          councilChip.classList.toggle('hidden', councilShown === null);
+          if (councilShown)
+            renderCouncil(
+              councilChip,
+              councilView(councilShown, city?.shore ?? null),
+              window.innerHeight >= TALL_SCREEN,
+            );
+        }
         timelineFrame?.(tick);
         Object.assign(liveInfo, {
           tick,
@@ -1362,6 +1503,13 @@ async function main() {
       }
     }
     placementFrame?.();
+    // A few times a second is plenty for numbers a person reads.
+    if (stats?.on && now - statsAt >= 250) {
+      statsAt = now;
+      showStats();
+    }
+    // With no log there is no tick, only the hour on the slider, and the resident is placed by their schedule.
+    if (!state) following?.frame(hour * TICKS_PER_HOUR, noVoyage);
     // A frame with no tick has no update to draw a voyage that just ended away.
     traffic?.sync();
     if (paint) post!.render(controls.target);
@@ -1495,7 +1643,12 @@ async function main() {
         const tick = scrubTarget ?? liveInfo?.tick;
         if (tick === undefined || Number.isNaN(tick)) return null;
         // The clock coasts past the newest record while the connection is down; the log has nothing there to open.
-        return momentLink(location.href, state ? Math.min(tick, state.latest) : tick, controls.state());
+        return momentLink(
+          location.href,
+          state ? Math.min(tick, state.latest) : tick,
+          controls.state(),
+          following?.resident ?? null,
+        );
       });
   }
   if (city && !still && !reduced && !capture && attractSeconds > 0) {
@@ -1507,7 +1660,7 @@ async function main() {
       if (!intro && idle.active(now)) controls.drift(ATTRACT_RATE * dt);
     };
   }
-  if (city && !still && frozenHour === null && !reduced && !capture && !sharedView)
+  if (city && !still && frozenHour === null && !reduced && !capture && !sharedView && !followed)
     intro = startIntro(camera, controls, performance.now());
   if (capture) {
     controls.enabled = false;
@@ -1523,6 +1676,7 @@ async function main() {
     camera.aspect = innerWidth / innerHeight;
     camera.updateProjectionMatrix();
     post!.resize();
+    fitCouncil(councilChip, innerHeight >= TALL_SCREEN);
   });
 }
 

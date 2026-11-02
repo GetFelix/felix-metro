@@ -173,20 +173,21 @@ guess.
 A car's position every tick would cost around 4 MB/s for 10,000 cars. The sim
 writes decisions instead, and the client works out positions:
 
-| Event                  | Fields                                                                         | Meaning                                             |
-| ---------------------- | ------------------------------------------------------------------------------ | --------------------------------------------------- |
-| `trip`                 | resident, vehicle kind, depart tick, route (segment ids with a speed each)     | Leaves now along this route                         |
-| `replan`               | resident, vehicle, node, new route                                             | A removed road changed the route                    |
-| `arrived`              | resident, lot                                                                  | Reached a building                                  |
-| `activity`             | resident, kind (sleep, work, shop, ...), until tick                            | What they are doing inside                          |
-| `left` / `entered`     | resident, other district; `entered` adds the vehicle state with the route left | Crossed into another district                       |
-| `built` / `demolished` | lot, building kind, rotation                                                   | A building changed                                  |
-| `road`                 | segment, change (closed, opened, added, removed)                               | Reserved: closing and opening a road                |
-| `roadwork`             | segment, change (added, removed), the segment's two nodes                      | A builder added or removed a road                   |
-| `command`              | principal hash, builder name, command id, result                               | A builder's command was applied or refused          |
-| `speed`                | ticks per second                                                               | The city's speed changed; 0 is paused               |
-| `ledger`               | reason (day, build, demolish), earned, spent                                   | Money moved in or out of the city's funds           |
-| `balance`              | amount                                                                         | A district's share of the funds, each keyframe tick |
+| Event                  | Fields                                                                               | Meaning                                             |
+| ---------------------- | ------------------------------------------------------------------------------------ | --------------------------------------------------- |
+| `trip`                 | resident, vehicle kind, depart tick, route (segment ids with a speed each)           | Leaves now along this route                         |
+| `replan`               | resident, vehicle, node, new route                                                   | A removed road changed the route                    |
+| `arrived`              | resident, lot                                                                        | Reached a building                                  |
+| `activity`             | resident, kind (sleep, work, shop, ...), until tick                                  | What they are doing inside                          |
+| `left` / `entered`     | resident, other district; `entered` adds the vehicle state with the route left       | Crossed into another district                       |
+| `built` / `demolished` | lot, building kind, rotation                                                         | A building changed                                  |
+| `road`                 | segment, change (closed, opened, added, removed)                                     | Reserved: closing and opening a road                |
+| `roadwork`             | segment, change (added, removed), the segment's two nodes                            | A builder added or removed a road                   |
+| `command`              | principal hash, builder name, command id, result                                     | A builder's command was applied or refused          |
+| `speed`                | ticks per second                                                                     | The city's speed changed; 0 is paused               |
+| `ledger`               | reason (day, build, demolish), earned, spent                                         | Money moved in or out of the city's funds           |
+| `balance`              | amount                                                                               | A district's share of the funds, each keyframe tick |
+| `council`              | days scored, patience, each faction's demand, measure, satisfaction and unhappy days | How the council's factions feel, each keyframe tick |
 
 A route is its segment ids from the road graph and one speed byte per segment,
 a percentage of the segment class's speed. A trip of 12 segments is under 40
@@ -274,13 +275,14 @@ The tag is four bits, so only tag 14 is free for a new event kind. Tag 15,
 `extended`, holds the rare events: its body starts with a kind varint, then the
 fields.
 
-| Kind | Event      | Fields                                                                |
-| ---- | ---------- | --------------------------------------------------------------------- |
-| 1    | `ledger`   | reason `u8` (0 day, 1 build, 2 demolish), earned varint, spent varint |
-| 2    | `balance`  | amount, a zigzag varint (may be negative)                             |
-| 6    | `roadwork` | segment, change `u8` (2 added, 3 removed), node a, node b: varints    |
+| Kind | Event      | Fields                                                                                                                                                                                                    |
+| ---- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1    | `ledger`   | reason `u8` (0 day, 1 build, 2 demolish), earned varint, spent varint                                                                                                                                     |
+| 2    | `balance`  | amount, a zigzag varint (may be negative)                                                                                                                                                                 |
+| 4    | `council`  | days varint, patience `u8`, then for each of three factions demand varint, measure varint, satisfaction `u8`, unhappy days `u8`; then the open day's commutes varint, commute ticks varint, visits varint |
+| 6    | `roadwork` | segment, change `u8` (2 added, 3 removed), node a, node b: varints                                                                                                                                        |
 
-A reader skips an extended kind it does not know. Kinds 3, 4 and 5 are the author, the council and policies, which other changes write.
+A reader skips an extended kind it does not know. Kinds 3 and 5 are the author and policies, which other changes write.
 
 Every arrival the sim makes is an `arrived` followed by the same resident's
 `activity`, so the encoder writes the pair as one `arrival` entry and the decoder
@@ -318,7 +320,8 @@ commit also writes the stream state key `keyframe`, so the newest one is one
 Because buildings and roads are diffs against the city the seed generates, the
 keyframe of a city nobody has built in carries none of them, and the cost is
 the residents. A removed road stays in the list, because segment ids are never
-reused and a page that starts here has to know the ids that are gone. The counts are what the stats sparkline plots.
+reused and a page that starts here has to know the ids that are gone. The counts summarise the residents list for a
+reader that would rather not walk it: the city stats (see [City stats](#city-stats)) are checked against them in a test.
 
 ### Log size
 
@@ -410,6 +413,43 @@ run a few ticks ahead of the tick on screen, and after a scrub they are the fund
 
 Cost to the log: one small event per district per city day, one per build, and a `balance` of a few bytes per district per
 city hour. `report_load` on the harbor city moves the day mean from 656.4 to 656.7 B/s.
+
+### The council
+
+Three factions judge the city. Once a city day they are scored from what the city did, and each one asks for something
+it states up front, so a player knows what to fix before looking for it.
+
+| Faction          | Asks for                                                                           | Measured from                                                                                          |
+| ---------------- | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| Commuters        | A trip to work or school that takes 12 city minutes (48 ticks) or less, on average | Ticks from `trip` to arrival, for every trip to work or school that day                                |
+| Harbor residents | 80% of residents with no factory within 3 tiles of home                            | The buildings, for residents of the districts along the shore (all districts if the city has no shore) |
+| Shops            | 5 visits a day for each shop                                                       | Arrivals to shop, divided by the shops residents go to that are still shops                            |
+
+These numbers are placeholders until the city has been played. On the harbor city with no changes, commuters average
+about 15 minutes, 71% of the shore's residents live away from factories and a shop gets 5 visits.
+
+- **Satisfaction.** 0 to 100. A faction scores 100 when the day gave it what it asked for, and less in proportion to
+  how far short it fell: a 24 minute commute against a 12 minute demand scores 50. Below 60 the faction is unhappy for
+  the day.
+- **Recall.** A faction unhappy for 3 days in a row recalls the mayor. A day it is not unhappy sets its count back to
+  zero. The sim only records this: the city keeps running, and a chapter decides what a recall costs. A day with
+  nothing to judge (nobody commuted, or no shops) upsets no one.
+- **The event.** District 0 writes one `council` event on every keyframe tick, holding the last scored day's demands,
+  measures, satisfaction and unhappy-day counts, and the open day's running totals. `days` says how many days have been
+  scored; until it is 1 the standings are only the demands. A city day ends on a keyframe tick, so the event written
+  then carries the new score. The page reads the newest one, so scrubbing shows the council as it stood.
+- **Restart.** The restart takes the council from its newest keyframe tick, including the running totals of the day in
+  progress, then steps on. A log written before the council existed starts it fresh, so its first score covers only
+  the part of the day after the restart.
+
+The page folds the council to one line below the funds: the lowest score, or the recall warning when a faction has been
+unhappy, naming the faction closest to a recall and the days left. Opening it lists a bar for each satisfaction, what the
+faction wants and how the last day went. It starts open on a tall screen and folded on a short one, follows the window
+if it is resized until the player opens or folds it, and then stays as the player leaves it. Before the first day is
+scored it says so instead of drawing empty bars.
+
+Cost to the log: one `council` event of about 30 bytes per keyframe tick, which is a city hour. `report_load` on the
+harbor city moves the day mean from 656.7 to 657.1 B/s.
 
 ### Commands and the registry
 
@@ -560,6 +600,37 @@ leg start and end, and places the car by `position_at`. A trip that matches no
 route is counted, not drawn. Trips already under way when a page opens are
 not drawn until their resident's next trip.
 
+### Following a resident
+
+Click a car or walker and the camera follows that resident; a card shows their name, kind, what they are doing and
+their day. The page knows the resident by number and nothing else: not the district they are in, which is only where
+a record was written, and not the instance slot they are drawn in, which changes every frame. Each frame it works out
+where they are from the state on screen at the tick on screen:
+
+1. `CityState::voyageAt(resident, tick)` finds the trip they are on at that tick, from whichever district's record told
+   of it. A trip that crosses into another district is still the same resident's trip.
+2. On a trip, `Traffic::positionOf` places them at the tick. It does not read what was drawn: the fleet leaves out
+   what the camera cannot see and the quality tier caps how many movers it draws, and neither may move the camera. The
+   followed resident is also exempt from the cap, so they are always drawn.
+3. With no trip, they are indoors. The page reads their day from `core` (`Metro::profile`, the same schedule the sim
+   uses) and takes the block the tick falls in: the camera goes to that lot, and the card says what they are doing
+   there. Home between 22:00 and 06:00 shows as asleep, as the keyframe's counts have it. The page does not read the
+   `arrived` and `activity` events for this. A trip that runs late still shows as a trip, so the schedule is only used
+   when none is under way. The exception is a page that opened mid-trip: it does not know that trip (see above), so
+   until the resident's next one it puts them at the block they are heading for.
+
+A seek, a scrub or a rewind replaces the state on screen. Nothing of the old one is kept, so the next frame asks the new
+one, and the camera glides to wherever the resident is at that tick.
+
+Picking works from the other side. The fleet notes the resident number and position of every car and walker it placed
+in the last round, and `pick` projects them to the screen and takes the nearest to the pointer within the larger of a
+small radius and the mover's own size on screen. It does not cast a ray at the instanced meshes: a walker is a few
+pixels tall, and an instance number says nothing about who it is.
+
+Turning and zooming leave a follow alone, so a resident can be looked at from any side. Moving the view (a pan, a
+pan key, reset) or `Esc` lets go. The link from **Share this moment** carries `follow=<resident>`, and a page opened
+with it starts with the camera on them.
+
 ## Seeking
 
 To draw tick `T`:
@@ -666,6 +737,41 @@ The history sessions are opened when the bar is first hovered, focused or
 touched, not at page load; the span is read again every 5 s only while the
 handle is dragged or the past is shown, and the sessions close after 30 s idle. The pill in the clock reads how long
 before the live tip the city on screen is, in city time.
+
+### City stats
+
+The stats panel shows the residents, who is on the road and the buildings by kind for the tick on screen. They are read
+from the folded state the scene is drawn from, never from a separate feed, so a scrub, a rewind or a seek changes them
+with the picture. `web/src/stats.ts` does the counting.
+
+| Number             | Where it comes from                                                                                                                                              |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Residents          | The residents every district's keyframe lists, added up whenever every district has a keyframe of one tick. Nobody moves in or out, so the total stays the same. |
+| On the road        | Residents with a trip that has left by the tick on screen and not yet arrived, split into cars and walkers by vehicle kind.                                      |
+| Buildings, by kind | The generated city's lots, changed by the lots the state says differ from it. Trees, plaza props and chimneys are not counted.                                   |
+
+A trip is on the road from its `depart` tick up to, but not including, its arrival tick. The arrival is known when the
+`trip` event is folded, from the rebuilt journey. A trip that left before the state's first record has no `trip`
+event, so it comes from the keyframe, which lists every resident on the road, and ends at its `arrived` event. That is
+what makes the count right straight after a seek. A seek folds one district's records and then the next's, and an
+arrival is in the district the traveller reaches, not the one the keyframe names them in, so an `arrived` event the
+state cannot place yet is kept until the keyframe that needs it is folded. The page draws such a car only from the resident's next trip (see
+[The live view](#the-live-view)), but it counts it.
+
+The state can hold records a tick or two ahead of the one drawn, so the count is asked for the drawn tick and ignores
+trips that leave after it. The panel reads the numbers a few times a second, not every frame.
+
+`web/src/stats.test.ts` follows the sim's own log of a morning (07:00 to 09:00, four districts) and compares the
+page's count with what the sim says was on the road at every tick, whether the state is folded from the start, holds
+records ahead of the tick, or starts at a keyframe as a seek does. The fixture, `web/src/stats-fixture.json`, is
+written by a test in `sim/src/world/tests.rs`, which fails when the file is out of date:
+
+```sh
+METRO_WRITE_FIXTURE=1 cargo test -p felix-metro-sim the_stats_fixture
+```
+
+Residents by activity (at home, at work, asleep) are not shown: only keyframes carry them, once an hour, and the events
+between them do not say where a resident is going to stay.
 
 ## Building
 
@@ -820,14 +926,14 @@ anything is built inside it.
 ## Risks, and what this surfaces in Felix
 
 - **Interpolation drift.** A car drawn by interpolation can disagree with where the sim thinks it is if the sim changes its plan without a `replan`. Every change of plan is an event, and the client trusts the log over its own guess.
-- **Retention.** History is bounded by one broker's disk. At 1 GB a day that is weeks, but tiered storage that Felix can read back would make it unbounded.
+- **Retention.** History is bounded by one broker's disk. At 1 GB a day that is weeks, but tiered storage that Felix can read back would make it unbounded. Until then the dev stack (`dev/seed.mjs`) keeps each stream for 7 days or 1 GiB, whichever is reached first, and everything older is gone, so a page asked for an older tick says the log no longer holds it.
 - **Scope.** No feature that does not serve one of the five demonstrations or the look.
 
 **Felix gaps this design runs into**
 
 1. **The page does not use the gateway's time lookup yet.** felix-gateway 0.8.0 exposes `offset_for_time` behind its `time` feature, but the page still estimates and corrects when it seeks. Using it makes a seek one lookup per district.
 2. **Per-shard subscribe through the gateway.** Done: the gateway's `read` and `subscribe` take a shard, and the page subscribes to each district's shard (`live.ts`). Kept here because it was a gap when the design was written.
-3. **Tiered storage has no read path.** Offloaded segments cannot be read back, so history older than local retention is gone.
+3. **Tiered storage has no read path.** Offloaded segments cannot be read back, so history older than local retention is gone. Felix tracks the work in [felix#172](https://github.com/GetFelix/felix/issues/172) (offload and cold-tier reads); this project does not enable tiered storage until reads work.
 4. **A commit is not idempotent.** A retried tick can land twice; readers dedupe on `(epoch, district, tick)`.
 
 **Open questions**
