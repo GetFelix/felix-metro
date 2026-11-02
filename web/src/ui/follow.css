@@ -72,3 +72,56 @@
   background: var(--cyan-wash);
   color: var(--text);
 }
+
+.follow .day-nav {
+  display: grid;
+  grid-template-columns: 28px 1fr 28px;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+}
+.follow .day-nav h3 {
+  margin: 0;
+  text-align: center;
+}
+.follow .day-nav .icon-button {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-m);
+}
+.follow .day-nav .icon-button[aria-disabled='true'] {
+  opacity: 0.35;
+  pointer-events: none;
+}
+.follow .log li {
+  padding: 0;
+}
+.follow .log button {
+  display: flex;
+  flex: 1;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: 3px var(--space-2);
+  border: 0;
+  border-radius: var(--radius-s);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.follow .log button:hover {
+  background: var(--cyan-wash);
+}
+.follow .log button:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: -2px;
+}
+.follow .note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+.follow .note:empty {
+  display: none;
+}
