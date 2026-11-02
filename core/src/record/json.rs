@@ -190,6 +190,23 @@ fn event(out: &mut String, e: &Event) {
             }
             out.push(']');
         }
+        Event::Policy { settings } => {
+            out.push_str("{\"type\":\"policy\",\"settings\":[");
+            for (n, s) in settings.iter().enumerate() {
+                if n > 0 {
+                    out.push(',');
+                }
+                match s.changed {
+                    Some(tick) => {
+                        let _ = write!(out, "{{\"value\":{},\"changed\":{tick}}}", s.value);
+                    }
+                    None => {
+                        let _ = write!(out, "{{\"value\":{},\"changed\":null}}", s.value);
+                    }
+                }
+            }
+            out.push(']');
+        }
     }
     out.push('}');
 }
@@ -275,6 +292,12 @@ pub(super) fn command(c: &CommandRecord) -> String {
             let _ = write!(out, "{{\"type\":\"fork\",\"tick\":{tick},\"name\":");
             text(&mut out, name);
             out.push('}');
+        }
+        Command::Policy { kind, value } => {
+            let _ = write!(
+                out,
+                "{{\"type\":\"policy\",\"kind\":{kind},\"value\":{value}}}"
+            );
         }
     }
     out.push('}');

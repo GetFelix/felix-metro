@@ -7,7 +7,7 @@
 
 use std::{cmp::Reverse, collections::BinaryHeap};
 
-use crate::{City, Door, record::Leg};
+use crate::{City, Door, Segment, SegmentClass, record::Leg};
 
 #[cfg(test)]
 mod tests;
@@ -28,20 +28,43 @@ const FASTEST_MS_PER_TILE: u64 = 666;
 
 /// How many vehicles were on each segment last tick, by segment id.
 #[derive(Clone, Copy, Debug)]
-pub struct Congestion<'a>(&'a [u16]);
+pub struct Congestion<'a> {
+    counts: &'a [u16],
+    /// The most a car may drive, in percent of the road's speed, on an avenue and on a street.
+    limits: [u8; 2],
+}
 
 impl<'a> Congestion<'a> {
     /// An empty city: every segment at full speed.
-    pub const FREE: Congestion<'static> = Congestion(&[]);
+    pub const FREE: Congestion<'static> = Congestion {
+        counts: &[],
+        limits: [100; 2],
+    };
 
     pub fn new(counts: &'a [u16]) -> Self {
-        Self(counts)
+        Self {
+            counts,
+            limits: [100; 2],
+        }
     }
 
-    fn percent(&self, segment: u32, length: u16) -> u32 {
-        let count = u32::from(self.0.get(segment as usize).copied().unwrap_or(0));
-        let room = CARS_PER_TILE * u32::from(length);
-        (100 * room / (room + count)).max(MIN_PERCENT)
+    /// The same counts with speed limits, in percent of each class's speed.
+    pub fn with_limits(self, avenue: u8, street: u8) -> Self {
+        Self {
+            limits: [avenue, street],
+            ..self
+        }
+    }
+
+    fn percent(&self, segment: u32, seg: &Segment) -> u32 {
+        let count = u32::from(self.counts.get(segment as usize).copied().unwrap_or(0));
+        let room = CARS_PER_TILE * u32::from(seg.length);
+        let jam = (100 * room / (room + count)).max(MIN_PERCENT);
+        let limit = match seg.class {
+            SegmentClass::Avenue => self.limits[0],
+            SegmentClass::Street => self.limits[1],
+        };
+        jam.min(u32::from(limit))
     }
 }
 
@@ -220,7 +243,7 @@ fn leg_ms(city: &City, segment: u32, milli: u32, cong: &Congestion, mode: Mode) 
     match mode {
         Mode::Walk => u64::from(milli) * 1000 / u64::from(WALK_SPEED),
         Mode::Drive => {
-            let percent = cong.percent(segment, seg.length);
+            let percent = cong.percent(segment, seg);
             u64::from(milli) * 100_000 / (u64::from(seg.speed) * u64::from(percent))
         }
     }
@@ -402,7 +425,7 @@ pub fn route(city: &City, from: Door, to: Door, depart: u32, cong: &Congestion) 
             let seg = &city.segments[segment as usize];
             let percent = match mode {
                 Mode::Walk => (WALK_SPEED * 100 / u32::from(seg.speed)).max(1),
-                Mode::Drive => cong.percent(segment, seg.length),
+                Mode::Drive => cong.percent(segment, seg),
             };
             tick += leg_ticks(seg.speed, percent, from.abs_diff(to));
             TripLeg {
