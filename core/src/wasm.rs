@@ -50,12 +50,18 @@ pub fn decode_record(bytes: &[u8]) -> Result<String, JsError> {
     crate::record::decode_json(bytes).map_err(|e| JsError::new(&e.to_string()))
 }
 
+/// How many cities with roads laid a [`Metro`] keeps, the generated one included.
+const LAID: usize = 4;
+
 /// A city and its residents, for turning `trip` events into positions.
 #[wasm_bindgen]
 pub struct Metro {
     /// The city as generated, which the built roads are laid on again each time they change.
     generated: crate::City,
     city: Rc<crate::City>,
+    /// The last few cities laid, by their road list. The live city and a moment on screen take turns with one
+    /// `Metro`, so going back to a list is a lookup rather than a new copy.
+    laid: Vec<(Vec<u32>, Rc<crate::City>)>,
     places: crate::Places,
     residents: HashMap<u32, Option<crate::Resident>>,
 }
@@ -67,9 +73,11 @@ impl Metro {
     pub fn new(seed: &str, districts_per_side: u16) -> Result<Metro, JsError> {
         let city = city(seed, districts_per_side)?;
         let places = crate::Places::new(&city);
+        let city = Rc::new(city);
         Ok(Metro {
-            generated: city.clone(),
-            city: Rc::new(city),
+            generated: (*city).clone(),
+            laid: vec![(Vec::new(), Rc::clone(&city))],
+            city,
             places,
             residents: HashMap::new(),
         })
@@ -101,6 +109,10 @@ impl Metro {
     /// do not fit the city.
     #[wasm_bindgen(js_name = setRoads)]
     pub fn set_roads(&mut self, roads: &[u32]) -> Result<(), JsError> {
+        if let Some((_, city)) = self.laid.iter().find(|(r, _)| r == roads) {
+            self.city = Rc::clone(city);
+            return Ok(());
+        }
         let built: Vec<crate::BuiltRoad> = roads
             .chunks_exact(4)
             .map(|r| crate::BuiltRoad {
@@ -114,6 +126,10 @@ impl Metro {
         city.restore_roads(&built)
             .map_err(|e| JsError::new(&e.to_string()))?;
         self.city = Rc::new(city);
+        if self.laid.len() == LAID {
+            self.laid.remove(1);
+        }
+        self.laid.push((roads.to_vec(), Rc::clone(&self.city)));
         Ok(())
     }
 

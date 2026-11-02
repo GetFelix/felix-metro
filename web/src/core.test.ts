@@ -112,6 +112,19 @@ describe('built roads in WebAssembly', () => {
     expect(metro.cityHash()).toBe(generated);
   });
 
+  it('goes back to roads it laid before as they were', () => {
+    const metro = new Metro('harbor', 2);
+    metro.setRoads(Uint32Array.from([104, 6, 7, 0]));
+    const added = metro.cityHash();
+    metro.setRoads(Uint32Array.from([104, 6, 7, 1]));
+    const removed = metro.cityHash();
+    expect(removed).not.toBe(added);
+    metro.setRoads(Uint32Array.from([104, 6, 7, 0]));
+    expect(metro.cityHash()).toBe(added);
+    metro.setRoads(Uint32Array.from([104, 6, 7, 1]));
+    expect(metro.cityHash()).toBe(removed);
+  });
+
   it('numbers a road after a gap: core fills a segment it has not been told of', () => {
     const metro = new Metro('harbor', 2);
     expect(() => metro.setRoads(Uint32Array.from([105, 6, 7, 0]))).not.toThrow();

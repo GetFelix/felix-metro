@@ -142,7 +142,9 @@ const refused = new WeakMap<Trips, Uint32Array>();
  */
 export function syncRoads(trips: Trips, roads: Uint32Array): boolean {
   const held = given.get(trips) ?? NO_ROADS;
-  if (held === roads || (held.length === 0 && roads.length === 0) || !trips.setRoads) return true;
+  // Two states with the same roads, such as the live city and a moment shortly before, share core's city.
+  const same = held === roads || (held.length === roads.length && held.every((n, i) => n === roads[i]));
+  if (same || !trips.setRoads) return true;
   // A list core turned down is not tried again for every trip; core keeps the roads it had.
   if (refused.get(trips) === roads) return false;
   try {
@@ -154,6 +156,17 @@ export function syncRoads(trips: Trips, roads: Uint32Array): boolean {
   }
   given.set(trips, roads);
   return true;
+}
+
+/** Roads by segment as `Metro.setRoads` takes them. */
+function listRoads(roads: ReadonlyMap<number, BuiltRoad>): Uint32Array {
+  const ids = [...roads.keys()].sort((x, y) => x - y);
+  const out = new Uint32Array(ids.length * 4);
+  ids.forEach((id, i) => {
+    const r = roads.get(id)!;
+    out.set([id, r.a, r.b, r.change === ROAD_REMOVED ? 1 : 0], i * 4);
+  });
+  return out;
 }
 
 /** One resident's trip, from the tick it leaves to the tick it arrives. */
@@ -202,6 +215,15 @@ export class CityState {
   private readonly roadDistrict = new Map<number, number>();
   /** {@link builtRoads}, until the roads change. */
   private roadList: Uint32Array | null = NO_ROADS;
+  /** Roads the records of a fold tell of before it takes them; see {@link foresee}. */
+  private readonly ahead = new Map<number, BuiltRoad>();
+  /** {@link routeRoads}, until the roads change. */
+  private routeList: Uint32Array | null = null;
+  /**
+   * The tick of each resident's newest `replan`, with its epoch. A seek takes one district's records at a time, so the
+   * `trip` event a replan took over can be folded after it.
+   */
+  private readonly replans = new Map<number, { epoch: number; tick: number }>();
   /** The newest tick of each district. */
   readonly ticks: number[];
   /** The sim epoch of each district's newest record. */
@@ -309,7 +331,15 @@ export class CityState {
     for (const e of record.events) {
       if (e.type === 'trip') {
         const t = e;
-        syncRoads(this.trips, this.builtRoads());
+        const replanned = this.replans.get(t.resident);
+        if (replanned?.epoch === record.epoch && t.depart < replanned.tick) {
+          // The replan's route is the one to draw. The trip still counts from when it left.
+          const covered = this.spells.get(t.resident)?.some((s) => s.from <= replanned.tick && s.to > replanned.tick);
+          const to = this.voyages.get(t.resident)?.journey.arrive() ?? Infinity;
+          if (!covered) this.depart(t.resident, { vehicle: t.vehicle, from: t.depart, to });
+          continue;
+        }
+        syncRoads(this.trips, this.routeRoads());
         const journey = this.trips.trip(t.resident, t.vehicle, t.depart, Uint32Array.from(t.route.flat()));
         this.depart(t.resident, { vehicle: t.vehicle, from: t.depart, to: journey?.arrive() ?? Infinity });
         if (!journey) {
@@ -320,7 +350,7 @@ export class CityState {
         if (old) this.finishing.push(old);
         this.voyages.set(t.resident, { resident: t.resident, vehicle: t.vehicle, depart: t.depart, journey });
       } else if (e.type === 'replan') {
-        this.replan(e, record.tick);
+        this.replan(e, record.tick, record.epoch);
       } else if (e.type === 'arrived') {
         this.arrive(e.resident, record.tick);
       } else if (e.type === 'built' || e.type === 'demolished') {
@@ -349,8 +379,11 @@ export class CityState {
   }
 
   // The old trip may run along a road that is gone, so it stops being drawn now rather than when it would have arrived.
-  private replan(e: ReplanEvent, tick: number): void {
+  private replan(e: ReplanEvent, tick: number, epoch: number): void {
     const old = this.voyages.get(e.resident);
+    // Folded after the resident's next trip, which another district's records held: that trip is the one to draw.
+    if (old && old.depart > tick) return;
+    this.replans.set(e.resident, { epoch, tick });
     if (old) {
       this.voyages.delete(e.resident);
       this.end(old);
@@ -361,7 +394,7 @@ export class CityState {
       this.finishing.splice(i, 1);
       this.end(v);
     }
-    syncRoads(this.trips, this.builtRoads());
+    syncRoads(this.trips, this.routeRoads());
     const journey = this.trips.replan?.(e.resident, e.vehicle, tick, e.node, Uint32Array.from(e.route.flat()));
     if (!journey) {
       this.unplaced++;
@@ -378,14 +411,32 @@ export class CityState {
    * each in segment order. The same array until the roads change.
    */
   builtRoads(): Uint32Array {
-    if (this.roadList) return this.roadList;
-    const ids = [...this.roads.keys()].sort((x, y) => x - y);
-    const out = new Uint32Array(ids.length * 4);
-    ids.forEach((id, i) => {
-      const r = this.roads.get(id)!;
-      out.set([id, r.a, r.b, r.change === ROAD_REMOVED ? 1 : 0], i * 4);
-    });
-    return (this.roadList = out);
+    return (this.roadList ??= listRoads(this.roads));
+  }
+
+  /**
+   * Learn the roads `records` tell of before taking them. A seek folds one district's records at a time, and a trip
+   * can run on a road whose district comes later; core resolves it once it knows that road. Only trips use these:
+   * {@link roads} and {@link builtRoads} still follow the records taken.
+   */
+  foresee(records: Iterable<TickRecord>): void {
+    for (const r of records) {
+      for (const [segment, change, a, b] of r.keyframe?.roads ?? []) this.ahead.set(segment, { change, a, b });
+      for (const e of r.events)
+        if (e.type === 'roadwork') this.ahead.set(e.segment, { change: e.change, a: e.a, b: e.b });
+    }
+    this.routeList = null;
+  }
+
+  // The roads a trip is resolved with: those taken, and those foreseen that are not yet. A route keeps naming a
+  // segment after it is taken away, so a foreseen road is given as it ends up.
+  private routeRoads(): Uint32Array {
+    if (this.routeList) return this.routeList;
+    const missing = [...this.ahead.keys()].filter((s) => !this.roads.has(s));
+    if (missing.length === 0) return (this.routeList = this.builtRoads());
+    return (this.routeList = listRoads(
+      new Map([...this.roads, ...missing.map((s) => [s, this.ahead.get(s)!] as const)]),
+    ));
   }
 
   // Remember when a lot changed, for the animation. A demolition during a rise comes down from the height reached.
@@ -564,6 +615,8 @@ export class CityState {
         this.end(v);
       }
     }
+    for (const [resident, r] of this.replans)
+      if (this.voyages.get(resident)?.depart !== r.tick) this.replans.delete(resident);
   }
 
   private end(voyage: Voyage): void {
@@ -614,6 +667,7 @@ export class CityState {
 
   private roadsChanged(): void {
     this.roadList = null;
+    this.routeList = null;
     this.onRoads?.();
   }
 

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { CityState, type TickRecord, type Trips } from './city';
+import { CityState, type Journey, type TickEvent, type TickRecord, type Trips } from './city';
 import { GatewayError, type Page, type StateValue } from './gateway';
 import type { City } from './layout';
 
@@ -9,6 +9,7 @@ vi.mock('./core/felix_metro_core.js', () => ({
 }));
 vi.mock('./auth', () => ({ signIn: async () => 'token' }));
 const { Seeker, SeekError, fold, foldMore, continues, tryFoldMore } = await import('./seek');
+type SeekResult = import('./seek').SeekResult;
 
 const city = { lots: [] } as unknown as City;
 const trips: Trips = { trip: () => undefined };
@@ -129,6 +130,70 @@ const folded = async (s: InstanceType<typeof Seeker>, tick: number, districts = 
   fold(state, await s.seek(tick));
   return state;
 };
+
+describe('a fold of roads and replans across districts', () => {
+  const lots = { lots: [0, 1].map((id) => ({ id, district: id })) } as unknown as City;
+  const record = (district: number, tick: number, events: TickEvent[] = []): TickRecord => ({
+    kind: 'tick',
+    epoch: 1,
+    district,
+    tick,
+    speed: 4,
+    keyframeOffset: 0,
+    wallUs: 0,
+    keyframe: tick === 240 ? { buildings: [], roads: [], residents: [] } : null,
+    events,
+  });
+  const journey = (arrive: number): Journey => ({ arrive: () => arrive, positionAt() {}, lots() {}, free() {} });
+  /** Core, with a trip on segment 104 placed only once core has that road. */
+  const metro = () => {
+    let roads = new Uint32Array(0);
+    return {
+      trip: (_r: number, _v: number, depart: number, route: Uint32Array) =>
+        route[0] === 104 && roads[0] !== 104 ? undefined : journey(depart + 30),
+      replan: (_r: number, _v: number, depart: number) => journey(depart + 50),
+      setRoads: (r: Uint32Array) => void (roads = r),
+    } satisfies Trips;
+  };
+  const result = (zero: TickRecord[], one: TickRecord[]): SeekResult => ({
+    tick: zero.at(-1)!.tick,
+    requested: zero.at(-1)!.tick,
+    exact: true,
+    districts: [zero, one].map((records) => ({ records, offset: 0, before: [] })),
+  });
+  /** Each district's records from the keyframe at 240 to `to`, with `events` at the ticks given. */
+  const district = (d: number, to: number, events: Record<number, TickEvent[]>) =>
+    Array.from({ length: to - 239 }, (_, i) => record(d, 240 + i, events[240 + i] ?? []));
+
+  it('places a trip on a road of a district folded after it', () => {
+    const road: TickEvent = { type: 'roadwork', segment: 104, change: 2, a: 6, b: 7 };
+    const trip: TickEvent = { type: 'trip', resident: 1, vehicle: 1, depart: 250, route: [[104, 100]] };
+    const state = new CityState(lots, metro(), 2);
+    fold(state, result(district(0, 260, { 250: [trip] }), district(1, 260, { 245: [road] })));
+    expect(state.unplaced).toBe(0);
+    expect(state.voyages.get(1)?.depart).toBe(250);
+    expect([...state.builtRoads()]).toEqual([104, 6, 7, 0]);
+  });
+
+  it('keeps a replan over the trip it took over when the trip is folded after it', () => {
+    const trip: TickEvent = { type: 'trip', resident: 1, vehicle: 1, depart: 250, route: [[3, 100]] };
+    const replan: TickEvent = { type: 'replan', resident: 1, vehicle: 1, node: 12, route: [[3, 100]] };
+    const state = new CityState(lots, metro(), 2);
+    fold(state, result(district(0, 260, { 255: [replan] }), district(1, 260, { 250: [trip] })));
+    expect([...state.active()].map((v) => [v.depart, v.journey.arrive()])).toEqual([[255, 305]]);
+    expect(state.onRoad(260).cars).toBe(1);
+    expect(state.onRoad(300).cars).toBe(1);
+    expect(state.unplaced).toBe(0);
+  });
+
+  it('keeps the next trip over a replan of the one before when the replan is folded after it', () => {
+    const next: TickEvent = { type: 'trip', resident: 1, vehicle: 1, depart: 258, route: [[3, 100]] };
+    const replan: TickEvent = { type: 'replan', resident: 1, vehicle: 1, node: 12, route: [[3, 100]] };
+    const state = new CityState(lots, metro(), 2);
+    fold(state, result(district(0, 260, { 258: [next] }), district(1, 260, { 250: [replan] })));
+    expect([...state.active()].map((v) => v.depart)).toEqual([258]);
+  });
+});
 
 describe('seek into a construction window', () => {
   /** Lot 9 went up at tick 238, two ticks before hour one's keyframe, which lists it finished. */

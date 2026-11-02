@@ -366,7 +366,7 @@ describe('CityState', () => {
     it('also ends an earlier trip still being drawn', () => {
       const state = new CityState(city, replanning(), 2);
       state.apply(record(0, 5, [trip(1, 5)]));
-      state.apply(record(0, 6, [trip(1, 14)]));
+      state.apply(record(0, 6, [trip(1, 6)]));
       expect([...state.active()]).toHaveLength(2);
       state.apply(record(0, 7, [replan(1)]));
       expect([...state.active()].map((v) => v.depart)).toEqual([7]);
@@ -459,5 +459,13 @@ describe('syncRoads', () => {
     // The good list is still what core holds, so going back to it costs nothing.
     expect(syncRoads(metro, good)).toBe(true);
     expect(asked).toBe(2);
+  });
+
+  it('does not lay the roads again for another list with the same roads', () => {
+    let asked = 0;
+    const metro: Trips = { trip: () => undefined, setRoads: () => void asked++ };
+    expect(syncRoads(metro, Uint32Array.from([104, 6, 7, 0]))).toBe(true);
+    expect(syncRoads(metro, Uint32Array.from([104, 6, 7, 0]))).toBe(true);
+    expect(asked).toBe(1);
   });
 });
