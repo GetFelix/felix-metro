@@ -4,12 +4,14 @@ import { HINT_TEXT } from './hint';
 import { SHORTCUTS } from './keys';
 import { SHARE_COPIED, SHARE_LABEL, SHARE_NONE } from './share';
 import { CHOICES } from './settings';
+import { UNAVAILABLE_TEXT } from './sound';
 
 // docs/ui.md sets the copy rules: plain words, none of the system's own, and no em dashes.
 const JARGON = /\b(logs?|streams?|offsets?|ticks?|shards?|keyframes?|districts?)\b/i;
 
 const words = [
   HINT_TEXT,
+  UNAVAILABLE_TEXT,
   SHARE_LABEL,
   SHARE_COPIED,
   SHARE_NONE,

@@ -160,7 +160,8 @@ export interface TimelineHandlers {
   /** The handle was put at `tick` by the pointer (`drag` while it moves, `end` on release) or by Home (`key`). */
   onMove(tick: number, phase: 'drag' | 'end' | 'key'): void;
   /** An arrow key or page key asked for a step. */
-  onStep(direction: 1 | -1, big: boolean): void;
+  /** `repeat` is true for the presses a held key makes after the first. */
+  onStep(direction: 1 | -1, big: boolean, repeat: boolean): void;
   /** End, or a click on the live tip. */
   onLive(): void;
   /** The bar is in use (pointer over it, focus in it, or a drag), or no longer is. */
@@ -279,10 +280,10 @@ export function createTimeline(root: HTMLElement, handlers: TimelineHandlers) {
     // The keys act on the live span, a drag on the one it began with; they do not mix.
     if (dragging) return;
     const big = e.shiftKey;
-    if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') handlers.onStep(-1, big);
-    else if (e.key === 'ArrowRight' || e.key === 'ArrowUp') handlers.onStep(1, big);
-    else if (e.key === 'PageDown') handlers.onStep(-1, true);
-    else if (e.key === 'PageUp') handlers.onStep(1, true);
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') handlers.onStep(-1, big, e.repeat);
+    else if (e.key === 'ArrowRight' || e.key === 'ArrowUp') handlers.onStep(1, big, e.repeat);
+    else if (e.key === 'PageDown') handlers.onStep(-1, true, e.repeat);
+    else if (e.key === 'PageUp') handlers.onStep(1, true, e.repeat);
     else if (e.key === 'Home') handlers.onMove(hold.current.oldest, 'key');
     else if (e.key === 'End') handlers.onLive();
     else return;

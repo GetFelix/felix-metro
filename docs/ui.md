@@ -1,9 +1,9 @@
 # The page overlay
 
 The overlay is everything on the page that is not the city: the Felix Metro chip, the clock, the timeline,
-the settings button and the panels it opens. This page says what it does, where it lives in the code, and how
-to add to it. It also holds the rules (colour, type, motion and wording) that keep new controls looking like
-the ones already there.
+the settings and sound buttons and the panels the first one opens. This page says what it does, where it lives
+in the code, and how to add to it. It also holds the rules (colour, type, motion and wording) that keep new
+controls looking like the ones already there.
 
 | Day, with the LIVE pill                                  | Night, with the settings sheet                                         |
 | -------------------------------------------------------- | ---------------------------------------------------------------------- |
@@ -18,6 +18,8 @@ the ones already there.
   choosing Automatic forgets it. [Quality tiers](art.md#quality-tiers) says what each tier changes.
 - **See every key.** Press `?`, or open **Keyboard shortcuts** in the settings sheet. Press `Esc` to close
   the sheet. Focus goes back to where it was.
+- **Turn the sound on.** The speaker button next to the settings button, or `M`, switches the ambient sound. It is off
+  until you do. See [Sound](#sound).
 - **Get a hint on a first visit.** When the timeline first appears, a line above it says "Drag the timeline to go
   back in time". It goes away on your first click, key press or scroll, or after a few seconds, and it is not
   shown again in that browser.
@@ -40,7 +42,7 @@ These page parameters change the overlay:
 | Parameter        | Effect                                                                                     |
 | ---------------- | ------------------------------------------------------------------------------------------ |
 | `?tier=low`      | Forces a quality for this visit (`low`, `medium` or `high`). It overrides the saved choice |
-| `?ui=0`          | Hides the overlay: no chips, no settings button, no `?` key and no hint                    |
+| `?ui=0`          | Hides the overlay: no chips, no buttons, no `?` or `M` key and no hint                     |
 | `?capture&trace` | The same as `?ui=0` for the controls and the hint, since a clip must draw as is            |
 | `?attract=30`    | Seconds with no input before the camera turns on its own (60 by default, `0` for never)    |
 | `?live=0`        | Draws the city with no gateway; the timeline never appears, so there is no hint            |
@@ -60,6 +62,7 @@ framework. Each part has one file of each kind:
 | Timeline bar and its moments     | `web/src/timeline.ts`, `web/src/marker-row.ts`                     | `web/src/ui/timeline.css` |
 | Settings sheet and key list      | `web/src/ui/shell.ts`, `settings.ts`, `keys.ts`, `sheet.ts`        | `web/src/ui/sheet.css`    |
 | Share button, photo mode         | `web/src/ui/share.ts`, `web/src/ui/photo.ts`, `web/src/moments.ts` | `web/src/ui/photo.css`    |
+| Sound button                     | `web/src/ui/sound.ts`                                              | `web/src/ui/kit.css`      |
 | Hint and messages                | `web/src/ui/hint.ts`, `web/src/ui/toast.ts`                        | `web/src/ui/toast.css`    |
 | Frame times (`?hud`)             | `web/src/ui/hud.ts`                                                | `web/src/ui/kit.css`      |
 
@@ -110,6 +113,55 @@ flowchart LR
 The `?` key is ignored while a text field, text area or editable text has focus, so typing a question mark
 still works there. `keys.test.ts` reads the timeline's key handler and fails if it handles a key that has no
 row, so the list cannot fall behind the code it describes.
+
+### Sound
+
+The sound is three small modules, each with one job:
+
+| File                        | What it does                                                                           |
+| --------------------------- | -------------------------------------------------------------------------------------- |
+| `web/src/soundscape-mix.ts` | Pure numbers: how loud traffic and crickets are at an hour, and when a whoosh is due   |
+| `web/src/soundscape.ts`     | The Web Audio graph: filtered noise for traffic, pulsed tones for crickets, the whoosh |
+| `web/src/ui/sound.ts`       | The button, the `M` key and the remembered choice                                      |
+
+There are no audio files. Traffic is brown noise through a low-pass filter with a slow swell, crickets are two pulsed
+tones, and the whoosh is a burst of noise swept from high to low. Nothing needs a licence or a credit.
+
+The mix is a function of the city's hour and nothing else. It uses the same dusk and dawn curve as the sky (`night` in
+`web/src/daylight.ts`), so the crickets come in as the lamps do and traffic never cuts in or out. `mixAt(hour)` is unit
+tested without a browser.
+
+A browser only lets a page start audio from a click or key press, so the page makes no `AudioContext` until the sound
+button, or `M`, is first used. The context is then made once and kept; turning the sound off fades it out and
+suspends it.
+
+If the browser has no `AudioContext`, or refuses to make one, `enable()` returns false. The button stays off and a
+short note says "Sound is not available in this browser". Nothing is logged to the console. The next press tries again.
+
+```mermaid
+flowchart LR
+    CLICK["Button click or M"] -->|first time| MAKE["Make the AudioContext"]
+    CLICK -->|after that| FADE["Fade in or out"]
+    MAKE -->|"throws or missing"| NOTE["Button stays off,<br/>short note"]
+    MAKE --> FADE
+    HOUR["City hour<br/>(clock, slider, rewind)"] -->|setHour| MIX["mixAt: traffic and crickets"]
+    MIX --> FADE
+    REWIND["Rewind starts, or a scrub<br/>into the past"] -->|"at most every 1.5 s"| WHOOSH["Whoosh"]
+```
+
+The whoosh plays when a backward playback starts (not when it speeds up or slows down) and when the timeline is moved
+to an earlier moment, once the earlier moment is on screen. A drag or a held arrow key plays it once, at its first move
+into the past. It is also limited to one every 1.5 seconds, and a seek that fails is silent.
+
+Photo mode (`H`) hides the sound button with the other controls, and `M` still works there. If the browser blocks the sound in photo mode, nothing is said, since a note would wait out of sight and show up afterwards.
+
+The choice is kept in local storage under `felix-metro.sound`; blocked storage reads as off. If it was left on, the
+button shows as on after a reload and the sound starts at the first click or key press, since the browser allows
+nothing sooner. Shift, Ctrl, Alt, Cmd and `Esc` do not count: a browser does not accept them as a go-ahead, so the sound
+waits for the next press. Using the button or `M` first switches it off instead.
+
+A hidden tab is suspended and wakes when you return, and a context the system interrupted (iOS does this) is resumed
+at the same moment.
 
 ### The clock
 
@@ -218,11 +270,11 @@ in the overlay's files or in this page.
 
 ## Checking a change
 
-Run the unit tests for the data-driven parts: the key list, the hint's memory and the quality choice.
+Run the unit tests for the data-driven parts: the key list, the hint's memory, the quality choice and the sound.
 
 ```sh
 cd web
-npx vitest run src/ui src/quality.test.ts
+npx vitest run src/ui src/quality.test.ts src/soundscape
 ```
 
 Then check the page itself. Install the test browser once with `npx playwright install chromium`. Serve the page in
@@ -238,10 +290,15 @@ cd web
 node scripts/check-ui.mjs http://localhost:5173/ /tmp/ui
 ```
 
-`check-ui.mjs` drives the page with the keyboard (open the sheet, pick a quality, read the key list, `Esc`),
-checks that the hint is shown once and never under `?ui=0` or `?capture`, that the clock rolls and holds still
-with reduced motion, that `H` hides every control, that `?cam` starts the camera where a link says, that attract
-mode turns the camera and stops on a mouse move, and that nothing overflows or collides at 360px, even with the city picker's arrow showing
-and the Reconnecting pill. It writes screenshots of the shell, the
-sheet, the key list and the hint, by day and night, at 1280px and 360px wide, into the folder you name. Look at
-them: the checks do not know whether the page looks right.
+`check-ui.mjs` drives the page with the keyboard (open the sheet, pick a quality, read the key list, `Esc`). It checks that:
+
+- the hint is shown once, and never under `?ui=0` or `?capture`;
+- no audio context is made before the sound button is used, the button and `M` switch the sound, and blocked audio
+  gives a note and no console error;
+- the clock rolls, and holds still with reduced motion;
+- `H` hides every control, `?cam` starts the camera where a link says, and attract mode turns the camera and stops on a
+  mouse move;
+- nothing overflows or collides at 360px, even with the city picker's arrow showing and the Reconnecting pill.
+
+It writes screenshots of the shell, the sheet, the key list and the hint, by day and night, at 1280px and 360px wide,
+into the folder you name. Look at them: the checks do not know whether the page looks right.
