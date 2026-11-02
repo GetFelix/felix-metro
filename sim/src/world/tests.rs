@@ -615,7 +615,7 @@ pub(super) fn restored(city: &City, ticks: &[Vec<DistrictTick>], at: u32) -> Wor
         .events
         .iter()
         .find_map(Policy::from_event)
-        .expect("a keyframe tick writes the policies");
+        .unwrap_or_else(Policy::new);
     World::restore(
         city.clone(),
         at,

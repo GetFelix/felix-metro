@@ -466,7 +466,7 @@ notice that on the next scored day, which is what makes the limits a trade.
   12 and starts no cooldown. A policy that changed less than a city day ago (5,760 ticks) is refused with result 11.
   The cooldown is per policy, so changing one does not hold the others. A refusal changes nothing.
 - **The event.** A `policy` command that applies records the new settings in a `policy` event in district 0, and every
-  keyframe tick carries the same event. It holds each value and the tick of its last change, so the cooldown survives a
+  keyframe tick carries the same event once any policy has changed (a city that never changed one writes none). It holds each value and the tick of its last change, so the cooldown survives a
   restart. The page reads the newest one.
 - **Restart.** The restart takes the policies from the newest keyframe tick, then applies any `policy` event after
   it before stepping. A log from before policies starts with the usual hours and no limits.
@@ -481,7 +481,7 @@ notice that on the next scored day, which is what makes the limits a trade.
 The page lists the policies under the factions in the same folded panel, each with its value and the time it can change
 again from.
 
-Cost to the log: one `policy` event of about 10 bytes per keyframe tick.
+Cost to the log: nothing until a policy is first changed, then one `policy` event of a few bytes per keyframe tick (one per hour of city time).
 
 ### Commands and the registry
 
@@ -544,7 +544,7 @@ for every other command.
 | Result | Meaning                                                                                |
 | ------ | -------------------------------------------------------------------------------------- |
 | 0      | applied                                                                                |
-| 1      | not a command record                                                                   |
+| 1      | not a command record, or a value out of range                                          |
 | 2      | lot or node does not exist                                                             |
 | 3      | `build` on a lot that has a building                                                   |
 | 4      | `demolish` on a lot with nothing on it                                                 |

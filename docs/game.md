@@ -184,7 +184,7 @@ The numbers are placeholders until the economy is in the sim and measured.
 2. Money and the `ledger` event, shown as one number on the page (done; the timeline does not draw it yet).
 3. Factions: three satisfaction numbers from the log, their demands, and the recall
    warning with its countdown (done).
-4. Policy commands, two of them, with a cooldown (done).
+4. Policy commands (shop hours and a speed limit for each road class), with a cooldown (done).
 5. Goals and the first chapter, without forks: the player commits changes for real.
 6. Investigations, one or two, checked as a batch.
 7. Measure a fork's morning rush on one broker; then forks, what-ifs and policy

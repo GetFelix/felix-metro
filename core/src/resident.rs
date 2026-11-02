@@ -351,13 +351,20 @@ impl Resident {
                 let from = city.lots[from_lot as usize].door()?;
                 let to = city.lots[to_lot as usize].door()?;
                 let trip = Trip::from_route(city, from, to, depart, legs, mode)?;
+                // The trip left under the policy of its departure, which the keyframe's may have
+                // since raised, so the day comes from the unextended leave tick. A late close only
+                // delays a departure past it.
                 let due = [today.saturating_sub(1), today]
                     .into_iter()
-                    .map(|d| (self.leave_tick(block, d, late_close), d))
+                    .map(|d| (self.leave_tick(block, d, 0), d))
                     .filter(|&(t, _)| t <= depart)
                     .max();
+                let late = due.map_or(0, |(_, d)| self.leave_tick(block, d, late_close));
+                let left = due
+                    .map_or(0, |(t, _)| t)
+                    .max(if late <= depart { late } else { 0 });
                 Some(Matched {
-                    gap: depart - due.map_or(0, |(t, _)| t),
+                    gap: depart - left,
                     trip,
                     block,
                     day: due.map_or(today, |(_, d)| d),

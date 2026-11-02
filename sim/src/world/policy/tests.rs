@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
-use felix_metro_core::record::{Command, RESULT_APPLIED};
-use felix_metro_core::{Archetype, City, SegmentClass, TICKS_PER_DAY, TICKS_PER_HOUR};
+use felix_metro_core::record::{Command, Doing, RESULT_APPLIED};
+use felix_metro_core::{Activity, Archetype, City, SegmentClass, TICKS_PER_DAY, TICKS_PER_HOUR};
 
 use super::*;
 use crate::world::tests::restored;
@@ -176,10 +176,86 @@ fn a_world_restored_across_a_policy_change_steps_as_the_original_does() {
     }
 }
 
+#[test]
+fn a_world_restored_while_shopkeepers_drive_home_under_raised_hours_steps_as_the_original_does() {
+    // Hours are raised just after a shopkeeper leaves work, while they are on the road, and the restart is at the
+    // next keyframe.
+    let city = City::generate("harbor", 2).unwrap();
+    let world = World::new(city.clone());
+    let (id, leave, at) = world
+        .people
+        .iter()
+        .filter(|p| p.resident.archetype == Archetype::Shopkeeper)
+        .find_map(|p| {
+            let work = p
+                .resident
+                .schedule
+                .blocks
+                .iter()
+                .position(|b| b.activity == Activity::Work)?;
+            let leave = p.resident.leave_tick(work, 1, 0);
+            let at = (leave + 5).next_multiple_of(TICKS_PER_HOUR);
+            (at - leave < 40).then_some((p.resident.id, leave, at))
+        })
+        .expect("a shopkeeper leaves work shortly before a keyframe");
+    let steps = |world: &mut World, from: u32, to: u32| -> Vec<Vec<DistrictTick>> {
+        (from..to)
+            .map(|tick| {
+                if tick == leave + 5 {
+                    assert_eq!(set(world, POLICY_SHOP_HOURS, 1), RESULT_APPLIED);
+                }
+                world.step()
+            })
+            .collect()
+    };
+    let mut world = world;
+    let ticks = steps(&mut world, 0, at + 400);
+    let driving = ticks[at as usize]
+        .iter()
+        .flat_map(|d| d.keyframe.iter().flat_map(|k| &k.residents))
+        .any(|r| r.id == id && matches!(r.doing, Doing::Trip(_)));
+    assert!(driving, "resident {id} is not on the road at the keyframe");
+    let mut restored = restored(&city, &ticks, at);
+    let rest = steps(&mut restored, at + 1, at + 400);
+    for (n, step) in rest.iter().enumerate() {
+        let tick = at as usize + 1 + n;
+        assert!(*step == ticks[tick], "restored at {at}, tick {tick}");
+    }
+}
+
 fn world_policy_at(ticks: &[Vec<DistrictTick>], at: u32) -> Policy {
     ticks[at as usize][0]
         .events
         .iter()
         .find_map(Policy::from_event)
         .unwrap()
+}
+
+#[test]
+fn a_restored_event_cannot_hold_values_the_sim_divides_by() {
+    let mut settings = Policy::new().settings;
+    settings[POLICY_SHOP_HOURS].value = 200;
+    settings[POLICY_AVENUE_LIMIT].value = 0;
+    settings[POLICY_STREET_LIMIT].value = 255;
+    let policy = Policy::from_event(&Event::Policy { settings }).unwrap();
+    assert_eq!(policy.shop_hours(), 3);
+    assert_eq!(policy.limits(), (30, 100));
+}
+
+#[test]
+fn a_keyframe_tick_writes_the_policies_only_once_one_has_changed() {
+    let has_policy = |tick: &[DistrictTick]| {
+        tick[0]
+            .events
+            .iter()
+            .any(|e| Policy::from_event(e).is_some())
+    };
+    let mut world = harbor();
+    assert!(
+        !has_policy(&world.step()),
+        "the first keyframe tick is already past the default"
+    );
+    assert_eq!(set(&mut world, POLICY_STREET_LIMIT, 60), RESULT_APPLIED);
+    let ticks: Vec<_> = (0..TICKS_PER_HOUR).map(|_| world.step()).collect();
+    assert!(has_policy(ticks.last().unwrap()));
 }

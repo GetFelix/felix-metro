@@ -10,7 +10,7 @@ const usual = [
 
 describe('policyRows', () => {
   it('shows the usual hours and no limits for a city nobody has set', () => {
-    const rows = policyRows(event(...usual));
+    const rows = policyRows(event(...usual), 0);
     expect(rows.map((r) => [r.name, r.value, r.again])).toEqual([
       ['Shop hours', 'Usual', null],
       ['Avenue speed limit', 'No limit', null],
@@ -20,9 +20,14 @@ describe('policyRows', () => {
 
   it('says when a changed policy can change again', () => {
     // Set at 17:30 on day 1, so it can change from 17:30 on day 2.
-    const rows = policyRows(event({ value: 2, changed: 4200 }, { value: 60, changed: 100 }, usual[2]!));
+    const rows = policyRows(event({ value: 2, changed: 4200 }, { value: 60, changed: 100 }, usual[2]!), 5000);
     expect(rows[0]).toMatchObject({ value: '2 h later', again: 'Day 2, 17:30' });
     expect(rows[1]).toMatchObject({ value: '60% of their speed', again: 'Day 2, 00:25' });
+  });
+
+  it('stops mentioning a cooldown once it has ended', () => {
+    const rows = policyRows(event({ value: 2, changed: 4200 }, usual[1]!, usual[2]!), 4200 + 5760);
+    expect(rows[0]).toMatchObject({ value: '2 h later', again: null });
   });
 
   it('reads the clock like the page does', () => {

@@ -99,8 +99,9 @@ council, running totals included, from the newest keyframe tick.
 The mayor sets shop hours (0 to 3 hours later than usual) and a speed limit for avenues and for streets (30 to 100
 percent of the road's speed) with a `policy` command. Each can change once a city day. Later shop hours keep
 shopkeepers at work longer and raise shop tax; a limit caps how fast trips are planned and driven on that class of road.
-District 0 writes a `policy` event when one changes and on every keyframe tick, with the values and when each last
-changed, and a restart restores them. [docs/design.md](../docs/design.md#policy) has the rules.
+District 0 writes a `policy` event when one changes and on every keyframe tick after the first change, with the values and when each last
+changed, and a restart restores them. A client sends one with `policy(kind, value)` from `dev/lib/gateway.mjs`
+(kind 0 is shop hours, 1 the avenue limit, 2 the street limit); the page has no control for it yet. [docs/design.md](../docs/design.md#policy) has the rules.
 
 ## The registry
 

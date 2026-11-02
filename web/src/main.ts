@@ -40,7 +40,7 @@ import { intoThePast, startsRewind, whooshDue } from './soundscape-mix';
 import { createStatus, type Status } from './ui/status';
 import { note, toast } from './ui/toast';
 import { councilView, fitCouncil, renderCouncil, TALL_SCREEN, type CouncilEvent } from './council';
-import { policyRows, type PolicyEvent } from './policy';
+import { policyRows, USUAL_POLICY, type PolicyEvent } from './policy';
 import { money } from './money';
 import { displayName } from './registry';
 import { Traffic } from './traffic';
@@ -1312,7 +1312,7 @@ async function main() {
           policyShown = state.policy;
           councilChip.classList.toggle('hidden', councilShown === null);
           if (councilShown) {
-            const rows = policyShown ? policyRows(policyShown) : [];
+            const rows = policyRows(policyShown ?? USUAL_POLICY, tick);
             renderCouncil(
               councilChip,
               councilView(councilShown, city?.shore ?? null),

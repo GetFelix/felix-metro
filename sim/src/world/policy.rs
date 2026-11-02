@@ -44,7 +44,15 @@ impl Policy {
     /// The policies a `policy` event describes, or `None` for any other event.
     pub(crate) fn from_event(event: &Event) -> Option<Policy> {
         match *event {
-            Event::Policy { settings } => Some(Policy { settings }),
+            Event::Policy { mut settings } => {
+                // A hand-written event must not hold a value the rest of the sim divides by.
+                settings[POLICY_SHOP_HOURS].value =
+                    settings[POLICY_SHOP_HOURS].value.min(MAX_SHOP_HOURS);
+                for kind in [POLICY_AVENUE_LIMIT, POLICY_STREET_LIMIT] {
+                    settings[kind].value = settings[kind].value.clamp(MIN_LIMIT, 100);
+                }
+                Some(Policy { settings })
+            }
             _ => None,
         }
     }
@@ -71,7 +79,10 @@ impl Policy {
         if setting.value == value {
             return Err(REFUSED_UNCHANGED);
         }
-        if setting.changed.is_some_and(|at| tick < at + COOLDOWN) {
+        if setting
+            .changed
+            .is_some_and(|at| tick < at.saturating_add(COOLDOWN))
+        {
             return Err(REFUSED_COOLDOWN);
         }
         *setting = PolicySetting {

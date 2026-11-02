@@ -410,7 +410,11 @@ impl World {
                 standings: self.council.standings,
                 tally: self.council.tally,
             });
-            out[0].events.push(self.policy.event());
+            // Left out until a policy is first changed, which keeps the rush-hour log under its budget;
+            // a restart reads a missing event as the usual hours and limits.
+            if self.policy != Policy::new() {
+                out[0].events.push(self.policy.event());
+            }
             for (district, keyframe) in self.keyframes(tick).into_iter().enumerate() {
                 out[district].keyframe = Some(keyframe);
             }

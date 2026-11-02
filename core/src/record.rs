@@ -316,7 +316,7 @@ pub enum Event {
     },
     /// The city's policies as they stand, in the order of [`POLICIES`]. District
     /// 0 writes it when a `policy` command changes one and on every keyframe
-    /// tick, so a sim that restarts reads the values and their cooldowns.
+    /// tick once any has changed, so a sim that restarts reads the values and their cooldowns.
     Policy {
         settings: [PolicySetting; POLICIES],
     },
