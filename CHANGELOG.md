@@ -18,9 +18,17 @@
   each such lot at 4 ticks a second; a city nobody has built in writes none, so the log-size figures below are
   unchanged.
 
+### Added
+
+- Moments: a **Share this moment** button copies a link such as `/?at=<tick>&cam=<x,z,distance,azimuth,polar>#harbor`
+  that opens the city at that tick from that camera view (`?cam` is new). `H` is photo mode and hides every control.
+  A page left alone for 60 seconds turns the camera slowly (`?attract=<seconds>`, `0` turns it off).
+
 ### Changed
 
 - Built on Felix 0.6.2: the sim's `felix-client` and `felix-wire` pins, the dev stack and CI images.
+- The dev stack runs felix-gateway 0.8.0 (was 0.7.0). It adds `shard` on `state_get`, `past_end`, `offset_for_time` and
+  the other opt-in features of that release; the page asks for none of them yet.
 - The overlay's styles moved from `web/index.html` into `web/src/ui/*.css`, and the picker, loading screen and frame-time
   display into `web/src/ui/`. `docs/ui.md` describes the kit, the motion rules and the wording rules.
 - The log's busiest minute is under the 10 KB/s goal. A 20,000-resident city is estimated to write 9.96 KB/s in the evening rush

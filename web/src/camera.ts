@@ -150,6 +150,11 @@ export class CameraRig extends THREE.EventDispatcher<{ start: object }> {
     this.goal = orbitBy(this.goal, azimuth, polar, this.limits);
   }
 
+  /** Turn by `azimuth` radians as the idle display does. Unlike `orbit` it is not the person taking over, so the opening drift is left alone. */
+  drift(azimuth: number) {
+    this.goal = orbitBy(this.goal, azimuth, 0, this.limits);
+  }
+
   /** Drag the ground so what was under `from` is under `to`. */
   grab(from: Ndc, to: Ndc) {
     this.take();
