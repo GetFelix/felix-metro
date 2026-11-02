@@ -718,14 +718,14 @@ anything is built inside it.
 ## Risks, and what this surfaces in Felix
 
 - **Interpolation drift.** A car drawn by interpolation can disagree with where the sim thinks it is if the sim changes its plan without a `replan`. Every change of plan is an event, and the client trusts the log over its own guess.
-- **Retention.** History is bounded by one broker's disk. At 1 GB a day that is weeks, but tiered storage that Felix can read back would make it unbounded.
+- **Retention.** History is bounded by one broker's disk. At 1 GB a day that is weeks, but tiered storage that Felix can read back would make it unbounded. Until then the dev stack (`dev/seed.mjs`) keeps each stream for 7 days or 1 GiB, whichever is reached first, and everything older is gone, so a page asked for an older tick says the log no longer holds it.
 - **Scope.** No feature that does not serve one of the five demonstrations or the look.
 
 **Felix gaps this design runs into**
 
 1. **The page does not use the gateway's time lookup yet.** felix-gateway 0.8.0 exposes `offset_for_time` behind its `time` feature, but the page still estimates and corrects when it seeks. Using it makes a seek one lookup per district.
 2. **Per-shard subscribe through the gateway.** Done: the gateway's `read` and `subscribe` take a shard, and the page subscribes to each district's shard (`live.ts`). Kept here because it was a gap when the design was written.
-3. **Tiered storage has no read path.** Offloaded segments cannot be read back, so history older than local retention is gone.
+3. **Tiered storage has no read path.** Offloaded segments cannot be read back, so history older than local retention is gone. Felix tracks the work in [felix#172](https://github.com/GetFelix/felix/issues/172) (offload and cold-tier reads); this project does not enable tiered storage until reads work.
 4. **A commit is not idempotent.** A retried tick can land twice; readers dedupe on `(epoch, district, tick)`.
 
 **Open questions**
