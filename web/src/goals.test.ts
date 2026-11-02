@@ -1,7 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import type { CouncilEvent } from './council';
-import { goalsView, readChapter, type Chapter } from './goals';
+import { goalsView, openingPolicy, readChapter, type Chapter } from './goals';
+import { policyRows, USUAL_POLICY } from './policy';
 
 // The chapter table and the council and funds the sim reached after three days of each run. sim/src/world/council/tests.rs
 // writes it.
@@ -20,6 +21,18 @@ describe('readChapter', () => {
   });
 });
 
+describe('openingPolicy', () => {
+  it('shows the limits a chapter city opens with, before any policy event exists', () => {
+    const rows = policyRows(openingPolicy(chapter), 0);
+    expect(rows.map((r) => r.value)).toEqual(['Usual', '40% of their speed', '60% of their speed']);
+    expect(rows.every((r) => r.again === null)).toBe(true);
+  });
+
+  it('is the usual policy for a city with no chapter', () => {
+    expect(openingPolicy(null)).toBe(USUAL_POLICY);
+  });
+});
+
 describe('goalsView against the sim', () => {
   it('calls a mayor who changed nothing lost: the commute is too long and the council has recalled them', () => {
     const view = goalsView(chapter, fixture.ignored.council, fixture.ignored.funds);
@@ -27,6 +40,19 @@ describe('goalsView against the sim', () => {
     expect(view.status).toBe('Lost');
     expect(view.rows.map((r) => r.state)).toEqual(['failed', 'failed', 'met']);
     expect(view.rows[0]!.now).toBe('24 min');
+    expect(
+      goalsView(
+        chapter,
+        {
+          ...fixture.raised.council,
+          standings: [
+            { ...fixture.raised.council.standings[0]!, measure: 70 },
+            ...fixture.raised.council.standings.slice(1),
+          ],
+        },
+        1,
+      ).rows[0]!.now,
+    ).toBe('17.5 min');
   });
 
   it('calls a mayor who raised the limits the winner', () => {

@@ -44,9 +44,9 @@ import { createBuildBar } from './ui/build-bar';
 import { Placement, type CommandLink } from './placement';
 import { createPlacementView } from './placement-view';
 import { note, toast } from './ui/toast';
-import { goalsView, readChapter, type Chapter } from './goals';
+import { goalsView, openingPolicy, readChapter, type Chapter } from './goals';
 import { councilView, fitCouncil, renderCouncil, TALL_SCREEN, type CouncilEvent } from './council';
-import { policyRows, USUAL_POLICY, type PolicyEvent } from './policy';
+import { policyRows, type PolicyEvent } from './policy';
 import { money } from './money';
 import { displayName } from './registry';
 import { Traffic } from './traffic';
@@ -1544,7 +1544,7 @@ async function main() {
           councilFunds = funds;
           councilChip.classList.toggle('hidden', councilShown === null);
           if (councilShown) {
-            const rows = policyRows(policyShown ?? USUAL_POLICY, tick);
+            const rows = policyRows(policyShown ?? openingPolicy(chapter), tick);
             renderCouncil(
               councilChip,
               councilView(councilShown, city?.shore ?? null),

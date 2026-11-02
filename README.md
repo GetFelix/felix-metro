@@ -381,7 +381,13 @@ dev/city.sh lakeside
 
 `pier` is held back the same way. It is the first chapter: it opens with slow speed limits, the council lists its
 goals, and it starts at its first tick so the three days to meet them are yours. Start it with `dev/city.sh pier`,
-open `/#pier`, and run `dev/speed.sh pier 16` to get through the three days in 18 minutes.
+open `/#pier`, and run `dev/speed.sh pier 16` to get through the three days in 18 minutes. The page has no control for
+policies yet, so change the speed limits from a terminal (needs Node 22; sign in as the builder at <http://127.0.0.1:8088/?as=mayor#pier> to watch):
+
+```sh
+node dev/policy.mjs pier avenue 100
+node dev/policy.mjs pier street 100
+```
 
 A page opened at a city the gateway refuses (`/#nowhere`) still shows the list. It reads
 it through `lobby`, a city the stack seeds for that and nothing else: no sim, no

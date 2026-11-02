@@ -149,7 +149,8 @@ Goals, judged when day 3 has been scored:
 
 The player has the council, the policies, the timeline and the resident's day. The cause is in the policies: the
 speed limits are the only thing that moves the commute, and a limit can be changed once a city day. Reading the
-council to see what commuters want, finding the limits under it and sending the change is the whole chapter. Raising
+council to see what commuters want, finding the limits under it and sending the change is the whole chapter. Until the page has
+a control for policies, `node dev/policy.mjs pier avenue 100` sends one. Raising
 both limits meets the goals; raising one does not, because the avenue limit alone brings the commute to 17.5 minutes
 and the street limit alone to 20.
 
@@ -168,7 +169,7 @@ in 18.
   upkeep as land; transit, fares and paid services are not built.
 - **Factions.** Done: the sim scores three factions once a city day, writes a `council` event on every keyframe tick
   and counts the days a faction stays unhappy; the page shows them with the recall countdown (see The council in
-  design.md). A recall changes nothing yet; a chapter will give it a cost.
+  design.md). A recall changes nothing in the sim; a chapter's page treats it as a loss.
 - **Persistence across a restart.** Done: a restarted sim resumes from the newest keyframe
   and the records after it (see Restart in design.md). The new state below has to be
   rebuilt the same way, so each new piece of state is restored in `sim/src/world/restore.rs`. The account is written as

@@ -30,8 +30,12 @@ impl Chapter {
     /// The numbers the page judges the goals by, as JSON.
     pub fn to_json(&self) -> String {
         format!(
-            "{{\"seed\":\"{}\",\"days\":{},\"commuteTicks\":{}}}",
-            self.seed, self.days, self.commute_ticks
+            "{{\"seed\":\"{}\",\"openingAvenueLimit\":{},\"openingStreetLimit\":{},\"days\":{},\"commuteTicks\":{}}}",
+            self.seed,
+            self.opening_avenue_limit,
+            self.opening_street_limit,
+            self.days,
+            self.commute_ticks
         )
     }
 }

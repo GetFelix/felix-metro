@@ -190,21 +190,28 @@ fn only_shops_residents_go_to_count_as_shops() {
 /// A run of the chapter city to the first tick after its last day is scored, with the speed limits raised to
 /// the roads' own on the first tick or left as the chapter opened them.
 fn chapter_run(raise: bool) -> World {
+    use felix_metro_core::record::{POLICY_AVENUE_LIMIT, POLICY_STREET_LIMIT};
+
+    chapter_run_raising(if raise {
+        &[POLICY_AVENUE_LIMIT, POLICY_STREET_LIMIT]
+    } else {
+        &[]
+    })
+}
+
+/// The same run with only the limits of `kinds` raised.
+fn chapter_run_raising(kinds: &[usize]) -> World {
     use felix_metro_core::chapter_for;
-    use felix_metro_core::record::{
-        Command, POLICY_AVENUE_LIMIT, POLICY_STREET_LIMIT, RESULT_APPLIED,
-    };
+    use felix_metro_core::record::{Command, RESULT_APPLIED};
 
     let chapter = chapter_for("pier").unwrap();
     let mut world = World::new(City::generate(chapter.seed, chapter.districts_per_side).unwrap());
-    if raise {
-        for kind in [POLICY_AVENUE_LIMIT, POLICY_STREET_LIMIT] {
-            let command = Command::Policy {
-                kind: kind as u8,
-                value: 100,
-            };
-            assert_eq!(world.apply(&command).result, RESULT_APPLIED);
-        }
+    for &kind in kinds {
+        let command = Command::Policy {
+            kind: kind as u8,
+            value: 100,
+        };
+        assert_eq!(world.apply(&command).result, RESULT_APPLIED);
     }
     run_to(&mut world, TICKS_PER_DAY * chapter.days + 1);
     assert_eq!(world.council.days, chapter.days);
@@ -228,6 +235,18 @@ fn raising_both_limits_meets_the_chapters_goals() {
     assert!(commuters.measure <= chapter.commute_ticks);
     assert!(world.council.standings.iter().all(|s| s.unhappy_days == 0));
     assert!(world.funds() > 0);
+}
+
+#[test]
+fn raising_only_one_limit_is_not_enough() {
+    use felix_metro_core::record::{POLICY_AVENUE_LIMIT, POLICY_STREET_LIMIT};
+
+    let chapter = felix_metro_core::chapter_for("pier").unwrap();
+    let measure = |kind| chapter_run_raising(&[kind]).council.standings[FACTION_COMMUTERS].measure;
+    // The docs say 17.5 and 20 minutes; these are those numbers in ticks.
+    assert_eq!(measure(POLICY_AVENUE_LIMIT), 70);
+    assert_eq!(measure(POLICY_STREET_LIMIT), 80);
+    assert!(measure(POLICY_AVENUE_LIMIT) > chapter.commute_ticks);
 }
 
 /// `web/src/chapter-fixture.json` is what the page's goal tests read: the chapter table and the council and funds

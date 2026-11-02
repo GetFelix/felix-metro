@@ -221,7 +221,7 @@ describe('renderCouncil policies', () => {
 
 describe('renderCouncil goals', () => {
   afterEach(() => vi.unstubAllGlobals());
-  const chapter = { seed: 'pier', days: 3, commuteTicks: 64 };
+  const chapter = { seed: 'pier', openingAvenueLimit: 40, openingStreetLimit: 60, days: 3, commuteTicks: 64 };
   const sections = (root: Fake) => root.all('details')[0]!.children.map((c) => c.className);
 
   it('lists the goals between the factions and the policies, with how each stands', () => {
