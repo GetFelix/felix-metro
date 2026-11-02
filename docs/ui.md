@@ -73,7 +73,7 @@ These page parameters change the overlay:
 | `?follow=412`    | Opens with the camera on resident 412 and their card. A resident the city lacks is said so                                                                                                                             |
 | `?live=0`        | Draws the city with no gateway; the timeline never appears, so there is no hint, and the build buttons are off                                                                                                         |
 | `?as=mayor`      | Picks which login the dev stack's stand-in identity provider signs in (`viewer` if left out); `mayor` may build. It grants nothing with a real provider, and a tab already signed in keeps its token, so use a new tab |
-| `?hud`           | Shows frame times under the Felix Metro chip, for tuning                                                                                                                                                               |
+| `?hud`           | Shows the frame rate and frame times under the Felix Metro chip, for tuning                                                                                                                                            |
 
 ## How it is built
 
