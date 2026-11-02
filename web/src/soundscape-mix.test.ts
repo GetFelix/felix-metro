@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { intoThePast, mixAt, startsRewind, WHOOSH_GAP_MS, whooshDue } from './ambient-mix';
+import { intoThePast, mixAt, startsRewind, WHOOSH_GAP_MS, whooshDue } from './soundscape-mix';
 
 describe('the mix by hour', () => {
   it('is traffic by day and crickets by night', () => {

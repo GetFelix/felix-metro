@@ -89,7 +89,15 @@ async function main() {
 
   const renderer = createRenderer(tier);
   const initial = new Map([[lot.id, demolish ? building : { kind: NO_BUILDING, rotation: 0 }]]);
-  const { scene, construction, lots, glows, setTime, setLot } = await createCity(renderer, tier, city, false, initial);
+  const { scene, construction, lots, glows, setTime, setLot } = await createCity(
+    renderer,
+    tier,
+    city,
+    false,
+    initial,
+    // One lot alone is the picture.
+    false,
+  );
   if (params.has('churn')) {
     // Each swap takes down what stood and draws the other building. Left to finish, only the last is on screen.
     const kinds = [building, { kind: NO_BUILDING, rotation: 0 }];

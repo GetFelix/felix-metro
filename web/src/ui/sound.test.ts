@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { Ambient } from '../ambient';
+import type { Soundscape } from '../soundscape';
 import {
   UNAVAILABLE_TEXT,
   countsAsGesture,
@@ -14,7 +14,7 @@ const storage = (): SoundStorage & { data: Map<string, string> } => {
   return { data, getItem: (k) => data.get(k) ?? null, setItem: (k, v) => void data.set(k, v) };
 };
 
-function fakeAmbient(works = true) {
+function fakeSoundscape(works = true) {
   const a = {
     on: false,
     enabled: 0,
@@ -29,7 +29,7 @@ function fakeAmbient(works = true) {
     setHour: () => {},
     whoosh: () => {},
   };
-  return a satisfies Ambient & { enabled: number };
+  return a satisfies Soundscape & { enabled: number };
 }
 
 function setup(opts: { remembered?: boolean; works?: boolean; blocked?: boolean } = {}) {
@@ -47,7 +47,7 @@ function setup(opts: { remembered?: boolean; works?: boolean; blocked?: boolean 
         }
       : store,
   );
-  const ambient = fakeAmbient(opts.works ?? true);
+  const ambient = fakeSoundscape(opts.works ?? true);
   const told: string[] = [];
   const changes: boolean[] = [];
   let gesture: (() => void) | null = null;

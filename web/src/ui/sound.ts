@@ -1,5 +1,5 @@
-// The sound button and its M key. The choice is kept in local storage; the audio itself is `ambient.ts`.
-import type { Ambient } from '../ambient';
+// The sound button and its M key. The choice is kept in local storage; the audio itself is `soundscape.ts`.
+import type { Soundscape } from '../soundscape';
 import { isTypingTarget } from './keys';
 
 export const UNAVAILABLE_TEXT = 'Sound is not available in this browser';
@@ -32,7 +32,7 @@ export function createSoundMemory(open: () => SoundStorage = () => localStorage)
 }
 
 export interface SoundDeps {
-  ambient: Ambient;
+  ambient: Soundscape;
   memory: { on(): boolean; remember(on: boolean): void };
   /** Say something short on screen. */
   tell(text: string): void;
@@ -127,7 +127,7 @@ export interface Sound {
  * else, such as an open sheet.
  */
 export function createSound(
-  ambient: Ambient,
+  ambient: Soundscape,
   into: HTMLElement,
   tell: (text: string) => void,
   blocked: () => boolean,

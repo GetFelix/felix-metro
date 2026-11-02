@@ -18,8 +18,7 @@ use std::sync::Arc;
 use felix_metro_core::record::{Doing, Event, TickRecord};
 use felix_metro_core::{City, TICKS_PER_DAY};
 use felix_metro_sim::{
-    Connection, FelixLog, Settings, connect, district_keys, events_stream, load_history, run_city,
-    state_at,
+    Connection, FelixLog, Settings, connect, events_stream, load_history, run_city, state_at,
 };
 use felix_metro_sim::{Log, Write};
 use std::time::Duration;
@@ -84,7 +83,7 @@ async fn a_city_runs_a_day_with_every_tick_in_every_district() {
     assert_eq!(done.ticks, TICKS_PER_DAY);
 
     // Read every shard back. District `i` is on shard `i`, and only it.
-    let (shards, routing) = client
+    let (shards, _) = client
         .client()
         .await
         .stream_routing(&connection.tenant, &connection.namespace, &stream)
@@ -205,17 +204,13 @@ async fn a_city_runs_a_day_with_every_tick_in_every_district() {
 
     // The `keyframe` state key of each district points at its newest keyframe.
     let newest = u64::from((TICKS_PER_DAY - 1) / 240 * 240);
-    for (district, key) in district_keys(shards, routing, DISTRICTS)
-        .unwrap()
-        .iter()
-        .enumerate()
-    {
+    for district in 0..DISTRICTS {
         let state = client
-            .state_get(
+            .state_get_on_shard(
                 &connection.tenant,
                 &connection.namespace,
                 &stream,
-                key.as_bytes(),
+                district as u32,
                 "keyframe",
             )
             .await
@@ -231,17 +226,13 @@ async fn a_city_runs_a_day_with_every_tick_in_every_district() {
         newest as u32,
     );
     assert_eq!(expected.len(), DISTRICTS);
-    for (district, key) in district_keys(shards, routing, DISTRICTS)
-        .unwrap()
-        .iter()
-        .enumerate()
-    {
+    for (district, frame) in expected.iter().enumerate() {
         let state = client
-            .state_get(
+            .state_get_on_shard(
                 &connection.tenant,
                 &connection.namespace,
                 &stream,
-                key.as_bytes(),
+                district as u32,
                 "keyframe",
             )
             .await
@@ -263,11 +254,7 @@ async fn a_city_runs_a_day_with_every_tick_in_every_district() {
         assert_eq!(page.records[0].offset, at);
         assert_eq!(record.header.tick, newest as u32);
         assert_eq!(record.header.keyframe_offset, at, "a keyframe names itself");
-        assert_eq!(
-            record.keyframe.as_ref(),
-            Some(&expected[district]),
-            "district {district}"
-        );
+        assert_eq!(record.keyframe.as_ref(), Some(frame), "district {district}");
     }
 }
 

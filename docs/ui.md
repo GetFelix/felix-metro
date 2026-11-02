@@ -114,11 +114,11 @@ row, so the list cannot fall behind the code it describes.
 
 The sound is three small modules, each with one job:
 
-| File                     | What it does                                                                           |
-| ------------------------ | -------------------------------------------------------------------------------------- |
-| `web/src/ambient-mix.ts` | Pure numbers: how loud traffic and crickets are at an hour, and when a whoosh is due   |
-| `web/src/ambient.ts`     | The Web Audio graph: filtered noise for traffic, pulsed tones for crickets, the whoosh |
-| `web/src/ui/sound.ts`    | The button, the `M` key and the remembered choice                                      |
+| File                        | What it does                                                                           |
+| --------------------------- | -------------------------------------------------------------------------------------- |
+| `web/src/soundscape-mix.ts` | Pure numbers: how loud traffic and crickets are at an hour, and when a whoosh is due   |
+| `web/src/soundscape.ts`     | The Web Audio graph: filtered noise for traffic, pulsed tones for crickets, the whoosh |
+| `web/src/ui/sound.ts`       | The button, the `M` key and the remembered choice                                      |
 
 There are no audio files. Traffic is brown noise through a low-pass filter with a slow swell, crickets are two pulsed
 tones, and the whoosh is a burst of noise swept from high to low. Nothing needs a licence or a credit.
@@ -250,7 +250,7 @@ Run the unit tests for the data-driven parts: the key list, the hint's memory, t
 
 ```sh
 cd web
-npx vitest run src/ui src/quality.test.ts src/ambient
+npx vitest run src/ui src/quality.test.ts src/soundscape
 ```
 
 Then check the page itself. Install the test browser once with `npx playwright install chromium`. Serve the page in

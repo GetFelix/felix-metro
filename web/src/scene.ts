@@ -13,29 +13,18 @@ import { clockwise, facingAngle, lotLook, roadModel, type City } from './layout'
 import { KINDS } from './kinds';
 const TREE_FIRST = 38; // kinds from here are trees and plaza props: no building
 import { NO_BUILDING, type Building } from './city';
-import { createFleet, type InstancedFleet } from './fleet';
+import { Ambient, type ModelPart } from './ambient-fx';
+import { CAR_MODELS } from './ambient';
+import { TICKS_PER_HOUR } from './clock';
+import { createFleet, parts, type InstancedFleet } from './fleet';
 import { ConstructionFx, type LotAccess } from './construction-fx';
 import { showClock } from './ui/clock';
+import { radialTexture as radial } from './instanced';
 
 // Seeded so the frame is identical on every load.
 let seed = 7;
 const rand = () => ((seed = (seed * 16807) % 2147483647) - 1) / 2147483646;
 const pick = <T>(a: readonly T[]): T => a[Math.floor(rand() * a.length)]!;
-
-// Light pools are additive ground decals instead of real lights, so fifty lamps cost almost nothing.
-function radial(color: string) {
-  const c = document.createElement('canvas');
-  c.width = c.height = 128;
-  const g = c.getContext('2d')!;
-  const grad = g.createRadialGradient(64, 64, 0, 64, 64, 64);
-  grad.addColorStop(0, color);
-  grad.addColorStop(1, 'rgba(0,0,0,0)');
-  g.fillStyle = grad;
-  g.fillRect(0, 0, 128, 128);
-  const t = new THREE.CanvasTexture(c);
-  t.colorSpace = THREE.SRGBColorSpace;
-  return t;
-}
 
 interface Mover {
   o: THREE.Object3D;
@@ -103,8 +92,6 @@ const CARS = [
   'ambulance',
 ];
 const CAR_SCALE = 0.12;
-// Vehicle kinds 1 to 6 in the log, in order.
-const CAR_KINDS = ['sedan', 'taxi', 'suv', 'van', 'hatchback-sports', 'delivery'];
 const PEOPLE = 'abcdef'.split('').flatMap((c) => [`character-female-${c}`, `character-male-${c}`]);
 
 // The frame's map is 17 tiles across; a bigger city widens the shadow, fog and ground to match.
@@ -120,8 +107,14 @@ export async function createCity(
   city: City | null = null,
   live = false,
   initial: ReadonlyMap<number, Building> = new Map(),
+  /** False leaves out the ambient life, for measuring what it costs. */
+  withAmbient = true,
 ) {
   let setLotDrawn: (id: number, building: Building | null) => Promise<void> = async () => {};
+  /** The building kind and the loaded building on each lot, for the ambient life that hangs on them. */
+  const kindOn = new Map<number, number>();
+  let buildingOn: (id: number) => THREE.Object3D | null = () => null;
+  let ambient: Ambient | null = null;
   let lots: LotAccess = { objects: () => [], ghosts: () => [], setGhost: () => {}, centre: () => [0, 0] };
   const span = city ? Math.max(1, city.tiles / FRAME_TILES) : 1;
   const half = city ? (city.tiles - 1) / 2 : 0;
@@ -378,6 +371,8 @@ export async function createCity(
       jobs: Promise<THREE.Object3D>[];
       /** The jobs that have finished, for what animates a lot. */
       objects: THREE.Object3D[];
+      /** The lot's building once it has loaded, for what is hung on its roof and walls. */
+      building: THREE.Object3D | null;
     }
     const lotObjects = new Map<number, Drawn>();
     const site = new Set(c.development);
@@ -391,15 +386,18 @@ export async function createCity(
       first: boolean,
       ghost = false,
     ) {
-      const mine: Drawn = { jobs: [], objects: [] };
+      const mine: Drawn = { jobs: [], objects: [], building: null };
       const put = (...args: Parameters<typeof place>) => {
         const job = place(...args);
         mine.jobs.push(job);
         void job.then((o) => mine.objects.push(o));
         jobs.push(job);
+        return job;
       };
+      const putBuilding = (...args: Parameters<typeof place>) => void put(...args).then((o) => (mine.building = o));
       const choose = <T>(a: readonly T[]): T => a[Math.floor(rnd() * a.length)]!;
       (ghost ? ghostObjects : lotObjects).set(lot.id, mine);
+      if (!ghost) kindOn.set(lot.id, kind);
       const x = wx(lot.x),
         z = wx(lot.z);
       if (site.has(lot.id) && (kind === NO_BUILDING || kind >= TREE_FIRST)) {
@@ -425,19 +423,19 @@ export async function createCity(
       if (paved && !ghost) put('roads', 'tile-low', x, z);
       if (first && lot.id === c.tower) return; // drawn below with its crown
       if (look === 'skyscraper') {
-        put(pack, model, x, z, rotY, 0.7, lit ? 0.3 : 0, Math.floor(rnd() * 6));
+        putBuilding(pack, model, x, z, rotY, 0.7, lit ? 0.3 : 0, Math.floor(rnd() * 6));
       } else if (look === 'commercial') {
-        put(pack, model, x, z, rotY, 1, lit, Math.floor(rnd() * 6));
+        putBuilding(pack, model, x, z, rotY, 1, lit, Math.floor(rnd() * 6));
       } else if (look === 'house') {
-        put(pack, model, x, z, rotY, 0.62, lit ? 1 : 0, Math.floor(rnd() * 5));
+        putBuilding(pack, model, x, z, rotY, 0.62, lit ? 1 : 0, Math.floor(rnd() * 5));
         if (rnd() < 0.6) {
           const tree = choose(['tree-small', 'tree-large']);
           put('suburban', tree, x + (rnd() - 0.5) * 0.7, z + (rnd() - 0.5) * 0.7, rnd() * 6, 0.9);
         }
       } else if (look === 'factory') {
-        put(pack, model, x, z, rotY, 0.46, lit ? 1 : 0, 2 + Math.floor(rnd() * 3));
+        putBuilding(pack, model, x, z, rotY, 0.46, lit ? 1 : 0, 2 + Math.floor(rnd() * 3));
       } else if (look === 'prop') {
-        put(pack, model, x, z, rnd() * 6, 0.55);
+        putBuilding(pack, model, x, z, rnd() * 6, 0.55);
       } else if (look === 'tree') {
         // Parks and filler: two or three trees to a tile read as a copse.
         const n = lot.zone === 'park' ? 3 : 1;
@@ -461,6 +459,7 @@ export async function createCity(
       if (!lot || id === c.tower) return;
       const old = lotObjects.get(id)?.jobs ?? [];
       lotObjects.delete(id);
+      ambient?.clearLot(id);
       // Not awaited: a second call for the lot while models load would find nothing to take down and draw beside this
       // one, and whichever drew last would be the only one tracked.
       for (const job of old) void job.then((o) => scene.remove(o));
@@ -469,7 +468,9 @@ export async function createCity(
       const rnd = () => unitHash(id * 64 + kind, n++);
       drawLot(lot, kind, building?.rotation ?? lot.facing, rnd, false);
       await Promise.all(lotObjects.get(id)?.jobs ?? []);
+      ambient?.refresh(id);
     };
+    buildingOn = (id) => lotObjects.get(id)?.building ?? null;
     lots = {
       objects: (id) => lotObjects.get(id)?.objects ?? [],
       ghosts: (id) => ghostObjects.get(id)?.objects ?? [],
@@ -722,6 +723,8 @@ export async function createCity(
     beamMat.opacity = d.beam;
     crowd?.setLights(d.headlight, d.taillight, d.beam);
     if (bloom) bloom.strength = d.bloom;
+    // A live city hands its ambient life the tick; a still one has only the hour.
+    if (!live) ambient?.update(Math.round(hour * TICKS_PER_HOUR));
     crownMat.emissiveIntensity = d.crown;
     signMat.emissiveIntensity = d.signEmissive;
     const hh = Math.floor(hour) % 24,
@@ -752,7 +755,7 @@ export async function createCity(
   // A live city draws its voyages as instances of the models, loaded once each.
   if (live) {
     const [cars, people] = await Promise.all([
-      Promise.all(CAR_KINDS.map((name) => loadModel('cars', name))),
+      Promise.all(CAR_MODELS.map((name) => loadModel('cars', name))),
       Promise.all(PEOPLE.map((name) => loadModel('mini-characters', name))),
     ]);
     crowd = createFleet(scene, {
@@ -772,9 +775,31 @@ export async function createCity(
   // Scaffolds and dust are left out on the low tier; buildings still rise and fall.
   const construction = new ConstructionFx(scene, lots, tier !== 'low');
 
+  if (city && withAmbient) {
+    const post: ModelPart[] = parts(await loadModel('roads', 'traffic-light')).map(({ mesh, local }) => ({
+      geometry: mesh.geometry,
+      material: materials.materialFor('roads', mesh.material as THREE.MeshStandardMaterial, 0),
+      local,
+    }));
+    ambient = new Ambient(
+      scene,
+      city,
+      {
+        kind: (id) => kindOn.get(id) ?? NO_BUILDING,
+        building: (id) => buildingOn(id),
+        busy: (id) => construction.busy(id),
+      },
+      settingsFor(tier).ambient,
+      glows,
+      post,
+    );
+    for (const lot of city.lots) ambient.refresh(lot.id);
+  }
+
   return {
     scene,
     construction,
+    ambient,
     lots,
     cars,
     people,

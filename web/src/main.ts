@@ -30,8 +30,8 @@ import { createLoader, type Loader } from './ui/loader';
 import { createPicker } from './ui/picker';
 import { createShell, type Shell } from './ui/shell';
 import { createSound } from './ui/sound';
-import { createAmbient } from './ambient';
-import { intoThePast, startsRewind, whooshDue } from './ambient-mix';
+import { createSoundscape } from './soundscape';
+import { intoThePast, startsRewind, whooshDue } from './soundscape-mix';
 import { createStatus, type Status } from './ui/status';
 import { note, toast } from './ui/toast';
 import { displayName } from './registry';
@@ -321,10 +321,10 @@ async function main() {
   // The capture job needs the page as it draws, with nothing to dismiss, so it gets no controls and no tip.
   const shell = ui && !capture && layout === 'city' ? createShell(quality) : null;
   // The sound has no audio context until its button is first used, and none at all without the button.
-  const ambient = createAmbient();
+  const soundscape = createSoundscape();
   const sound = shell
     ? createSound(
-        ambient,
+        soundscape,
         shell.tools,
         // The message would wait unseen under photo mode and show up after it.
         (text) => document.body.classList.contains(PHOTO_CLASS) || note(text),
@@ -335,7 +335,7 @@ async function main() {
   /** The rewind sweep, at most once in a while however often a rewind is asked for. */
   const whoosh = () => {
     const now = performance.now();
-    if (!ambient.on || !whooshDue(lastWhoosh, now)) return;
+    if (!soundscape.on || !whooshDue(lastWhoosh, now)) return;
     lastWhoosh = now;
     sound?.whoosh();
   };
@@ -432,7 +432,7 @@ async function main() {
   // A shared view replaces the opening drift.
   const sharedView = cam !== null && controls.setState(cam, { ease: false });
   const drawn: ReadonlyMap<number, Building> = new Map(state?.built);
-  const { scene, construction, cars, people, glows, setTime, setShadows, fleet, setLot } = await createCity(
+  const { scene, construction, ambient, cars, people, glows, setTime, setShadows, fleet, setLot } = await createCity(
     renderer,
     quality.tier,
     city,
@@ -449,6 +449,7 @@ async function main() {
     renderer.setPixelRatio(Math.min(devicePixelRatio, s.pixelRatioCap));
     setShadows(s.shadows, s.shadowMapSize);
     construction.setEffects(tier !== 'low');
+    ambient?.setTier(s.ambient);
     if (traffic) traffic.cap = s.movers;
     post = createPost(renderer, scene, camera, passesFor(tier), glows);
     setTime(hour, post.bloom);
@@ -467,6 +468,7 @@ async function main() {
   const liveState = state;
   const traffic = state && fleet ? new Traffic(fleet, city ? (city.tiles - 1) / 2 : 0, city?.lots ?? []) : null;
   if (traffic) traffic.cap = settingsFor(quality.tier).movers;
+  if (traffic && ambient) traffic.extras = (f) => ambient.place(f);
   if (state && traffic) {
     // The sun follows the tick the page draws, so the slider is only a readout.
     slider.disabled = true;
@@ -480,12 +482,12 @@ async function main() {
   slider.value = String(hour);
   slider.addEventListener('input', () => {
     hour = parseFloat(slider.value);
-    ambient.setHour(hour);
+    soundscape.setHour(hour);
     setTime(hour, post!.bloom);
   });
   post = createPost(renderer, scene, camera, passesFor(quality.tier), glows);
   setTime(hour, post.bloom);
-  ambient.setHour(hour);
+  soundscape.setHour(hour);
 
   addEventListener('visibilitychange', () => quality.restartWindow());
 
@@ -1156,13 +1158,19 @@ async function main() {
         clockTicks.advance(Math.min(1, frameMs / 1000), state.latest, state.speed, link.down);
       if (!Number.isNaN(tick)) {
         state.retire(Math.floor(tick));
+        // Ambient life follows the clock the person reads: a held hour, a scrub target, or the tick on screen.
+        const ambientTick = frozenHour !== null ? frozenHour * TICKS_PER_HOUR : (scrubTarget ?? tick);
+        // The vans go in the fleet's round; what hangs on buildings waits for the construction update, which says
+        // which lots are going up or coming down at this tick.
+        ambient?.drive(ambientTick);
         traffic.update(tick, still ? 0 : dt, state.active());
         state.settle(tick);
         construction.update(tick, state.rising, state.falling);
+        ambient?.decorate(ambientTick);
         const time = cityTime(scrubTarget ?? tick);
         if (frozenHour === null && !(Math.abs(time.hour - shownHour) <= 0.004)) {
           shownHour = hour = time.hour;
-          ambient.setHour(hour);
+          soundscape.setHour(hour);
           setTime(hour, post!.bloom);
           day.textContent = `Day ${time.day}`;
         }
