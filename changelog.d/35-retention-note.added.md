@@ -1,1 +1,0 @@
-- The design notes now say what history the dev stack keeps (7 days or 1 GiB per stream) and link the Felix issue for reading offloaded history back.
