@@ -194,7 +194,7 @@ refused in the page with its reason, and the architect takes it away with two ta
 | 2   | Time travel         | In progress: keyframes, seeking, the timeline scrubber and its markers for rush hours and builds, rewind then follow, and backward playback with speeds built, smoothness not yet measured                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | 3   | Follow a life       | In progress: click a car or walker to follow them, with a card for their day read from the log and a `?follow=` link; ambient sound built; city stats at any tick built                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | 4   | Build               | In progress: the sim applies build, demolish and speed commands and records who sent them, and the page animates a building going up (scaffold) or coming down (dust) over 8 ticks, backwards when you rewind; build, demolish and road tools in the page; roads with replanning; zones are not built yet                                                                                                                                                                                                                                                                                                                                              |
-| 5   | Branching timelines | Planned                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| 5   | Branching timelines | In progress: the sim forks a city at a past tick with a `fork` command, the fork copies the parent's history and runs on its own; the page's way to fork and compare is not built yet                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | 6   | Scale and failover  | In progress: a restarted sim resumes from its log. The page has a mode for measuring the frame rate over 16 districts on a real GPU (see [docs/art.md](docs/art.md#what-it-costs)); no frame rate has been recorded yet. 20,000 residents and broker loss are open                                                                                                                                                                                                                                                                                                                                                                                     |
 | 7   | Self-hosting        | Planned                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | 8   | A first chapter     | In progress: the sim resumes from its log after a restart (nothing built is lost, no tick repeated or missing, commands run once); the city has funds (taxes and upkeep each day, a price on building, shown on the page, also for the moment you scrub to); the council's three factions are scored each city day and shown with their demands and a recall countdown; the mayor can set shop hours and speed limits for avenues and streets, each once a city day (a `policy` command); the first chapter, `pier`, opens with slow speed limits and lists its goals under the council (see [docs/game.md](docs/game.md)); investigations are planned |
@@ -210,6 +210,23 @@ A city the gateway refuses (a misspelled name, or no access) shows a message ins
 retrying. The city name in the top left opens a list of every city. The clock's digits roll as time moves, the button under it opens the settings sheet, and the `?` key opens the key list. The page's
 own [building tools](#building) place and demolish buildings; a command published to the city's command stream by any client with a
 builder's token is applied by the sim and shows up in the page, rising over 8 ticks of city time inside a scaffold (a demolished building scales down in a puff of dust). Rewind through it and it comes down again; the low quality tier skips the scaffold and the dust.
+
+## Forking a city
+
+A builder can fork a city at any tick it has already run. The fork is a new city named after its parent
+(`harbor~bridge-closed`) that starts as a copy of the parent's whole history up to that tick, then ticks on by itself:
+what is built in one never appears in the other. Everyone who can watch or build in the parent can in the fork. The
+page has no button for it yet; the sim side is done and `fork` is a command like `build`:
+
+```sh
+node dev/check-fork.mjs pinecrest
+```
+
+That forks `pinecrest` through the gateway, waits for the fork to be listed, and checks that the fork holds the parent's
+history, runs on, and is independent. A fork is joined at the gateway as `pinecrest_<name>`, because the gateway allows
+no `~` in a name. How it works, and the new result codes 16 to 21, are in
+[docs/design.md](docs/design.md#branching). The sim makes a fork's streams through a provisioner service the
+deployment runs (`SIM_FORK_PROVISION_URL`); the dev stack has one.
 
 ## Ambient life
 
@@ -524,8 +541,9 @@ dev/speed.sh harbor      # show it
 
 `dev/seed.mjs` sets up the tenant, each city's streams and `lobby`, and the roles that
 `viewer` (watch) and `mayor` (watch and build) sign in with. `METRO_BUILDERS=mayor,architect dev/up.sh` makes a
-second sign-in a builder too, which CI uses to test two builders at once. `sim/ci/` runs the same
-seed against a broker for the sim's integration test.
+second sign-in a builder too, which CI uses to test two builders at once. `dev/provision.mjs` runs as the
+`provisioner` service and makes the streams of a fork, with the roles of the city it came from.
+`sim/ci/` runs the same seed against a broker for the sim's integration test.
 
 ## Documentation
 

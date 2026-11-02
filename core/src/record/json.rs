@@ -181,6 +181,15 @@ fn event(out: &mut String, e: &Event) {
         Event::Balance { amount } => {
             let _ = write!(out, "{{\"type\":\"balance\",\"amount\":{amount}");
         }
+        Event::Forked {
+            tick,
+            name,
+            principal,
+        } => {
+            let _ = write!(out, "{{\"type\":\"forked\",\"tick\":{tick},\"name\":");
+            text(out, name);
+            let _ = write!(out, ",\"principal\":\"{principal:016x}\"");
+        }
         Event::Council {
             days,
             patience,
@@ -340,12 +349,16 @@ pub(super) fn registry(e: &RegistryRecord) -> String {
             parent,
             tick,
             wall_us,
+            principal,
         } => {
             out.push_str("{\"kind\":\"registry\",\"type\":\"forked\",\"name\":");
             text(&mut out, name);
             out.push_str(",\"parent\":");
             text(&mut out, parent);
-            let _ = write!(out, ",\"tick\":{tick},\"wallUs\":{wall_us}}}");
+            let _ = write!(
+                out,
+                ",\"tick\":{tick},\"wallUs\":{wall_us},\"principal\":\"{principal:016x}\"}}"
+            );
         }
     }
     out

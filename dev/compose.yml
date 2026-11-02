@@ -56,10 +56,24 @@ services:
       METRO_BUILDERS: ${METRO_BUILDERS:-mayor}
     volumes:
       - ./seed.mjs:/app/seed.mjs:ro,z
+      - ./lib:/app/lib:ro,z
       - ./state:/state:z
     depends_on:
       controlplane:
         condition: service_healthy
+
+  # Makes the streams of a fork, which the sim cannot: only the control plane creates streams. Reached by the sim
+  # on the stack's network; it has no authentication and no published port.
+  provisioner:
+    image: docker.io/library/node:24-alpine
+    command: ["node", "/app/provision.mjs"]
+    volumes:
+      - ./provision.mjs:/app/provision.mjs:ro,z
+      - ./lib:/app/lib:ro,z
+    restart: on-failure
+    depends_on:
+      seed:
+        condition: service_completed_successfully
 
   broker:
     image: ghcr.io/getfelix/felix-broker:0.6.2
@@ -132,6 +146,7 @@ services:
       SIM_FELIX_CA_FILE: /state/broker-cert.pem
       SIM_FELIX_TOKEN_FILE: /state/sim.token
       SIM_TENANT: metro
+      SIM_FORK_PROVISION_URL: http://provisioner:9500
       SIM_CITIES: ${SIM_CITIES:-harbor pinecrest}
       # Seeded but idle, and not in the registry, until dev/city.sh starts it.
       SIM_ON_DEMAND: ${SIM_ON_DEMAND-lakeside pier}
@@ -143,6 +158,8 @@ services:
     depends_on:
       finalize:
         condition: service_completed_successfully
+      provisioner:
+        condition: service_started
 
   # Follows every district of every city through the gateway until each has
   # delivered a tick, then writes state/probed for up.sh.

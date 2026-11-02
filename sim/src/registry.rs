@@ -10,6 +10,7 @@ use felix_metro_core::record::RegistryRecord;
 use tracing::{info, warn};
 
 use crate::felix::Connection;
+use crate::fork::Request;
 
 /// The registry's stream: one shard, kept for good.
 pub const REGISTRY_STREAM: &str = "metro.cities";
@@ -30,6 +31,12 @@ fn created(name: &str, districts_per_side: u16, wall_us: u64) -> Result<Vec<u8>>
     .with_context(|| format!("encode the registry record of {name}"))
 }
 
+fn wall_us() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_micros() as u64)
+}
+
 /// Writes `name` to the registry. A record that was sent twice because the first answer was lost is
 /// harmless: readers list a name once.
 pub async fn announce(
@@ -38,10 +45,34 @@ pub async fn announce(
     name: &str,
     districts_per_side: u16,
 ) -> Result<()> {
-    let wall_us = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| d.as_micros() as u64);
-    let record = created(name, districts_per_side, wall_us)?;
+    let record = created(name, districts_per_side, wall_us())?;
+    send(client, connection, name, record).await
+}
+
+/// Lists a fork, once its streams hold the history it was made from.
+pub(crate) async fn announce_fork(
+    client: &ClusterClient,
+    connection: &Connection,
+    fork: &Request,
+) -> Result<()> {
+    let record = RegistryRecord::Forked {
+        name: fork.child.clone(),
+        parent: fork.parent.clone(),
+        tick: fork.tick,
+        wall_us: wall_us(),
+        principal: fork.principal,
+    }
+    .encode()
+    .with_context(|| format!("encode the registry record of {}", fork.child))?;
+    send(client, connection, &fork.child, record).await
+}
+
+async fn send(
+    client: &ClusterClient,
+    connection: &Connection,
+    name: &str,
+    record: Vec<u8>,
+) -> Result<()> {
     for attempt in 1..=ATTEMPTS {
         // A plain publish: the registry needs no atomic commit, which the fleet may not have enabled yet.
         match client
@@ -66,6 +97,36 @@ pub async fn announce(
         }
     }
     unreachable!("the last attempt returns")
+}
+
+/// Every record of the registry, oldest first.
+pub async fn list(client: &ClusterClient, connection: &Connection) -> Result<Vec<RegistryRecord>> {
+    let mut found = Vec::new();
+    let mut next = 0;
+    loop {
+        let page = client
+            .read(
+                &connection.tenant,
+                &connection.namespace,
+                REGISTRY_STREAM,
+                0,
+                next,
+                None,
+                1000,
+            )
+            .await
+            .context("read the registry")?;
+        if page.records.is_empty() {
+            return Ok(found);
+        }
+        for record in &page.records {
+            match RegistryRecord::decode(&record.payload) {
+                Ok(record) => found.push(record),
+                Err(err) => warn!(error = %err, "skipped a registry record that does not decode"),
+            }
+            next = record.offset + 1;
+        }
+    }
 }
 
 /// How long to wait before announcing again once a round of attempts has failed.

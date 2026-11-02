@@ -44,6 +44,7 @@ dev/speed.sh harbor 16
 [[ "$(dev/speed.sh harbor)" == "16" ]]
 dev/speed.sh harbor 4
 node dev/check-commands.mjs pinecrest
+node dev/check-fork.mjs pinecrest
 node dev/builder-bot.mjs pinecrest --interval 1 --count 12 --demolish-after 1 --json bot-log.ndjson
 node dev/check-builder-bot.mjs bot-log.ndjson --min 10
 echo "::endgroup::"
