@@ -73,7 +73,7 @@ describe('the mouse', () => {
       const { rig, onDom } = setup();
       onDom('pointerdown', { ...down, clientX: 500, clientY: 250 });
       onDom('pointermove', { ...down, clientX: 625, clientY: 250 });
-      expect(rig.grab).toHaveBeenCalledWith({ x: 0, y: 0 }, { x: 0.25, y: 0 });
+      expect(rig.grab).toHaveBeenCalledWith({ x: 0, y: 0 }, { x: 0.25, y: 0 }, true);
       expect(rig.orbit).not.toHaveBeenCalled();
     }
   });
@@ -146,9 +146,36 @@ describe('touch', () => {
     onDom('pointerdown', finger(2, 600, 250));
     onDom('pointermove', finger(2, 850, 250));
     // The middle moved from 500 to 625 and the spread from 200 to 450.
-    expect(rig.grab).toHaveBeenCalledWith({ x: 0, y: 0 }, { x: 0.25, y: 0 });
+    expect(rig.grab).toHaveBeenCalledWith({ x: 0, y: 0 }, { x: 0.25, y: 0 }, true);
     expect(rig.zoomAt).toHaveBeenCalledWith({ x: 0.25, y: 0 }, 200 / 450);
     expect(rig.orbit).not.toHaveBeenCalled();
+  });
+
+  it('does not call a pinch’s wobble a move of the view', () => {
+    const { rig, onDom } = setup();
+    onDom('pointerdown', finger(1, 400, 250));
+    onDom('pointerdown', finger(2, 600, 250));
+    onDom('pointermove', finger(2, 640, 252));
+    expect(rig.grab).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), false);
+    // The middle drifted 20 px so far; another 20 is a slide.
+    onDom('pointermove', finger(2, 680, 252));
+    expect(rig.grab).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), true);
+  });
+
+  it('does not call a long, jittery pinch a move of the view', () => {
+    const { rig, onDom } = setup();
+    onDom('pointerdown', finger(1, 400, 250));
+    onDom('pointerdown', finger(2, 600, 250));
+    // The fingers spread and close for a while, each event shaking the middle a few px: far more than 24 px of path in
+    // all, but the middle never leaves the neighbourhood of where it began.
+    for (let i = 0; i < 60; i++) {
+      const spread = (i % 10) * 3;
+      const shake = i % 2 === 0 ? 8 : -8;
+      onDom('pointermove', finger(2, 600 + spread + shake, 250));
+      onDom('pointermove', finger(1, 400 - spread + shake, 250));
+    }
+    expect(rig.grab).toHaveBeenCalledTimes(120);
+    for (const call of rig.grab.mock.calls) expect(call[2]).toBe(false);
   });
 
   it('does not jump when a second finger lands or lifts', () => {
