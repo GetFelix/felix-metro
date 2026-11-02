@@ -6,6 +6,8 @@ import {
   buildCommand,
   canBuild,
   canDemolish,
+  canPlaceRoad,
+  canRemoveRoad,
   clipName,
   demolishCommand,
   families,
@@ -14,10 +16,14 @@ import {
   kindOn,
   nameFrom,
   nextKind,
+  placeRoadCommand,
   refusal,
+  removeRoadCommand,
+  roadOver,
+  tilesBetween,
   type Ground,
 } from './build';
-import { NO_BUILDING } from './city';
+import { NO_BUILDING, ROAD_ADDED, ROAD_REMOVED, type BuiltRoad } from './city';
 import { decodeRecord, initSync } from './core/felix_metro_core.js';
 import { KINDS } from './kinds';
 
@@ -74,10 +80,113 @@ describe('the rules the sim keeps', () => {
   });
 });
 
+/**
+ * A row of four lots between node 0 at (0, 0) and node 1 at (5, 0): lots 0, 1 and 3 are cleared ground, lot 2 filler
+ * with trees and no door. Node 2 at (0, 3) is in node 0's column. Lot 4, beside node 2, is a home.
+ */
+const strip = (
+  over: { door?: number | null; built?: [number, number][]; roads?: [number, BuiltRoad][] } = {},
+): Ground => ({
+  city: {
+    development: [0, 1, 3],
+    nodes: [
+      [0, 0],
+      [5, 0],
+      [0, 3],
+    ],
+    lots: [
+      { id: 0, x: 1, z: 0, kind: NO_BUILDING, doorSegment: 0 },
+      { id: 1, x: 2, z: 0, kind: NO_BUILDING, doorSegment: 0 },
+      { id: 2, x: 3, z: 0, kind: TREE_FIRST, doorSegment: over.door === undefined ? null : over.door },
+      { id: 3, x: 4, z: 0, kind: TREE_FIRST + 1, doorSegment: 0 },
+      { id: 4, x: 0, z: 1, kind: 19, doorSegment: 0 },
+    ] as never,
+  },
+  built: new Map((over.built ?? []).map(([lot, kind]) => [lot, { kind, rotation: 0 }])),
+  roads: new Map(over.roads ?? []),
+});
+
+describe('roads', () => {
+  it('finds the tiles strictly between two crossings in one row or column', () => {
+    expect(tilesBetween([0, 0], [3, 0])).toEqual([
+      [1, 0],
+      [2, 0],
+    ]);
+    expect(tilesBetween([0, 3], [0, 1])).toEqual([[0, 2]]);
+    expect(tilesBetween([0, 0], [2, 2])).toEqual([]);
+  });
+
+  it('lays a road over cleared ground and filler nobody visits', () => {
+    expect(canPlaceRoad(strip(), 0, 1, 0)).toEqual({ ok: true });
+  });
+
+  it('says why core turned the land down, in words', () => {
+    expect(canPlaceRoad(strip(), 0, 1, 20)).toMatchObject({ ok: false, why: expect.stringMatching(/straight/) });
+    expect(canPlaceRoad(strip(), 0, 1, 21)).toMatchObject({ why: expect.stringMatching(/12 tiles/) });
+    expect(canPlaceRoad(strip(), 0, 1, 22)).toMatchObject({ why: expect.stringMatching(/already joins/) });
+    expect(canPlaceRoad(strip(), 0, 1, 23)).toMatchObject({ why: expect.stringMatching(/not clear/) });
+    expect(canPlaceRoad(strip(), 0, 0, 20)).toMatchObject({ why: expect.stringMatching(/different crossing/) });
+  });
+
+  it('refuses ground with a building on it, or that residents may use', () => {
+    expect(canPlaceRoad(strip({ built: [[1, 19]] }), 0, 1, 0)).toMatchObject({
+      ok: false,
+      why: 'A building is in the way.',
+    });
+    // Lot 2 has a door and is not cleared ground: the page cannot tell if anyone goes there, so it says no.
+    expect(canPlaceRoad(strip({ door: 7 }), 0, 1, 0)).toMatchObject({
+      ok: false,
+      why: expect.stringMatching(/People live, work or play/),
+    });
+  });
+
+  it('knows which lots a builder’s road runs over, and keeps a building off them', () => {
+    const laid = strip({ roads: [[104, { change: ROAD_ADDED, a: 0, b: 1 }]] });
+    expect([0, 1, 2, 3, 4].map((lot) => roadOver(laid, lot))).toEqual([104, 104, 104, 104, null]);
+    expect(canBuild(laid, 1)).toMatchObject({ ok: false, why: expect.stringMatching(/road runs over/) });
+    const gone = strip({ roads: [[104, { change: ROAD_REMOVED, a: 0, b: 1 }]] });
+    expect(roadOver(gone, 1)).toBeNull();
+    expect(canBuild(gone, 1)).toEqual({ ok: true });
+  });
+
+  it('notices a road laid in the same map, which the state changes in place', () => {
+    const g = strip();
+    expect(roadOver(g, 1)).toBeNull();
+    (g.roads as Map<number, BuiltRoad>).set(104, { change: ROAD_ADDED, a: 0, b: 1 });
+    expect(roadOver(g, 1)).toBe(104);
+  });
+
+  it('takes away only a road a builder laid and that is still there', () => {
+    const g = strip({
+      roads: [
+        [104, { change: ROAD_ADDED, a: 0, b: 1 }],
+        [105, { change: ROAD_REMOVED, a: 0, b: 2 }],
+      ],
+    });
+    expect(canRemoveRoad(g, 104)).toEqual({ ok: true });
+    expect(canRemoveRoad(g, 105)).toMatchObject({ ok: false, why: expect.stringMatching(/city’s own streets stay/) });
+    expect(canRemoveRoad(g, 3)).toMatchObject({ ok: false });
+    expect(canRemoveRoad(g, null)).toMatchObject({ ok: false });
+  });
+});
+
 describe('what a refusal says', () => {
   it('has plain words for every result the sim records', () => {
-    for (const code of [1, 2, 3, 4, 5, 7, 8, 9, 99]) expect(refusal(code)).toMatch(/^[A-Z].*\.$/);
-    expect(new Set([1, 2, 3, 4, 5, 7, 8, 9].map(refusal)).size).toBe(8);
+    const codes = [1, 2, 3, 4, 5, 7, 8, 9, 10, 20, 21, 22, 23, 24];
+    for (const code of [...codes, 99]) expect(refusal(code)).toMatch(/^[A-Z].*\.$/);
+    expect(new Set(codes.map((code) => refusal(code))).size).toBe(codes.length);
+    expect(refusal(23, 'build')).toMatch(/road runs over/);
+  });
+
+  it('knows the result codes core records', () => {
+    const rust = readFileSync(new URL('../../core/src/record.rs', import.meta.url), 'utf8');
+    const code = (name: string) => Number(new RegExp(`${name}: u8 = (\\d+)`).exec(rust)![1]);
+    expect(refusal(code('REFUSED_NO_FUNDS'))).toMatch(/afford/);
+    expect(refusal(code('REFUSED_NOT_STRAIGHT'))).toMatch(/straight/);
+    expect(refusal(code('REFUSED_TOO_LONG'))).toMatch(/12 tiles/);
+    expect(refusal(code('REFUSED_ROAD_EXISTS'))).toMatch(/already joins/);
+    expect(refusal(code('REFUSED_ROAD_BLOCKED'))).toMatch(/in the way/);
+    expect(refusal(code('REFUSED_NOT_BUILT'))).toMatch(/builder laid/);
   });
 });
 
@@ -124,6 +233,25 @@ describe('the command records', () => {
   it('demolish decodes in core as the command that was meant', () => {
     const json = JSON.parse(decodeRecord(demolishCommand(7, 'Zoë', 42)));
     expect(json).toMatchObject({ kind: 'command', id: 7, name: 'Zoë', command: { type: 'demolish', lot: 42 } });
+  });
+
+  it('place road and remove road decode in core as the commands that were meant', () => {
+    expect(JSON.parse(decodeRecord(placeRoadCommand(9, 'Ana', 6, 7)))).toMatchObject({
+      kind: 'command',
+      id: 9,
+      command: { type: 'placeRoad', a: 6, b: 7 },
+    });
+    expect(JSON.parse(decodeRecord(removeRoadCommand(10, 'Ana', 300)))).toMatchObject({
+      kind: 'command',
+      id: 10,
+      command: { type: 'removeRoad', segment: 300 },
+    });
+  });
+
+  it('writes the bytes core pins for the road commands', () => {
+    // core/src/record/tests.rs: remove road is tag 8 and the segment, little-endian.
+    expect([...removeRoadCommand(1, 'A', 300).slice(-5)]).toEqual([8, 44, 1, 0, 0]);
+    expect([...placeRoadCommand(1, 'A', 6, 0x01020304).slice(-9)]).toEqual([1, 6, 0, 0, 0, 4, 3, 2, 1]);
   });
 
   it('cuts a long name to 64 bytes without splitting a character', () => {

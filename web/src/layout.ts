@@ -10,6 +10,8 @@ export interface Lot {
   kind: number;
   /** Quarter turns from facing south: 0 south, 1 east, 2 north, 3 west. */
   facing: number;
+  /** The segment the lot's door is on, or null for filler ground with no door, where no resident ever goes. */
+  doorSegment: number | null;
 }
 export interface Road {
   x: number;
@@ -18,6 +20,17 @@ export interface Road {
   rot: number;
   mask: number;
   avenue: boolean;
+}
+/** A street between two nodes of the road graph, by id. Builders' roads come after the generated ones. */
+export interface Segment {
+  id: number;
+  a: number;
+  b: number;
+  avenue: boolean;
+  length: number;
+  /** Added by a builder; only these can be taken away. */
+  built: boolean;
+  removed: boolean;
 }
 export interface City {
   seed: string;
@@ -30,6 +43,20 @@ export interface City {
   lots: Lot[];
   roads: Road[];
   water: [number, number][];
+  /** The road graph's nodes (crossings, bends and dead ends) by index, as map tiles `[x, z]`. */
+  nodes: [number, number][];
+  segments: Segment[];
+}
+
+/** The columns of a road tile row, in the order core writes them in `roadColumns` and `Metro.roadsJson`. */
+export const ROAD_COLUMNS = ['x', 'z', 'piece', 'rot', 'mask', 'avenue'] as const;
+
+/** Road tile rows as core writes them, columns named by `columns`. */
+export function parseRoads(rows: unknown[][], columns: readonly string[] = ROAD_COLUMNS): Road[] {
+  return rows.map((row) => {
+    const r = Object.fromEntries(columns.map((c, i) => [c, row[i]]));
+    return { ...r, avenue: r.avenue === 1 } as unknown as Road;
+  });
 }
 
 /** Rows are arrays in the order named by the `*Columns` entries; read them by name so a new column cannot shift them. */
@@ -44,8 +71,15 @@ export function parseCity(json: string): City {
     tower: raw.tower,
     development: raw.development ?? [],
     lots: rows(raw.lotColumns, raw.lots) as unknown as Lot[],
-    roads: rows(raw.roadColumns, raw.roads).map((r) => ({ ...r, avenue: r.avenue === 1 })) as unknown as Road[],
+    roads: parseRoads(raw.roads, raw.roadColumns),
     water: raw.water,
+    nodes: raw.nodes ?? [],
+    segments: rows(raw.segmentColumns ?? [], raw.segments ?? []).map((r) => ({
+      ...r,
+      avenue: r.avenue === 1,
+      built: r.built === 1,
+      removed: r.removed === 1,
+    })) as unknown as Segment[],
   };
 }
 

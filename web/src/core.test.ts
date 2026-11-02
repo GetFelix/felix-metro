@@ -18,6 +18,7 @@ const fixture = JSON.parse(built('fixture.json').toString()) as {
     arrive: number;
     at: [number, number, number][];
   }[];
+  roads: { seed: string; districts: number; roads: number[][]; tiles: number; hash: string }[];
   records: { name: string; record: string; json: unknown; hash: string }[];
 };
 const bytes = (hex: string) => Uint8Array.from(hex.match(/../g)!, (byte) => parseInt(byte, 16));
@@ -80,6 +81,50 @@ describe('trips in WebAssembly', () => {
     expect(place(metro, t, [])).toBeUndefined();
     expect(place(metro, t, [[4_000_000_000, 100]])).toBeUndefined();
     expect(metro.trip(4_000_000_000, 1, t.depart, Uint32Array.from(t.route.flat()))).toBeUndefined();
+  });
+});
+
+describe('built roads in WebAssembly', () => {
+  it('lays the roads a log lists to the same city as the native build', () => {
+    expect(fixture.roads.length).toBeGreaterThan(0);
+    for (const { seed, districts, roads, tiles, hash } of fixture.roads) {
+      const metro = new Metro(seed, districts);
+      metro.setRoads(Uint32Array.from(roads.flat()));
+      expect(metro.cityHash(), `${seed} ${JSON.stringify(roads)}`).toBe(hash);
+      expect(JSON.parse(metro.roadsJson())).toHaveLength(tiles);
+    }
+  });
+
+  it('puts the generated city back when the roads are cleared', () => {
+    const metro = new Metro('harbor', 2);
+    const generated = metro.cityHash();
+    expect(generated).toBe(fixture.cities.find((c) => c.seed === 'harbor' && c.districts === 2)!.hash);
+    metro.setRoads(Uint32Array.from([104, 6, 7, 0]));
+    expect(metro.cityHash()).not.toBe(generated);
+    metro.setRoads(new Uint32Array(0));
+    expect(metro.cityHash()).toBe(generated);
+  });
+
+  it('numbers a road after a gap: core fills a segment it has not been told of', () => {
+    const metro = new Metro('harbor', 2);
+    expect(() => metro.setRoads(Uint32Array.from([105, 6, 7, 0]))).not.toThrow();
+    expect(() => metro.setRoads(Uint32Array.from([3, 6, 7, 0]))).toThrow();
+  });
+
+  it('checks a road on the land and roads alone, with the sim’s result codes', () => {
+    const metro = new Metro('harbor', 2);
+    expect(metro.roadCheck(6, 7)).toBe(0);
+    expect([...metro.roadTiles(6, 7)]).toEqual([17, 0, 18, 0]);
+    expect(metro.roadCheck(6, 6)).toBe(20);
+    expect(metro.roadCheck(4_000_000, 7)).toBe(2);
+    metro.setRoads(Uint32Array.from([104, 6, 7, 0]));
+    expect(metro.roadCheck(6, 7)).toBe(22);
+    expect(metro.roadTiles(6, 7)).toHaveLength(0);
+  });
+
+  it('gives no replanned trip from a node the city does not have', () => {
+    const metro = new Metro('harbor', 2);
+    expect(metro.replan(0, 1, 100, 4_000_000, Uint32Array.from([0, 100]))).toBeUndefined();
   });
 });
 

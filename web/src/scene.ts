@@ -9,7 +9,7 @@ import { cloneModel, facing as facingOf, fitToLot, loadModel } from './models';
 import { createMaterials } from './materials';
 import type { Tier } from './params';
 import { settingsFor } from './quality';
-import { clockwise, facingAngle, lotLook, roadModel, type City } from './layout';
+import { clockwise, facingAngle, lotLook, roadModel, type City, type Road } from './layout';
 import { KINDS } from './kinds';
 const TREE_FIRST = 38; // kinds from here are trees and plaza props: no building
 import { NO_BUILDING, type Building } from './city';
@@ -112,6 +112,7 @@ export async function createCity(
   withAmbient = true,
 ) {
   let setLotDrawn: (id: number, building: Building | null) => Promise<void> = async () => {};
+  let setRoadsDrawn: (roads: readonly Road[]) => void = () => {};
   /** The building kind and the loaded building on each lot, for the ambient life that hangs on them. */
   const kindOn = new Map<number, number>();
   let buildingOn: (id: number) => THREE.Object3D | null = () => null;
@@ -184,6 +185,23 @@ export async function createCity(
 
   // ---------- layout ----------
   const lamps: THREE.Object3D[] = [];
+  interface LampLight {
+    id: number;
+    pool: THREE.MeshBasicMaterial;
+    glow: THREE.SpriteMaterial;
+    bulb: THREE.MeshBasicMaterial;
+  }
+  /** What is drawn on a road tile: its model and lamp, and the lights hung on the lamp once it loaded. */
+  interface RoadDrawn {
+    look: string;
+    jobs: Promise<THREE.Object3D>[];
+    extras: THREE.Object3D[];
+    light: LampLight | null;
+    /** Taken away before its lamp loaded, so nothing is hung on it. */
+    gone: boolean;
+  }
+  /** The road tile each lamp of the generated city stands on, so a road a builder takes away takes its lamps too. */
+  const lampTile = new Map<THREE.Object3D, RoadDrawn>();
   const jobs: Promise<unknown>[] = [];
   const N = 9;
   if (!city)
@@ -334,18 +352,52 @@ export async function createCity(
   // Tile (x, z) of the map sits at world (x - half, z - half), so the city is centred on the origin.
   function drawCity(c: City) {
     const wx = (v: number) => v - half;
-    for (const r of c.roads) {
+    const tileKey = (x: number, z: number) => z * 65536 + x;
+    const roadLook = (r: Road) => `${r.piece}|${r.rot}|${r.mask}|${r.avenue}`;
+    const roadDrawn = new Map<number, RoadDrawn>();
+    const drawRoad = (r: Road, first: boolean) => {
+      const mine: RoadDrawn = { look: roadLook(r), jobs: [], extras: [], light: null, gone: false };
+      roadDrawn.set(tileKey(r.x, r.z), mine);
       const { name, turns } = roadModel(r.piece, r.rot, r.avenue);
-      jobs.push(place('roads', name, wx(r.x), wx(r.z), clockwise(turns)));
+      const model = place('roads', name, wx(r.x), wx(r.z), clockwise(turns));
+      mine.jobs.push(model);
+      if (first) jobs.push(model);
       // A lamp on every other straight, alternating sides; its arm points along -Z, so it turns toward the road.
-      if (r.piece !== 0 || (r.x + r.z) % 2 !== 0) continue;
+      if (r.piece !== 0 || (r.x + r.z) % 2 !== 0) return;
       const alongZ = r.mask === 5;
       const side = ((r.x + r.z) / 2) % 2 === 0 ? 1 : -1;
       const lx = wx(r.x) + (alongZ ? 0.44 * side : 0);
       const lz = wx(r.z) + (alongZ ? 0 : 0.44 * side);
       const rot = alongZ ? (side > 0 ? Math.PI / 2 : -Math.PI / 2) : side > 0 ? 0 : Math.PI;
-      jobs.push(place('roads', 'light-square', lx, lz, rot).then((o) => lamps.push(o)));
-    }
+      const lamp = place('roads', 'light-square', lx, lz, rot);
+      mine.jobs.push(lamp);
+      if (first) {
+        jobs.push(
+          lamp.then((o) => {
+            lamps.push(o);
+            lampTile.set(o, mine);
+          }),
+        );
+      } else {
+        void lamp.then((o) => {
+          if (!mine.gone) hangLamp(o, mine);
+        });
+      }
+    };
+    const undrawRoad = (key: number) => {
+      const mine = roadDrawn.get(key);
+      if (!mine) return;
+      roadDrawn.delete(key);
+      mine.gone = true;
+      for (const job of mine.jobs) void job.then((o) => scene.remove(o));
+      for (const o of mine.extras) {
+        scene.remove(o);
+        const at = glows.indexOf(o);
+        if (at >= 0) glows.splice(at, 1);
+      }
+      if (mine.light) lampLights.splice(lampLights.indexOf(mine.light), 1);
+    };
+    for (const r of c.roads) drawRoad(r, true);
 
     // Water: a tile each, and open sea past the map edge it lies along.
     if (c.water.length) {
@@ -460,17 +512,31 @@ export async function createCity(
       const b = initial.get(lot.id);
       drawLot(lot, b?.kind ?? lot.kind, b?.rotation ?? lot.facing, rand, true);
     }
-    // A lot's building changed: take down what stood and draw the new one, or the generated one for `null`. The look
-    // is picked from the lot and the kind, so every browser draws the same building.
-    setLotDrawn = async (id, building) => {
-      const lot = c.lots[id];
-      if (!lot || id === c.tower) return;
+    /** The building each lot should show, kept while a road covers the lot so it can come back when the road goes. */
+    const standing = new Map(initial);
+    /** Lots a builder's road runs over: nothing of theirs is drawn. */
+    const covered = new Set<number>();
+    const lotByTile = new Map(c.lots.map((l) => [tileKey(l.x, l.z), l.id]));
+    const takeDown = (id: number) => {
       const old = lotObjects.get(id)?.jobs ?? [];
       lotObjects.delete(id);
       ambient?.clearLot(id);
       // Not awaited: a second call for the lot while models load would find nothing to take down and draw beside this
       // one, and whichever drew last would be the only one tracked.
       for (const job of old) void job.then((o) => scene.remove(o));
+    };
+    // A lot's building changed: take down what stood and draw the new one, or the generated one for `null`. The look
+    // is picked from the lot and the kind, so every browser draws the same building.
+    setLotDrawn = async (id, building) => {
+      const lot = c.lots[id];
+      if (!lot || id === c.tower) return;
+      if (building) standing.set(id, building);
+      else standing.delete(id);
+      takeDown(id);
+      if (covered.has(id)) {
+        kindOn.set(id, NO_BUILDING);
+        return;
+      }
       const kind = building?.kind ?? lot.kind;
       let n = 0;
       const rnd = () => unitHash(id * 64 + kind, n++);
@@ -479,6 +545,33 @@ export async function createCity(
       ambient?.refresh(id);
     };
     buildingOn = (id) => lotObjects.get(id)?.building ?? null;
+    // The road tiles as core lays them now. Only the tiles that differ are drawn again, and a lot under a builder's
+    // road shows nothing until the road goes (road tiles of the generated city have no lot).
+    setRoadsDrawn = (roads) => {
+      const next = new Map(roads.map((r) => [tileKey(r.x, r.z), r]));
+      for (const [key, mine] of [...roadDrawn]) {
+        const r = next.get(key);
+        if (!r || roadLook(r) !== mine.look) undrawRoad(key);
+      }
+      for (const [key, r] of next) if (!roadDrawn.has(key)) drawRoad(r, false);
+      const under = new Set<number>();
+      for (const key of next.keys()) {
+        const lot = lotByTile.get(key);
+        if (lot !== undefined) under.add(lot);
+      }
+      for (const lot of [...covered]) {
+        if (under.has(lot)) continue;
+        covered.delete(lot);
+        void setLotDrawn(lot, standing.get(lot) ?? null);
+      }
+      for (const lot of under) {
+        if (covered.has(lot)) continue;
+        covered.add(lot);
+        takeDown(lot);
+        kindOn.set(lot, NO_BUILDING);
+      }
+      ambient?.setRoads(roads);
+    };
     lots = {
       objects: (id) => lotObjects.get(id)?.objects ?? [],
       ghosts: (id) => ghostObjects.get(id)?.objects ?? [],
@@ -540,12 +633,7 @@ export async function createCity(
   });
   // Additive glows: hidden while ambient occlusion reads the scene, or they shade it like solid quads.
   const glows: THREE.Object3D[] = [];
-  const lampLights: {
-    id: number;
-    pool: THREE.MeshBasicMaterial;
-    glow: THREE.SpriteMaterial;
-    bulb: THREE.MeshBasicMaterial;
-  }[] = [];
+  const lampLights: LampLight[] = [];
   const glowMat = new THREE.SpriteMaterial({
     map: radial('rgba(255,210,140,1)'),
     blending: THREE.AdditiveBlending,
@@ -694,8 +782,10 @@ export async function createCity(
 
   await Promise.all(jobs);
 
+  for (const lamp of lamps) hangLamp(lamp, lampTile.get(lamp) ?? null);
+
   // Bulbs, glows and pools hang off the lamp models' arms. Each lamp has its own materials so it can switch on alone.
-  for (const lamp of lamps) {
+  function hangLamp(lamp: THREE.Object3D, tile: RoadDrawn | null) {
     const arm = new THREE.Vector3(0, 0.58, -0.17).applyEuler(lamp.rotation).add(lamp.position);
     const light = {
       id: lampId(lamp.position.x, lamp.position.z),
@@ -714,6 +804,11 @@ export async function createCity(
     pool.position.set(arm.x, 0.03, arm.z);
     scene.add(bulb, glow, pool);
     glows.push(glow, pool);
+    if (tile) {
+      tile.extras.push(bulb, glow, pool);
+      tile.light = light;
+    }
+    if (lit) switchLamp(light, lit.hour, lit.d);
   }
 
   // ---------- time of day ----------
@@ -722,6 +817,14 @@ export async function createCity(
   const nightGround = new THREE.Color(GROUND_NIGHT);
   const lampColor = new THREE.Color(PALETTE.lamp);
   const bulbOff = new THREE.Color(BULB_OFF);
+  /** The light of the hour last set, for a lamp hung after it. */
+  let lit: { hour: number; d: ReturnType<typeof daylight> } | null = null;
+  function switchLamp(l: LampLight, hour: number, d: ReturnType<typeof daylight>) {
+    const on = lampSwitch(hour, l.id);
+    l.pool.opacity = on * d.poolOpacity;
+    l.glow.opacity = on * d.glowOpacity;
+    l.bulb.color.copy(bulbOff).lerp(lampColor, on);
+  }
   function setTime(hour: number, bloom: UnrealBloomPass | null) {
     const d = daylight(hour);
     scene.background = d.sky;
@@ -739,12 +842,8 @@ export async function createCity(
     );
     for (const m of materials.lit())
       m.emissiveIntensity = d.windowBrightness * m.userData.lit * windowSwitch(hour, m.userData.bucket);
-    for (const l of lampLights) {
-      const on = lampSwitch(hour, l.id);
-      l.pool.opacity = on * d.poolOpacity;
-      l.glow.opacity = on * d.glowOpacity;
-      l.bulb.color.copy(bulbOff).lerp(lampColor, on);
-    }
+    lit = { hour, d };
+    for (const l of lampLights) switchLamp(l, hour, d);
     headMat.opacity = d.headlight;
     tailMat.opacity = d.taillight;
     beamMat.opacity = d.beam;
@@ -835,6 +934,8 @@ export async function createCity(
     setShadows,
     fleet: crowd?.fleet ?? null,
     setLot: (id: number, b: Building | null) => setLotDrawn(id, b),
+    /** Draw the road tiles as core lays them, the generated ones and the builders', in place of what is drawn. */
+    setRoads: (roads: readonly Road[]) => setRoadsDrawn(roads),
     /** Show the building a builder's tool would put on lot `id` as a ghost, or none with null; `fits` tints it. */
     previewBuilding: (...args: Parameters<typeof previewBuilding>) => previewBuilding(...args),
   };

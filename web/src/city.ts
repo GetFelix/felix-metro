@@ -6,9 +6,7 @@ import type { City } from './layout';
 /** A building kind that means the lot is empty. */
 export const NO_BUILDING = 65535;
 
-/** What a `road` event or a keyframe's road list says happened to a segment, as the sim writes it. */
-export const ROAD_CLOSED = 0;
-export const ROAD_OPENED = 1;
+/** What a `roadwork` event or a keyframe's road list says a builder did to a segment. */
 export const ROAD_ADDED = 2;
 export const ROAD_REMOVED = 3;
 
@@ -25,10 +23,21 @@ interface BuildingEvent {
   kind: number;
   rotation: number;
 }
-interface RoadEvent {
-  type: 'road';
+/** A road a builder added (`ROAD_ADDED`) or took away (`ROAD_REMOVED`), between nodes `a` and `b`. */
+interface RoadworkEvent {
+  type: 'roadwork';
   segment: number;
   change: number;
+  a: number;
+  b: number;
+}
+/** A vehicle moved to `node` and sent on a new route, because a road on its old one was taken away. */
+interface ReplanEvent {
+  type: 'replan';
+  resident: number;
+  vehicle: number;
+  node: number;
+  route: [number, number][];
 }
 interface SpeedEvent {
   type: 'speed';
@@ -56,7 +65,8 @@ interface BalanceEvent {
 export type TickEvent =
   | TripEvent
   | BuildingEvent
-  | RoadEvent
+  | RoadworkEvent
+  | ReplanEvent
   | SpeedEvent
   | CommandEvent
   | LedgerEvent
@@ -71,7 +81,8 @@ export interface TickRecord {
   speed: number;
   keyframeOffset: number;
   wallUs: number;
-  keyframe: { buildings: [number, number, number][]; roads?: [number, number][] } | null;
+  /** `roads` rows are `[segment, change, a, b]`, for every road a builder added in the district, live or removed. */
+  keyframe: { buildings: [number, number, number][]; roads?: [number, number, number, number][] } | null;
   events: TickEvent[];
 }
 
@@ -84,9 +95,41 @@ export interface Journey {
   free(): void;
 }
 
-/** What turns a `trip` event into a {@link Journey}: core's `Metro`. */
+/** What turns a `trip` or `replan` event into a {@link Journey}: core's `Metro`. */
 export interface Trips {
   trip(resident: number, vehicle: number, depart: number, route: Uint32Array): Journey | undefined;
+  /** A replanned trip from `node`; without it every `replan` is counted unplaced. */
+  replan?(resident: number, vehicle: number, depart: number, node: number, route: Uint32Array): Journey | undefined;
+  /** Give the routes the roads builders added, as {@link CityState.builtRoads} lists them. */
+  setRoads?(roads: Uint32Array): void;
+}
+
+/** A road a builder added: whether it is still there, and the nodes it joins. */
+export interface BuiltRoad {
+  change: number;
+  a: number;
+  b: number;
+}
+
+const NO_ROADS = new Uint32Array(0);
+/** The built roads each `Trips` was last given. Several states can share one `Metro`, so it is tracked per `Metro`. */
+const given = new WeakMap<Trips, Uint32Array>();
+
+/**
+ * Give `trips` the roads of `roads` unless it has them already. Trips on a built segment resolve only once the
+ * `Metro` knows that segment. Returns false when the `Metro` would not take them.
+ */
+export function syncRoads(trips: Trips, roads: Uint32Array): boolean {
+  const held = given.get(trips) ?? NO_ROADS;
+  if (held === roads || (held.length === 0 && roads.length === 0) || !trips.setRoads) return true;
+  given.set(trips, roads);
+  try {
+    trips.setRoads(roads);
+    return true;
+  } catch (err) {
+    console.warn('the built roads do not fit the city', err);
+    return false;
+  }
 }
 
 /** One resident's trip, from the tick it leaves to the tick it arrives. */
@@ -126,10 +169,15 @@ export class CityState {
   readonly falling = new Map<number, Falling>();
   /** Lots that differ from the generated city. */
   readonly built = new Map<number, Building>();
-  /** Segments closed, added or removed since the city was generated, by segment: a `ROAD_*` change. */
-  readonly roads = new Map<number, number>();
-  /** The district whose record last said something about a segment, so its keyframe can replace the entry. */
+  /**
+   * Every road a builder added, by segment, including the ones taken away again: segment ids are never reused, so
+   * core needs the gaps to number the live ones.
+   */
+  readonly roads = new Map<number, BuiltRoad>();
+  /** The district whose records tell of a segment (that of its node a), so its keyframe can replace the entry. */
   private readonly roadDistrict = new Map<number, number>();
+  /** {@link builtRoads}, until the roads change. */
+  private roadList: Uint32Array | null = NO_ROADS;
   /** The newest tick of each district. */
   readonly ticks: number[];
   /** The sim epoch of each district's newest record. */
@@ -147,6 +195,8 @@ export class CityState {
   private readonly finishing: Voyage[] = [];
   /** Trips whose legs matched no route of their resident; zero unless the sim and this page disagree. */
   unplaced = 0;
+  /** Told when a builder's road is added or taken away. */
+  onRoads: (() => void) | null = null;
   /** Told when a lot's building changes, with `null` for the generated one. */
   onLot: ((lot: number, building: Building | null) => void) | null = null;
   /** Told when a voyage is replaced or ends, just before its journey is freed. */
@@ -214,6 +264,7 @@ export class CityState {
     for (const e of record.events) {
       if (e.type === 'trip') {
         const t = e;
+        syncRoads(this.trips, this.builtRoads());
         const journey = this.trips.trip(t.resident, t.vehicle, t.depart, Uint32Array.from(t.route.flat()));
         if (!journey) {
           this.unplaced++;
@@ -222,14 +273,16 @@ export class CityState {
         const old = this.voyages.get(t.resident);
         if (old) this.finishing.push(old);
         this.voyages.set(t.resident, { resident: t.resident, vehicle: t.vehicle, depart: t.depart, journey });
+      } else if (e.type === 'replan') {
+        this.replan(e, record.tick);
       } else if (e.type === 'built' || e.type === 'demolished') {
         this.mark(e, record.tick, this.rising, this.falling);
         this.set(
           e.lot,
           e.type === 'built' ? { kind: e.kind, rotation: e.rotation } : { kind: NO_BUILDING, rotation: 0 },
         );
-      } else if (e.type === 'road') {
-        this.road(d, e.segment, e.change);
+      } else if (e.type === 'roadwork') {
+        this.road(d, e.segment, { change: e.change, a: e.a, b: e.b });
       } else if (e.type === 'speed') {
         this.speed = e.ticksPerSecond;
       } else if (e.type === 'command') {
@@ -243,6 +296,43 @@ export class CityState {
     }
     this.prune(d);
     return 'applied';
+  }
+
+  // The old trip may run along a road that is gone, so it stops being drawn now rather than when it would have arrived.
+  private replan(e: ReplanEvent, tick: number): void {
+    const old = this.voyages.get(e.resident);
+    if (old) {
+      this.voyages.delete(e.resident);
+      this.end(old);
+    }
+    for (let i = this.finishing.length - 1; i >= 0; i--) {
+      const v = this.finishing[i]!;
+      if (v.resident !== e.resident) continue;
+      this.finishing.splice(i, 1);
+      this.end(v);
+    }
+    syncRoads(this.trips, this.builtRoads());
+    const journey = this.trips.replan?.(e.resident, e.vehicle, tick, e.node, Uint32Array.from(e.route.flat()));
+    if (!journey) {
+      this.unplaced++;
+      return;
+    }
+    this.voyages.set(e.resident, { resident: e.resident, vehicle: e.vehicle, depart: tick, journey });
+  }
+
+  /**
+   * The roads builders added, as `Metro.setRoads` takes them: segment, node a, node b and 1 if taken away, four numbers
+   * each in segment order. The same array until the roads change.
+   */
+  builtRoads(): Uint32Array {
+    if (this.roadList) return this.roadList;
+    const ids = [...this.roads.keys()].sort((x, y) => x - y);
+    const out = new Uint32Array(ids.length * 4);
+    ids.forEach((id, i) => {
+      const r = this.roads.get(id)!;
+      out.set([id, r.a, r.b, r.change === ROAD_REMOVED ? 1 : 0], i * 4);
+    });
+    return (this.roadList = out);
   }
 
   // Remember when a lot changed, for the animation. A demolition during a rise comes down from the height reached.
@@ -341,7 +431,7 @@ export class CityState {
   private keyframe(
     district: number,
     diffs: [number, number, number][],
-    roads: [number, number][],
+    roads: [number, number, number, number][],
     fresh: boolean,
   ): void {
     const listed = new Set(diffs.map((b) => b[0]));
@@ -357,22 +447,29 @@ export class CityState {
       if (this.city.lots[lot]?.district === district && !listed.has(lot)) this.set(lot, null);
     }
     for (const [lot, kind, rotation] of diffs) this.set(lot, { kind, rotation });
+    // The keyframe lists every road of the district, so one it leaves out was never built as of its tick.
+    const listedRoads = new Set(roads.map((r) => r[0]));
     for (const segment of [...this.roads.keys()]) {
-      if (this.roadDistrict.get(segment) === district) this.roads.delete(segment);
+      if (this.roadDistrict.get(segment) === district && !listedRoads.has(segment)) {
+        this.roads.delete(segment);
+        this.roadDistrict.delete(segment);
+        this.roadsChanged();
+      }
     }
-    for (const [segment, change] of roads) {
-      this.roads.set(segment, change);
-      this.roadDistrict.set(segment, district);
-    }
+    for (const [segment, change, a, b] of roads) this.road(district, segment, { change, a, b });
   }
 
-  // Opening a closed road and removing an added one put it back as generated, which is no entry.
-  private road(district: number, segment: number, change: number): void {
-    const was = this.roads.get(segment);
-    if (change === ROAD_OPENED && was === ROAD_CLOSED) this.roads.delete(segment);
-    else if (change === ROAD_REMOVED && was === ROAD_ADDED) this.roads.delete(segment);
-    else this.roads.set(segment, change);
+  private road(district: number, segment: number, road: BuiltRoad): void {
     this.roadDistrict.set(segment, district);
+    const was = this.roads.get(segment);
+    if (was?.change === road.change && was.a === road.a && was.b === road.b) return;
+    this.roads.set(segment, road);
+    this.roadsChanged();
+  }
+
+  private roadsChanged(): void {
+    this.roadList = null;
+    this.onRoads?.();
   }
 
   private set(lot: number, building: Building | null): void {

@@ -2,7 +2,7 @@
 // this table and the key list in the UI (`web/src/ui/keys.ts`) is built from it, so the two cannot drift.
 import { isTyping } from './camera-keys';
 
-export type BuildAction = 'build' | 'demolish' | 'rotate' | 'previous' | 'next' | 'cancel';
+export type BuildAction = 'build' | 'demolish' | 'road' | 'rotate' | 'previous' | 'next' | 'cancel';
 
 export interface BuildKey {
   action: BuildAction;
@@ -18,10 +18,11 @@ export interface BuildKey {
 export const BUILD_KEYS: readonly BuildKey[] = [
   { action: 'build', keys: ['b'], keycaps: ['B'], label: 'Pick the build tool, or put it away' },
   { action: 'demolish', keys: ['x'], keycaps: ['X'], label: 'Pick the demolish tool, or put it away' },
+  { action: 'road', keys: ['y'], keycaps: ['Y'], label: 'Pick the road tool, or put it away' },
   { action: 'rotate', keys: ['r'], keycaps: ['R'], label: 'Turn the building a quarter turn' },
   { action: 'previous', keys: ['[', ','], keycaps: ['[', ','], label: 'Choose the previous building' },
   { action: 'next', keys: [']', '.'], keycaps: [']', '.'], label: 'Choose the next building' },
-  { action: 'cancel', keys: ['escape'], keycaps: ['Esc'], label: 'Put the tool away' },
+  { action: 'cancel', keys: ['escape'], keycaps: ['Esc'], label: 'Drop the first end of a road, or put the tool away' },
 ];
 
 const BY_KEY = new Map(BUILD_KEYS.flatMap((row) => row.keys.map((key) => [key, row.action] as const)));

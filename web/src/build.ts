@@ -1,6 +1,6 @@
 // What a builder may do to a lot, and the bytes that ask the sim for it. The rules mirror sim/src/world.rs: the page
 // refuses what the sim would refuse, so a person is told at once instead of after a round trip.
-import { NO_BUILDING, type Building } from './city';
+import { NO_BUILDING, ROAD_ADDED, type Building, type BuiltRoad } from './city';
 import { KINDS } from './kinds';
 import type { City } from './layout';
 
@@ -24,8 +24,10 @@ const no = (why: string): Check => ({ ok: false, why });
 
 /** What the page can see of a city: its generated lots and development area, and what builders have changed. */
 export interface Ground {
-  city: Pick<City, 'lots' | 'development'>;
+  city: Pick<City, 'lots' | 'development'> & Partial<Pick<City, 'nodes'>>;
   built: ReadonlyMap<number, Building>;
+  /** The roads builders added, live and taken away, as `CityState.roads` keeps them. */
+  roads?: ReadonlyMap<number, BuiltRoad>;
 }
 
 /** The kind standing on `lot` now: a builder's change, else the generated city's. */
@@ -48,9 +50,12 @@ export function canBuild(ground: Ground, lot: number): Check {
   const kind = kindOn(ground, lot);
   if (kind === null) return no('That spot is not on the map.');
   if (!isDevelopment(ground, lot)) return no('Only the cleared ground can be built on.');
+  if (roadOver(ground, lot) !== null) return no(ROAD_HERE);
   if (!isEmpty(kind)) return no('There is already a building here.');
   return OK;
 }
+
+const ROAD_HERE = 'A road runs over this lot. Take the road away first.';
 
 /**
  * Whether the building on `lot` may come down. The sim refuses homes, workplaces and parks, which are the generated
@@ -64,8 +69,113 @@ export function canDemolish(ground: Ground, lot: number): Check {
   return OK;
 }
 
+// ---------- roads ----------
+
+/** The tiles strictly between two map tiles in one row or column, as `[x, z]`; none for tiles not in line. */
+export function tilesBetween(from: readonly [number, number], to: readonly [number, number]): [number, number][] {
+  const [ax, az] = from;
+  const [bx, bz] = to;
+  if (ax !== bx && az !== bz) return [];
+  const dx = Math.sign(bx - ax);
+  const dz = Math.sign(bz - az);
+  const out: [number, number][] = [];
+  for (let k = 1; k < Math.abs(bx - ax) + Math.abs(bz - az); k++) out.push([ax + dx * k, az + dz * k]);
+  return out;
+}
+
+const tileIndex = new WeakMap<readonly unknown[], Map<number, number>>();
+/** The lot on map tile `(x, z)`, or null for a road, the water or past the map. */
+export function lotAtTile(city: Pick<City, 'lots'>, x: number, z: number): number | null {
+  let index = tileIndex.get(city.lots);
+  if (!index) {
+    index = new Map(city.lots.map((l) => [l.z * 65536 + l.x, l.id]));
+    tileIndex.set(city.lots, index);
+  }
+  return index.get(z * 65536 + x) ?? null;
+}
+
+const covering = new WeakMap<ReadonlyMap<number, BuiltRoad>, { size: string; by: Map<number, number> }>();
+/** The live builder's road over each lot it covers, by lot. A road keeps its lots in the city's list underneath it. */
+export function roadLots(ground: Ground): ReadonlyMap<number, number> {
+  const { roads } = ground;
+  const nodes = ground.city.nodes;
+  if (!roads || !nodes || roads.size === 0) return new Map();
+  // Keyed on the map's contents too: the state changes it in place.
+  const size = [...roads].map(([id, r]) => `${id}:${r.change}`).join(',');
+  const cached = covering.get(roads);
+  if (cached?.size === size) return cached.by;
+  const by = new Map<number, number>();
+  for (const [segment, road] of roads) {
+    const [a, b] = [nodes[road.a], nodes[road.b]];
+    if (road.change !== ROAD_ADDED || !a || !b) continue;
+    for (const [x, z] of tilesBetween(a, b)) {
+      const lot = lotAtTile(ground.city, x, z);
+      if (lot !== null) by.set(lot, segment);
+    }
+  }
+  covering.set(roads, { size, by });
+  return by;
+}
+
+/** The builder's road over `lot`, or null. */
+export function roadOver(ground: Ground, lot: number): number | null {
+  return roadLots(ground).get(lot) ?? null;
+}
+
+/** Why the land and roads refuse a road, by the code core's `Metro.roadCheck` gives, in the sim's own result codes. */
+export function roadRefusal(code: number): string {
+  switch (code) {
+    case 2:
+      return 'That crossing is not on the map.';
+    case 20:
+      return 'A road runs straight: pick two crossings in one row or column.';
+    case 21:
+      return 'A road can be at most 12 tiles long.';
+    case 22:
+      return 'A road already joins these two crossings.';
+    case 23:
+      return 'The ground between is not clear: another road, the water or the edge of the map is in the way, or a road runs beside it.';
+    default:
+      return refusal(code);
+  }
+}
+
+/**
+ * Whether a road may join nodes `a` and `b`. `code` is what core's `Metro.roadCheck` says of the land and the roads;
+ * this adds the lots under it, which the page knows. The sim also refuses land residents use, which it finds by running
+ * their days, so the page offers only the cleared ground and filler with no door, which nobody visits.
+ */
+export function canPlaceRoad(ground: Ground, a: number, b: number, code: number): Check {
+  if (a === b) return no('Pick a different crossing for the other end.');
+  if (code !== 0) return no(roadRefusal(code));
+  const nodes = ground.city.nodes;
+  const [from, to] = [nodes?.[a], nodes?.[b]];
+  if (!from || !to) return no(roadRefusal(2));
+  for (const [x, z] of tilesBetween(from, to)) {
+    const lot = lotAtTile(ground.city, x, z);
+    if (lot === null) return no(roadRefusal(23));
+    const kind = kindOn(ground, lot);
+    if (kind === null || !isEmpty(kind)) return no('A building is in the way.');
+    const generated = ground.city.lots[lot]!;
+    if (!isDevelopment(ground, lot) && generated.doorSegment !== null) {
+      return no('People live, work or play along there. A road can only cross the cleared ground and empty plots.');
+    }
+  }
+  return OK;
+}
+
+/** Whether the road `segment` may be taken away: only a road a builder added and that is still there. */
+export function canRemoveRoad(ground: Ground, segment: number | null): Check {
+  if (segment === null) return no(GENERATED_ROAD);
+  if (ground.roads?.get(segment)?.change !== ROAD_ADDED) return no(GENERATED_ROAD);
+  return OK;
+}
+
+const GENERATED_ROAD = 'Only a road a builder laid can be taken away. The city’s own streets stay: homes and work are on them.';
+
 /** What a refused command is told to the person as, by the result code of its `command` event. */
-export function refusal(result: number): string {
+export function refusal(result: number, tool: 'build' | 'demolish' | 'road' | null = null): string {
+  if (result === 23 && tool === 'build') return 'A road runs over that lot now.';
   switch (result) {
     case 1:
       return 'The city could not read that.';
@@ -83,6 +193,18 @@ export function refusal(result: number): string {
       return 'People live or work there, so it stays.';
     case 9:
       return 'The city is busy. Try again.';
+    case 10:
+      return 'The city cannot afford that right now.';
+    case 20:
+      return 'A road has to run straight, along one row or column.';
+    case 21:
+      return 'That road is longer than 12 tiles.';
+    case 22:
+      return 'A road already joins those two crossings.';
+    case 23:
+      return 'Something is in the way: a road, the water or a building.';
+    case 24:
+      return 'Only a road a builder laid can be taken away, and only once.';
     default:
       return 'The city turned that down.';
   }
@@ -164,8 +286,10 @@ export function nameFrom(token: string, fallback = 'Builder'): string {
   }
 }
 
+const CMD_PLACE_ROAD = 1;
 const CMD_BUILD = 3;
 const CMD_DEMOLISH = 4;
+const CMD_REMOVE_ROAD = 8;
 const RECORD_COMMAND = 2;
 
 /** `text` cut to at most `max` bytes of UTF-8 without splitting a character. */
@@ -204,6 +328,16 @@ export function buildCommand(id: number, name: string, lot: number, kind: number
 /** A `demolish` command record. */
 export function demolishCommand(id: number, name: string, lot: number): Uint8Array {
   return record(id, name, [CMD_DEMOLISH, ...u32(lot)]);
+}
+
+/** A `place road` command record: a street between nodes `a` and `b`. */
+export function placeRoadCommand(id: number, name: string, a: number, b: number): Uint8Array {
+  return record(id, name, [CMD_PLACE_ROAD, ...u32(a), ...u32(b)]);
+}
+
+/** A `remove road` command record. */
+export function removeRoadCommand(id: number, name: string, segment: number): Uint8Array {
+  return record(id, name, [CMD_REMOVE_ROAD, ...u32(segment)]);
 }
 
 /** A random command id; two builders drawing the same one in the few seconds a command is waiting is a one in four billion. */

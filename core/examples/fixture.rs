@@ -258,6 +258,29 @@ fn trips() -> Vec<String> {
     out
 }
 
+/// Cities with roads a builder added and took away, as `Metro.setRoads` is given them, with the hash core makes of each.
+fn roads() -> Vec<String> {
+    // The one pair of nodes in each city a road may join over the cleared ground and empty plots alone.
+    let mut out = Vec::new();
+    for (seed, a, b) in [("harbor", 6, 7), ("pinecrest", 65, 75)] {
+        let mut city = City::generate(seed, 2).unwrap();
+        let segment = city.add_road(a, b).unwrap();
+        let laid = format!("[{segment},{a},{b},0]");
+        out.push(format!(
+            "    {{\"seed\": \"{seed}\", \"districts\": 2, \"roads\": [{laid}], \"tiles\": {}, \"hash\": \"{:016x}\"}}",
+            city.roads.len(),
+            city.hash()
+        ));
+        city.remove_road(segment).unwrap();
+        out.push(format!(
+            "    {{\"seed\": \"{seed}\", \"districts\": 2, \"roads\": [[{segment},{a},{b},1]], \"tiles\": {}, \"hash\": \"{:016x}\"}}",
+            city.roads.len(),
+            city.hash()
+        ));
+    }
+    out
+}
+
 fn main() {
     let cases = [("harbor", 2), ("meadow", 2), ("harbor", 4)];
     let cities: Vec<String> = cases
@@ -294,10 +317,11 @@ fn main() {
         })
         .collect();
     println!(
-        "{{\n  \"cities\": [\n{}\n  ],\n  \"days\": [\n{}\n  ],\n  \"trips\": [\n{}\n  ],\n  \"records\": [\n{}\n  ]\n}}",
+        "{{\n  \"cities\": [\n{}\n  ],\n  \"days\": [\n{}\n  ],\n  \"trips\": [\n{}\n  ],\n  \"roads\": [\n{}\n  ],\n  \"records\": [\n{}\n  ]\n}}",
         cities.join(",\n"),
         days.join(",\n"),
         trips().join(",\n"),
+        roads().join(",\n"),
         recs.join(",\n")
     );
 }

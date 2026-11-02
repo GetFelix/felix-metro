@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { NO_BUILDING } from './city';
+import { NO_BUILDING, ROAD_ADDED, ROAD_REMOVED } from './city';
 import { decodeRecord, initSync } from './core/felix_metro_core.js';
 import { GatewayError } from './gateway';
 import { ANSWER_MS, Placement, whyNot, type Blocked, type CommandLink, type PlacementDeps } from './placement';
@@ -256,5 +256,113 @@ describe('what became of a command', () => {
     expect(placement.status).toMatchObject({ state: 'refused', text: expect.stringContaining('not answered') });
     expect(placement.pending).toBe(0);
     expect(placement.preview(1)?.check.ok).toBe(true);
+  });
+});
+
+describe('the road tool', () => {
+  /** Nodes 0 and 1 at the ends of a row of cleared ground; node 2 off in a corner. Core says 0 for 0 to 1 only. */
+  function roads(over: Partial<PlacementDeps> = {}) {
+    const roadMap = new Map<number, { change: number; a: number; b: number }>();
+    const t = setup({
+      ground: () => ({
+        city: {
+          development: [0, 1],
+          nodes: [
+            [0, 0],
+            [3, 0],
+            [9, 9],
+          ],
+          lots: [
+            { id: 0, x: 1, z: 0, kind: NO_BUILDING, doorSegment: 0 },
+            { id: 1, x: 2, z: 0, kind: NO_BUILDING, doorSegment: 0 },
+          ] as never,
+        },
+        built: new Map(),
+        roads: roadMap,
+      }),
+      roadCheck: (a, b) => (Math.min(a, b) === 0 && Math.max(a, b) === 1 ? 0 : 20),
+      ...over,
+    });
+    t.placement.select('road');
+    return { ...t, roadMap };
+  }
+
+  it('picks the first end, shows the road to the second and sends it', async () => {
+    const { placement, sent } = roads();
+    placement.hoverRoad({ node: 0, segment: null });
+    expect(placement.roadPreview()).toEqual({ kind: 'start', a: 0, check: { ok: true } });
+    expect(await placement.commitRoad()).toBeNull();
+    expect(placement.roadStart).toBe(0);
+    expect(sent).toHaveLength(0);
+    placement.hoverRoad({ node: 1, segment: null });
+    expect(placement.roadPreview()).toEqual({ kind: 'lay', a: 0, b: 1, check: { ok: true } });
+    expect(await placement.commitRoad()).toBeNull();
+    expect(decode(sent[0]!)).toMatchObject({ id: 100, name: 'Ana', command: { type: 'placeRoad', a: 0, b: 1 } });
+    expect(placement.roadStart).toBeNull();
+    expect(placement.status).toEqual({ state: 'waiting', text: 'Waiting for the city…' });
+    placement.result(100, 0);
+    expect(placement.status).toEqual({ state: 'done', text: 'Road laid.' });
+  });
+
+  it('shows a refused road in red with the reason, and sends nothing', async () => {
+    const { placement, sent } = roads();
+    placement.hoverRoad({ node: 0, segment: null });
+    await placement.commitRoad();
+    placement.hoverRoad({ node: 2, segment: null });
+    const preview = placement.roadPreview()!;
+    expect(preview).toMatchObject({ kind: 'lay', check: { ok: false, why: expect.stringMatching(/straight/) } });
+    expect(await placement.commitRoad()).toMatch(/straight/);
+    expect(sent).toHaveLength(0);
+    // The first end stays, so another second end can be tried.
+    expect(placement.roadStart).toBe(0);
+  });
+
+  it('drops the first end on Esc, and puts the tool away on a second', () => {
+    const { placement } = roads();
+    placement.hoverRoad({ node: 0, segment: null });
+    void placement.commitRoad();
+    placement.cancel();
+    expect(placement.roadStart).toBeNull();
+    expect(placement.tool).toBe('road');
+    placement.cancel();
+    expect(placement.tool).toBeNull();
+  });
+
+  it('takes away a builder’s road under the pointer, and says why not for the city’s own', async () => {
+    const { placement, sent, roadMap } = roads();
+    roadMap.set(104, { change: ROAD_ADDED, a: 0, b: 1 });
+    placement.hoverRoad({ node: 0, segment: 104 });
+    expect(placement.roadPreview()).toEqual({ kind: 'remove', segment: 104, check: { ok: true } });
+    expect(await placement.commitRoad()).toBeNull();
+    expect(decode(sent[0]!)).toMatchObject({ command: { type: 'removeRoad', segment: 104 } });
+    expect(placement.roadPreview()!.check).toMatchObject({ ok: false, why: expect.stringMatching(/still going through/) });
+    placement.result(100, 24);
+    expect(placement.status.state === 'refused' && placement.status.text).toMatch(/builder laid/);
+    roadMap.set(104, { change: ROAD_REMOVED, a: 0, b: 1 });
+    expect(placement.roadPreview()!.check).toMatchObject({ ok: false, why: expect.stringMatching(/own streets/) });
+  });
+
+  it('holds a road while it goes through, so a second click does not send it again', async () => {
+    const { placement, sent } = roads();
+    for (const node of [0, 1]) {
+      placement.hoverRoad({ node, segment: null });
+      await placement.commitRoad();
+    }
+    for (const node of [1, 0]) {
+      placement.hoverRoad({ node, segment: null });
+      await placement.commitRoad();
+    }
+    expect(sent).toHaveLength(1);
+    expect(placement.status).toMatchObject({ state: 'refused', text: expect.stringMatching(/still going through/) });
+  });
+
+  it('refuses every road without core to ask, and is off with the other tools away from the tip', async () => {
+    const { placement, state } = roads({ roadCheck: undefined });
+    placement.hoverRoad({ node: 0, segment: null });
+    await placement.commitRoad();
+    placement.hoverRoad({ node: 1, segment: null });
+    expect(placement.roadPreview()!.check.ok).toBe(false);
+    state.tip = false;
+    expect(await placement.commitRoad()).toBe('Go back to live to build.');
   });
 });
