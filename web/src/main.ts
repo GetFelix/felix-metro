@@ -29,6 +29,8 @@ import { agoText, createGuess, createTimeline, moveRange, stepTick, clampTick, t
 import { createLoader, type Loader } from './ui/loader';
 import { createPicker } from './ui/picker';
 import { createShell, type Shell } from './ui/shell';
+import { createStatsPanel, type StatsPanel } from './ui/stats';
+import { createStats, type CityStats } from './stats';
 import { createStatus, type Status } from './ui/status';
 import { note, toast } from './ui/toast';
 import { displayName } from './registry';
@@ -59,6 +61,8 @@ declare global {
       /** Put the camera low beside the first car drawn. */
       closeUp(): boolean;
     };
+    /** The city stats for the state and tick on screen, as the panel shows them. */
+    __stats?: () => CityStats | null;
     /** What became of each record the page took, as `[district, tick, result]`; only under ?trace. */
     __trace?: [number, number, string][];
     /** The seek behind a page opened with ?at: the tick shown, and the ms to find and fold the city, and the ms after that to its first frame. */
@@ -316,7 +320,9 @@ async function main() {
   let apply: (tier: Tier) => void = () => {};
   const quality = createQuality({ url: urlTier, still, onChange: (t) => apply(t) });
   // The capture job needs the page as it draws, with nothing to dismiss, so it gets no controls and no tip.
-  const shell = ui && !capture && layout === 'city' ? createShell(quality) : null;
+  const stats: StatsPanel | null =
+    ui && !capture && layout === 'city' ? createStatsPanel(() => shell?.isOpen ?? false) : null;
+  const shell: Shell | null = stats ? createShell(quality, stats) : null;
 
   const renderer = createRenderer(quality.tier);
   let city: City | null = null;
@@ -456,6 +462,17 @@ async function main() {
     state.onVoyageEnd = (v) => traffic.release(v);
     hour = cityTime(Math.max(0, state.latest - 1)).hour;
   }
+  // The tick on screen, as the numbers of the stats panel are read for: null before the first frame has one.
+  const readStats = city ? createStats(city) : null;
+  const statsNow = (): CityStats | null => {
+    if (!readStats) return null;
+    const tick = liveInfo?.tick;
+    const folded = state && tick !== undefined && !Number.isNaN(tick);
+    return readStats(folded ? state : null, folded ? Math.floor(tick) : 0);
+  };
+  let statsAt = 0;
+  stats?.onChange(() => (statsAt = 0));
+  if (hooks) window.__stats = statsNow;
   hour = frozenHour ?? (state ? hour : parseFloat(slider.value));
   slider.value = String(hour);
   slider.addEventListener('input', () => {
@@ -1143,6 +1160,12 @@ async function main() {
           fps: smoothed,
         });
       }
+    }
+    // A few times a second is plenty for numbers a person reads.
+    if (stats?.on && now - statsAt >= 250) {
+      statsAt = now;
+      const read = statsNow();
+      if (read) stats.show(read);
     }
     // A frame with no tick has no update to draw a voyage that just ended away.
     traffic?.sync();

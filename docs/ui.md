@@ -23,6 +23,10 @@ the ones already there.
   shown again in that browser.
 - **Share a moment.** The link button under the settings button copies a link that opens the city at the moment on
   screen, from the same camera view. [Moments](../README.md#moments) shows the link and how it is read.
+- **See the city in numbers.** `C`, or **City stats** in the settings sheet, shows a panel on the left edge with the
+  residents, how many are on the road (in cars and on foot) and the buildings by kind. The numbers are for the moment
+  on screen, so they change as you scrub, rewind or seek. The choice is remembered. `H` hides the panel with the other
+  controls.
 - **Hide the controls.** `H` hides every control, message and the frame times, for a clean picture. `H` or `Esc`
   brings them back. It does nothing while a field has focus or the settings sheet is open.
 - **Leave it on a wall.** After a minute with no mouse, touch or key the camera turns slowly. Any input stops it.
@@ -56,6 +60,7 @@ framework. Each part has one file of each kind:
 | Timeline bar                     | `web/src/timeline.ts`                                              | `web/src/ui/timeline.css` |
 | Settings sheet and key list      | `web/src/ui/shell.ts`, `settings.ts`, `keys.ts`, `sheet.ts`        | `web/src/ui/sheet.css`    |
 | Share button, photo mode         | `web/src/ui/share.ts`, `web/src/ui/photo.ts`, `web/src/moments.ts` | `web/src/ui/photo.css`    |
+| City stats panel                 | `web/src/ui/stats.ts`, `web/src/stats.ts`                          | `web/src/ui/stats.css`    |
 | Hint and messages                | `web/src/ui/hint.ts`, `web/src/ui/toast.ts`                        | `web/src/ui/toast.css`    |
 | Frame times (`?hud`)             | `web/src/ui/hud.ts`                                                | `web/src/ui/kit.css`      |
 
@@ -106,6 +111,19 @@ flowchart LR
 The `?` key is ignored while a text field, text area or editable text has focus, so typing a question mark
 still works there. `keys.test.ts` reads the timeline's key handler and fails if it handles a key that has no
 row, so the list cannot fall behind the code it describes.
+
+### The stats panel
+
+`ui/stats.ts` builds the panel and `stats.ts` works out its numbers. The panel knows nothing about the city: `main.ts`
+reads the numbers for the state and tick on screen a few times a second and hands them over with `show()`. The
+[design notes](design.md#city-stats) say how each number is counted.
+
+It sits halfway down the left edge, clear of the Felix Metro chip, the clock and the timeline. At 600px and below it
+moves to the bottom left, above the timeline. It does not take clicks, so it never covers a thing you can press.
+`C` toggles it (see `isStatsKey`, which ignores the key while you type, with Ctrl, Cmd or Alt held, or under an open
+sheet), the switch in the settings sheet does the same, and the choice is kept in local storage under
+`felix-metro.stats`. A number that is not known shows `-`: with no gateway there is no city to count residents in, so
+only the buildings have numbers.
 
 ### The clock
 
@@ -194,11 +212,11 @@ in the overlay's files or in this page.
 
 ## Checking a change
 
-Run the unit tests for the data-driven parts: the key list, the hint's memory and the quality choice.
+Run the unit tests for the data-driven parts: the key list, the hint's memory, the quality choice and the stats.
 
 ```sh
 cd web
-npx vitest run src/ui src/quality.test.ts
+npx vitest run src/ui src/quality.test.ts src/stats.test.ts
 ```
 
 Then check the page itself. Install the test browser once with `npx playwright install chromium`. Serve the page in
@@ -215,7 +233,8 @@ node scripts/check-ui.mjs http://localhost:5173/ /tmp/ui
 ```
 
 `check-ui.mjs` drives the page with the keyboard (open the sheet, pick a quality, read the key list, `Esc`),
-checks that the hint is shown once and never under `?ui=0` or `?capture`, that the clock rolls and holds still
+checks the stats panel (off at first, toggled by `C` and by the settings switch, remembered, hidden by `H`, clear of the
+other controls at both widths), that the hint is shown once and never under `?ui=0` or `?capture`, that the clock rolls and holds still
 with reduced motion, that `H` hides every control, that `?cam` starts the camera where a link says, that attract
 mode turns the camera and stops on a mouse move, and that nothing overflows or collides at 360px, even with the city picker's arrow showing
 and the Reconnecting pill. It writes screenshots of the shell, the

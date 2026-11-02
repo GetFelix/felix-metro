@@ -13,6 +13,10 @@
 
 ### Added
 
+- City stats: a panel on the left edge shows the residents, how many are on the road (in cars and on foot) and the
+  buildings by kind (homes, shops and offices, towers, factories) for the moment on screen, so the numbers change as you
+  scrub, rewind or seek. Press `C` or use the switch in the settings sheet; the choice is remembered. A test follows the
+  sim's own log of a morning and checks the count against the sim at every tick.
 - Moments: a **Share this moment** button copies a link such as `/?at=<tick>&cam=<x,z,distance,azimuth,polar>#harbor`
   that opens the city at that tick from that camera view (`?cam` is new). `H` is photo mode and hides every control.
   A page left alone for 60 seconds turns the camera slowly (`?attract=<seconds>`, `0` turns it off).

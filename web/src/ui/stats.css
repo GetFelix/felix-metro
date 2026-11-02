@@ -1,0 +1,60 @@
+/* The stats panel sits on the left edge, halfway down, clear of the corners. On a phone it moves above the timeline. */
+.stats {
+  position: fixed;
+  z-index: 2;
+  left: var(--space-4);
+  top: 50%;
+  transform: translateY(-50%);
+  box-sizing: border-box;
+  width: 200px;
+  padding: var(--space-3) var(--space-4);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-l);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  font-size: 13px;
+  pointer-events: none;
+}
+.stats dl {
+  margin: 0;
+}
+.stats dl > div {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: 2px 0;
+}
+.stats dt {
+  color: var(--muted);
+}
+.stats dd {
+  margin: 0;
+  font:
+    500 13px 'JetBrains Mono',
+    monospace;
+  font-variant-numeric: tabular-nums;
+}
+.stats .lead dt {
+  color: var(--text);
+}
+.stats .sub dt {
+  padding-left: var(--space-3);
+}
+.stats h2 {
+  margin: var(--space-3) 0 var(--space-1);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+@media (max-width: 600px) {
+  .stats {
+    top: auto;
+    bottom: 96px;
+    transform: none;
+    width: 176px;
+    padding: var(--space-2) var(--space-3);
+  }
+}

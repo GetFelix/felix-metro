@@ -69,6 +69,15 @@ To show an earlier moment, the browser reads each district's nearest keyframe
 and the events after it, up to that moment. To play forward, it subscribes from
 there. [docs/design.md](docs/design.md) has the details.
 
+## City stats
+
+Press `C`, or switch on **City stats** in the settings sheet, for a panel on the left edge. It shows the residents, how
+many of them are on the road (in cars and on foot) and the buildings by kind: homes, shops and offices, towers and
+factories. The numbers are for the moment on screen, so they change as you drag the timeline, rewind or open a link
+made with **Share this moment**. Hide the panel with `C` again; the page remembers the choice. A page opened with
+`?live=0` has no residents to count, so it shows only the buildings of the generated city. [docs/design.md](docs/design.md#city-stats)
+says how the numbers are worked out.
+
 ## Playing the past
 
 Once the timeline has taken the city back to an earlier moment, three keys play it. They work like the shuttle keys of
@@ -94,7 +103,7 @@ connection, so a page opened with `?at` cannot play or rewind.
 | 0   | The look, locked    | In progress: style frame, assets, daylight, post-processing, quality tiers, the UI shell (settings sheet, key list, first-visit hint, rolling clock), camera controls, instanced traffic and ambient life done                                                                |
 | 1   | A live city         | Done                                                                                                                                                                                                                                                                          |
 | 2   | Time travel         | In progress: keyframes, seeking, the timeline scrubber, rewind then follow, and backward playback with speeds built, smoothness not yet measured                                                                                                                              |
-| 3   | Follow a life       | Planned                                                                                                                                                                                                                                                                       |
+| 3   | Follow a life       | In progress: city stats at any tick built; following one resident is not built yet                                                                                                                                                                                            |
 | 4   | Build               | In progress: the sim applies build, demolish and speed commands and records who sent them, and the page animates a building going up (scaffold) or coming down (dust) over 8 ticks, backwards when you rewind; placement tools in the page, roads and zones are not built yet |
 | 5   | Branching timelines | Planned                                                                                                                                                                                                                                                                       |
 | 6   | Scale and failover  | In progress: a restarted sim resumes from its log; 20,000 residents, 16 districts and broker loss are open                                                                                                                                                                    |

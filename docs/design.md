@@ -304,7 +304,8 @@ commit also writes the stream state key `keyframe`, so the newest one is one
 
 Because buildings and roads are diffs against the city the seed generates, the
 keyframe of a city nobody has built in carries none of them, and the cost is
-the residents. The counts are what the stats sparkline plots.
+the residents. The counts summarise the residents list for a reader that would rather not walk it: the city stats
+(see [City stats](#city-stats)) are checked against them in a test.
 
 ### Log size
 
@@ -606,6 +607,39 @@ The history sessions are opened when the bar is first hovered, focused or
 touched, not at page load; the span is read again every 5 s only while the
 handle is dragged or the past is shown, and the sessions close after 30 s idle. The pill in the clock reads how long
 before the live tip the city on screen is, in city time.
+
+### City stats
+
+The stats panel shows the residents, who is on the road and the buildings by kind for the tick on screen. They are read
+from the folded state the scene is drawn from, never from a separate feed, so a scrub, a rewind or a seek changes them
+with the picture. `web/src/stats.ts` does the counting.
+
+| Number             | Where it comes from                                                                                                            |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
+| Residents          | The residents every district's keyframe lists, added up once all districts have a keyframe of one tick. It never changes.      |
+| On the road        | Residents with a trip that has left by the tick on screen and not yet arrived, split into cars and walkers by vehicle kind.    |
+| Buildings, by kind | The generated city's lots, changed by the lots the state says differ from it. Trees, plaza props and chimneys are not counted. |
+
+A trip is on the road from its `depart` tick up to, but not including, its arrival tick. The arrival is known when the
+`trip` event is folded, from the rebuilt journey. A trip that left before the state's first record has no `trip`
+event, so it comes from the keyframe, which lists every resident on the road, and ends at its `arrived` event. That is
+what makes the count right straight after a seek. The page draws such a car only from the resident's next trip (see
+[The live view](#the-live-view)), but it counts it.
+
+The state can hold records a tick or two ahead of the one drawn, so the count is asked for the drawn tick and ignores
+trips that leave after it. The panel reads the numbers a few times a second, not every frame.
+
+`web/src/stats.test.ts` follows the sim's own log of a morning (07:00 to 09:00, four districts) and compares the
+page's count with what the sim says was on the road at every tick, whether the state is folded from the start, holds
+records ahead of the tick, or starts at a keyframe as a seek does. The fixture, `web/src/stats-fixture.json`, is
+written by a test in `sim/src/world/tests.rs`, which fails when the file is out of date:
+
+```sh
+METRO_WRITE_FIXTURE=1 cargo test -p felix-metro-sim the_stats_fixture
+```
+
+Residents by activity (at home, at work, asleep) are not shown: only keyframes carry them, once an hour, and the events
+between them do not say where a resident is going to stay.
 
 ## Building
 
