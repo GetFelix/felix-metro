@@ -35,7 +35,7 @@ enough to keep days of it.
 
 1. **Rewind to any moment, quickly.** From any position on the timeline, the city is drawn at that moment in under a second.
 2. **Rewind, then follow live with no gap.** Playing forward from the past joins live delivery without a missing or repeated event.
-3. **A small log.** A city of 20,000 residents writes on the order of 10 KB/s, so a week of history is a few gigabytes on one broker. Today's rush peaks near 17 KB/s, see #95.
+3. **A small log.** At 4 ticks a second, a city of 20,000 residents writes about 5.1 KB/s averaged over a day and 9.96 KB/s in the busiest minute of the rush, so a week of history is about 3 GB on one broker. These are extrapolated from measured cities of 522 and 5,568 residents; see the "Log size" section.
 4. **One authority that survives a restart.** The simulation is fenced at the broker, and a replacement picks up from the log where the last one stopped.
 5. **Forks are cheap.** A branch starts from a keyframe of the parent and owes it nothing after that.
 
@@ -172,30 +172,30 @@ guess.
 A car's position every tick would cost around 4 MB/s for 10,000 cars. The sim
 writes decisions instead, and the client works out positions:
 
-| Event                  | Fields                                                                     | Meaning                                    |
-| ---------------------- | -------------------------------------------------------------------------- | ------------------------------------------ |
-| `trip`                 | resident, vehicle kind, depart tick, route (segment ids with a speed each) | Leaves now along this route                |
-| `replan`               | resident, from segment, new route                                          | A jam or a closed road changed the route   |
-| `arrived`              | resident, lot                                                              | Reached a building                         |
-| `activity`             | resident, kind (sleep, work, shop, ...), until tick                        | What they are doing inside                 |
-| `left` / `entered`     | resident, other district, vehicle state with the route left                | Crossed into another district              |
-| `built` / `demolished` | lot, building kind, rotation                                               | A building changed                         |
-| `road`                 | segment, change (closed, opened, added, removed)                           | A road changed                             |
-| `command`              | principal hash, builder name, command id, result                           | A builder's command was applied or refused |
-| `speed`                | ticks per second                                                           | The city's speed changed; 0 is paused      |
+| Event                  | Fields                                                                         | Meaning                                    |
+| ---------------------- | ------------------------------------------------------------------------------ | ------------------------------------------ |
+| `trip`                 | resident, vehicle kind, depart tick, route (segment ids with a speed each)     | Leaves now along this route                |
+| `replan`               | resident, from segment, new route                                              | A jam or a closed road changed the route   |
+| `arrived`              | resident, lot                                                                  | Reached a building                         |
+| `activity`             | resident, kind (sleep, work, shop, ...), until tick                            | What they are doing inside                 |
+| `left` / `entered`     | resident, other district; `entered` adds the vehicle state with the route left | Crossed into another district              |
+| `built` / `demolished` | lot, building kind, rotation                                                   | A building changed                         |
+| `road`                 | segment, change (closed, opened, added, removed)                               | A road changed                             |
+| `command`              | principal hash, builder name, command id, result                               | A builder's command was applied or refused |
+| `speed`                | ticks per second                                                               | The city's speed changed; 0 is paused      |
 
-A route is its segment ids from the road graph (`u32`) and one speed byte per
-segment, a percentage of the segment class's speed. A trip of 12 segments is 36
-bytes, so a resident making five or six trips a city day, in a city of 20,000
-residents, writes under 5 KB/s of events at normal speed. Measured on the harbor city, a resident costs 0.15 B/s of events at 4 ticks a second, which is 3 KB/s at 20,000, plus the 31-byte header of each district's record every tick (2 KB/s for 16 districts).
+A route is its segment ids from the road graph and one speed byte per segment,
+a percentage of the segment class's speed. A trip of 12 segments is under 40
+bytes. "Log size" below has what a whole city writes.
 
 ### Byte layouts
 
 Every record starts with a kind byte, and a layout change gets a new kind.
-Integers are little-endian. A varint is LEB128 in its shortest form (a padded
-one is refused, so a retried tick is the same bytes), and a delta is a zigzag
-varint of the difference from the previous id in the list, so lists need no
-order. A string is a length byte and UTF-8, at most 64 bytes; encoding refuses a
+Fixed-size integers are little-endian. A varint is LEB128 in its shortest form
+(a padded one is refused, so a retried tick is the same bytes), and a delta is a
+zigzag varint of the difference from the previous value, so lists need no
+order. Ids, counts and ticks are varints, because they are small far more often
+than they are large. A string is a length byte and UTF-8, at most 64 bytes; encoding refuses a
 longer one instead of cutting it. `core/src/record.rs` encodes and decodes all
 of them.
 
@@ -203,16 +203,24 @@ Decoding returns an error for truncated or trailing bytes, an unknown kind or
 header flag bit, an out-of-range value, a string over 64 bytes or bad UTF-8,
 and a body shorter than its tag's fields. Flag bits choose the layout, so
 they stay strict, as in the wire protocol. Events and a keyframe's resident
-entries are framed instead (a tag, a varint body length and the body), so an
+entries are framed instead (a varint of the body length and a tag, then the body), so an
 older reader skips a tag it does not know and keeps the rest of the tick, and
 ignores bytes appended to a body it does know. A field can therefore be added
 to the end of an event without a new kind.
 
 | Kind | Record                                        |
 | ---- | --------------------------------------------- |
-| 1    | Tick record, a district's commit for one tick |
+| 1    | Retired: the first tick layout, refused       |
 | 2    | Command, on `metro.commands.<city>`           |
 | 3    | Registry entry, on `metro.cities`             |
+| 4    | Tick record, a district's commit for one tick |
+
+Kind 4 replaced kind 1 to shrink the log (see "Log size"). A log written under
+kind 1 is not readable: the decoder refuses it by its kind byte, and the dev
+stack keeps no state between runs, so there is nothing to migrate. A page that
+meets a kind 1 record on a broker that kept its log says so once ("start a fresh
+city") and draws without that district's history; an operator with a persistent
+broker creates a new city instead of reusing the old name.
 
 ### Tick records
 
@@ -220,41 +228,57 @@ Each district commits one record per tick. A tick with no events is still
 committed, so every tick has a record in every district. Seeking depends on
 that.
 
-| Offset | Size | Field                                                                       |
-| ------ | ---- | --------------------------------------------------------------------------- |
-| 0      | 1    | kind, 1                                                                     |
-| 1      | 4    | `epoch`, the sim's term; a restart keeps it, since the ticks carry on        |
-| 5      | 2    | `district`                                                                  |
-| 7      | 4    | `tick`                                                                      |
-| 11     | 1    | `speed`, ticks per second                                                   |
-| 12     | 1    | `flags`; bit 0 is a keyframe, other bits are refused                        |
-| 13     | 8    | `keyframe_offset`, the district's latest keyframe (a keyframe names itself) |
-| 21     | 8    | `wall_us`, microseconds since the Unix epoch at commit                      |
-| 29     | 2    | `events`, the number of events                                              |
-| 31     |      | the keyframe if bit 0 is set, then the events                               |
+| Field             | Size   | Contents                                                     |
+| ----------------- | ------ | ------------------------------------------------------------ |
+| kind              | 1      | 4                                                            |
+| `epoch`           | varint | the sim's term; a restart keeps it, since the ticks carry on |
+| `district`        | varint |                                                              |
+| `tick`            | varint |                                                              |
+| `speed`           | 1      | ticks per second                                             |
+| `flags`           | 1      | bit 0 is a keyframe, other bits are refused                  |
+| `keyframe_offset` | varint | the district's latest keyframe (a keyframe names itself)     |
+| `wall_us`         | 8      | microseconds since the Unix epoch at commit                  |
+| entries           | varint | the number of event entries                                  |
+|                   |        | the keyframe if bit 0 is set, then the entries               |
 
-An event is a tag byte, a varint body length and the fields below. `resident`
-is a `u32`. `events` counts every event, including ones a reader skips.
+A tick with nothing in it is 16 to 22 bytes: `tick` and `keyframe_offset` are varints, 1 byte each at first, 2 after 128 ticks, 3 after 16,384 and 4 after 2^21 (about six days at 4 ticks a second).
 
-| Tag | Event        | Fields                                       |
-| --- | ------------ | -------------------------------------------- |
-| 1   | `trip`       | resident, vehicle `u8`, depart `u32`, route  |
-| 2   | `replan`     | resident, from segment `u32`, route          |
-| 3   | `arrived`    | resident, lot `u32`                          |
-| 4   | `activity`   | resident, kind `u8`, until `u32`             |
-| 5   | `left`       | resident, district `u16`, vehicle state      |
-| 6   | `entered`    | resident, district `u16`, vehicle state      |
-| 7   | `built`      | lot `u32`, kind `u16`, rotation `u8`         |
-| 8   | `demolished` | lot `u32`, kind `u16`, rotation `u8`         |
-| 9   | `road`       | segment `u32`, change `u8`                   |
-| 10  | `command`    | principal `u64`, name, id `u32`, result `u8` |
-| 11  | `speed`      | ticks per second `u8`                        |
-| 12  | `command_cursor` | next command stream offset (varint) |
+An event is a frame: a varint of the body length shifted left four bits with
+the tag in the low four, then the body. A body under eight bytes has a one-byte
+frame. `resident` is a varint, and a tick in a body (`depart`, `until`) is a
+delta from the record's own `tick`, so a time near now is a byte or two. An
+entry is usually one event. `events` counts entries, including ones a reader
+skips.
+
+| Tag | Event            | Fields                                                           |
+| --- | ---------------- | ---------------------------------------------------------------- |
+| 1   | `trip`           | resident, vehicle `u8`, depart, route                            |
+| 2   | `replan`         | resident, from segment, route                                    |
+| 3   | `arrived`        | resident, lot                                                    |
+| 4   | `activity`       | resident, kind `u8`, until                                       |
+| 5   | `left`           | resident, district                                               |
+| 6   | `entered`        | resident, district, vehicle state                                |
+| 7   | `built`          | lot `u32`, kind `u16`, rotation `u8`                             |
+| 8   | `demolished`     | lot `u32`, kind `u16`, rotation `u8`                             |
+| 9   | `road`           | segment `u32`, change `u8`                                       |
+| 10  | `command`        | principal `u64`, name, id `u32`, result `u8`                     |
+| 11  | `speed`          | ticks per second `u8`                                            |
+| 12  | `command_cursor` | next command stream offset, varint                               |
+| 13  | `arrival`        | resident, lot, kind `u8`, until: an `arrived` and its `activity` |
+
+The tag is four bits, so only tags 14 and 15 remain free for new event kinds.
+Past those, a wider tag would be a new record kind.
+
+Every arrival the sim makes is an `arrived` followed by the same resident's
+`activity`, so the encoder writes the pair as one `arrival` entry and the decoder
+reads it back as the two events. A reader that gets them as separate entries
+(tags 3 and 4) sees the same events.
 
 A route is a varint leg count, the segment ids (first as a delta from 0, then
 each from the one before), then one speed byte per leg. A vehicle state is kind
 `u8`, progress along its first leg in thousandths `u16` (0 to 1000), and a
-route.
+route. `left` carries no vehicle: the district a vehicle leaves only needs to
+know it is gone, and `entered` carries the route for the district it joins.
 
 An activity `kind` is the schedule's activity: 0 home, 1 work, 2 school, 3 shop,
 4 leisure. Sleep is not one; a viewer shows a resident at home through the night
@@ -271,22 +295,68 @@ header and the events. A keyframe can be drawn with nothing before it. Its
 commit also writes the stream state key `keyframe`, so the newest one is one
 `state_get` away, with its offset as the value's version.
 
-| Part      | Contents                                                                                                                                                                                                 |
-| --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| buildings | varint count; per lot that differs from the generated city: lot delta, kind `u16` (65535 for none), rotation `u8`                                                                                        |
-| roads     | varint count; per segment closed or added: segment delta, change `u8`                                                                                                                                    |
-| residents | varint count; per resident in the district: id delta, then a framed state: tag `0`, kind `u8`, lot `u32` and until varint (an activity in that lot), or tag `1` and a vehicle state (a trip in progress) |
-| counts    | varints: home, at work, on the road, asleep. Home between 22:00 and 06:00 is asleep; work and school are at work; shopping and leisure are in none of them                                               |
+| Part      | Contents                                                                                                                                                                                                                                                                             |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| buildings | varint count; per lot that differs from the generated city: lot delta, kind `u16` (65535 for none), rotation `u8`                                                                                                                                                                    |
+| roads     | varint count; per segment closed or added: segment delta, change `u8`                                                                                                                                                                                                                |
+| residents | varint count; per resident in the district: id delta, then a frame (the body length shifted left two bits, the tag in the low two): tag `0`, kind `u8`, lot varint and until as a delta from the tick (an activity in that lot), or tag `1` and a vehicle state (a trip in progress) |
+| counts    | varints: home, at work, on the road, asleep. Home between 22:00 and 06:00 is asleep; work and school are at work; shopping and leisure are in none of them                                                                                                                           |
 
 Because buildings and roads are diffs against the city the seed generates, the
 keyframe of a city nobody has built in carries none of them, and the cost is
-the residents.
+the residents. The counts are what the stats sparkline plots.
 
-20,000 residents at about 10 bytes each (measured: a district of 200 residents writes a 1.8 KB keyframe) is about 200 KB per city hour, about
-3.4 KB/s. Events, keyframes and record headers together come to about 8.4 KB/s averaged over a day, or under 1 GB a day.
+### Log size
 
-The mean hides the rush. Trips cluster around 08:00 and 17:15, and the hourly keyframe of every district lands on the same tick (08:00 and 17:00 are both on the hour). Measured on a harbor city with 1,260 residents in each of four districts, the same load as 20,000 residents in 16, the busiest minute of the morning rush writes 3.7 KB/s and of the evening rush 4.2 KB/s, which is 14.6 and 16.5 KB/s at 20,000 residents, and one district's busiest minute is 1.5 KB/s. The worst single tick is a district's keyframe, about 20 KB, against under 600 B for a tick without one. `report_load` in `sim/src/world/tests.rs` prints these. Bringing the peak back to the 10 KB/s goal is tracked in #95.
-The counts are what the stats sparkline plots.
+The goal is about 10 KB/s for a city of 20,000 residents at 4 ticks a second,
+in its busiest minute and not only on average. The sim also accepts 8 and 16 ticks
+a second, which multiplies every figure here. The keyframe argument below also
+depends on 4 ticks a second: one city hour is then 60 seconds, so a minute holds
+one keyframe of each district. `report_load` measures it:
+
+```sh
+cargo test -p felix-metro-sim --release report_load -- --ignored --nocapture
+```
+
+It steps the harbor city at 2 by 2 (522 residents in 4 districts) through a day,
+encodes every district's record of every tick, and prints the bytes per second
+of the whole day and of the busiest minute of each rush. A record's header is
+the same size whatever happens in the tick, and everything else grows with
+residents, so it scales the figures to 20,000 residents in 16 districts by
+that rule. Nothing that large has run, so the 20,000 figures are extrapolated.
+A second line does the same for the city with 64 residents a home
+(5,568 residents), which has about the load per district of 20,000 in 16 and
+agrees with the first. The measurement charges every record the header it has
+after 2^21 ticks (22 bytes), so it holds on a long-lived log. The same bound is a test,
+`the_busiest_minute_of_a_rush_stays_under_ten_kilobytes_a_second`.
+
+| Extrapolated to 20,000 residents in 16 districts, at 4 ticks a second | Harbor city (522 residents) | 64 residents a home (5,568) |
+| --------------------------------------------------------------------- | --------------------------- | --------------------------- |
+| Mean over a day                                                       | 5.1 KB/s                    | 5.3 KB/s                    |
+| Busiest minute, 07:45 to 08:15                                        | 8.1 KB/s                    | 8.9 KB/s                    |
+| Busiest minute, 17:00 to 17:30                                        | 9.96 KB/s                   | 9.86 KB/s                   |
+
+That is under 0.5 GB a day. The header of each district's record, every tick,
+is 1.4 KB/s of it (22 bytes, 16 districts, 4 ticks a second; 1 KB/s on a young
+log, where it is 16). The evening rush has under 0.5% of headroom. A resident costs
+about 0.19 B/s on top: 0.075 for events and 0.11 for the hourly keyframe, about
+6.7 bytes each.
+
+The mean hides the rush. Trips cluster around 08:00 and 17:15, and each one
+writes a `trip` with its route and an arrival, plus a `left` and an `entered`
+when it crosses a district boundary. Ids and times as varints and deltas, the
+arrival as one entry and no route on `left` are what keep that minute under the
+goal.
+
+Every district's keyframe lands on the same tick, the hour, so the worst single
+tick is the district's keyframe: about 1.5 KB in the harbor city and 15 to 20 KB
+at 1,250 residents a district, against 120 to 430 bytes for a tick without one.
+Moving each district's keyframe to a different tick of the hour would flatten
+that burst but not the busiest minute, because any minute holds one keyframe of
+every district: measured with four offsets and 16-byte headers, the evening
+figure went from 9.6 to 9.8 KB/s. It would also cost the page its instant preview of a whole-city
+keyframe while scrubbing, which needs every district's keyframe on one tick, so
+keyframes stay on the hour.
 
 ### Commands and the registry
 
@@ -346,18 +416,18 @@ busy only after it resumes, and the cursor passes them as soon as the resuming c
 middle of a tick after that can apply those commands for real on the restart, or lose them. Exactly once holds
 for every other command.
 
-| Result | Meaning |
-|---|---|
-| 0 | applied |
-| 1 | not a command record |
-| 2 | lot or node does not exist |
-| 3 | `build` on a lot that has a building |
-| 4 | `demolish` on a lot with nothing on it |
-| 5 | `build` of a kind that is not a building, or a rotation past 3 |
-| 6 | `speed` other than 0, 4, 8 or 16 |
-| 7 | not carried out yet: `place road`, `zone` and `fork` |
-| 8 | the lot is one residents go to |
-| 9 | sent while the city was paused with more commands waiting than it holds; send it again |
+| Result | Meaning                                                                                |
+| ------ | -------------------------------------------------------------------------------------- |
+| 0      | applied                                                                                |
+| 1      | not a command record                                                                   |
+| 2      | lot or node does not exist                                                             |
+| 3      | `build` on a lot that has a building                                                   |
+| 4      | `demolish` on a lot with nothing on it                                                 |
+| 5      | `build` of a kind that is not a building, or a rotation past 3                         |
+| 6      | `speed` other than 0, 4, 8 or 16                                                       |
+| 7      | not carried out yet: `place road`, `zone` and `fork`                                   |
+| 8      | the lot is one residents go to                                                         |
+| 9      | sent while the city was paused with more commands waiting than it holds; send it again |
 
 Lots residents go to (homes, workplaces, parks) cannot be built over or demolished,
 because the schedules that send people there do not change.
@@ -473,7 +543,7 @@ ends. That session is opened as soon as the past is on screen and kept while it 
 back on the live city, so Back to live finds it open (the page holds one live, up to two history and one playback session,
 well within the gateway's eight a person).
 
-Space and the pill's Play button play and pause from the past on screen. **Back to live** does not cut: the city's time
+Space and the pill's Play button play and pause from the past on screen, and `J`, `K` and `L` set the speed and the direction (see **Rewinding and speeds** below). **Back to live** does not cut: the city's time
 races forward with the cars moving, at the city's own pace plus a steady gain that closes the distance in about three
 seconds (at most 960 ticks a second in all), paced by the wall clock. A timer moves the playhead and applies its records every 40 ms, off the render loop, so a catch-up takes about three seconds even where frames come once a second or slower; frames only draw the state (and also step the playhead by wall-clock time, so nothing is applied twice). When the playhead is within a tick of the live state's newest tick the
 page hands over. Within a second of the tip it hands over at once. If the session is not open at the click, the race
@@ -484,6 +554,39 @@ ends and the page shows the live city. The playback's session is closed when the
 record all along, so nothing is folded a second time and nothing reloads; the live clock is set to the playhead
 first, so a car under way carries on from where it was drawn. Scrubbing while playing ends the playback; a page opened with `?at` has
 no live state to join and cannot play.
+
+**Rewinding and speeds.** `J`, `K` and `L` move along one ladder of rates, in multiples of the city's own speed: 8x, 4x, 2x
+and 1x backward, a stop, then 0.5x, 1x, 2x, 4x and 8x forward. `L` goes a rung faster forward (a rewind slows to a stop
+first), `J` goes a rung slower or faster backward, and `K` stops. From a stop each starts at 1x. A forward rate only scales
+the playhead's pace, so the pumps above feed it as before. At 8x on a city running at 16 ticks a second that is 128 ticks
+a second, which the pumps have not been measured against.
+
+A state only moves forward, so a rewind refolds. The playback keeps the records of the hour on screen, from its keyframe:
+those the seek that made the state read, plus every record played forward since. Going back, it folds a fresh state from
+the keyframe to two ticks past the playhead (the lead a forward play keeps) and puts it on screen in place of the old one,
+as a scrub does. A refold happens at most every 30 ms. Faster than that the playhead goes on and the state trails it by a
+few ticks, and a stop settles it on the tick drawn. Turning forward again resumes the pumps from the offsets of the tick
+last folded to.
+
+```mermaid
+flowchart LR
+    P["Playhead moves back"] --> H{"Hour on hand<br/>covers the tick?"}
+    H -->|yes| F["Fold a fresh state from the keyframe"]
+    H -->|"no, the hour before was fetched"| S["Switch to it"] --> F
+    H -->|"no, not yet"| W["Wait at the keyframe"]
+    F --> D["Draw it, fetch the hour before"]
+```
+
+The hour before is read ahead. When a rewind starts, and again each time it enters an hour, the playback asks the seeker
+for the hour before the one it is in; ending the playback abandons that read. Separately, 400 ms after the past comes to
+rest on screen (a seek lands, or a playback is paused), the seeker reads the last tick of the hour before and of the hour
+after, so a rewind or an hour step finds them cached. It holds three hours of records per district for this: the one on
+screen and one either side. Neither kind of read cancels a seek or is cancelled by one, except that starting a scrub or
+leaving the past stops the idle read-ahead. With the hour before on hand the playhead crosses the boundary in the step
+that reaches it. Without it, the playhead waits at the keyframe until it arrives. If retention has taken the hour before,
+the rewind stops at the oldest tick the log holds and says so. Any other failed read ends the playback and shows the live
+city, like any other playback failure. Districts need not keyframe on the same tick: the hour on hand reaches back to the
+latest of their keyframes. `J` from the live city steps back 15 minutes, as the left arrow does, and rewinds from there.
 
 **Scrubbing** draws the nearest keyframe on hand while the handle moves, with
 the sun and the clock at the handle's hour, and fills in events once it rests.
@@ -538,7 +641,7 @@ timelines locked to the same tick.
 
 - **Three.js**, plain TypeScript, no UI framework, built with Vite.
 - **Kenney city kits** (Roads, Commercial, Suburban, Industrial, Car Kit): CC0, one consistent style, restyled by material name to one palette.
-- **Instanced meshes** for cars, people, trees and repeated buildings.
+- **Instanced meshes** for cars and people, so a rush hour of hundreds costs the draw calls of a handful ([how](art.md#cars-and-walkers)). Trees and repeated buildings are still one object each.
 - **Distance haze**: a depth-of-field pass that blurs only what lies beyond a wide sharp band past the focus, with saturated colour, so the city reads sharp up close and softens toward the horizon.
 - **A camera you can move.** Turn, tilt, slide and zoom with a mouse, trackpad, touch or the keyboard, kept inside the city. See [the camera](art.md#camera).
 - **Day and night from the tick.** Sun angle, sky, street lights and window lights all follow the city clock, live and while scrubbing.

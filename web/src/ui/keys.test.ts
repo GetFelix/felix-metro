@@ -28,7 +28,24 @@ describe('the key list', () => {
   });
 
   it('lists the keys of today', () => {
-    for (const key of ['←', '→', '↑', '↓', 'Shift', 'Page Up', 'Page Down', 'Home', 'End', 'Space', 'Esc', '?', 'Tab'])
+    for (const key of [
+      '←',
+      '→',
+      '↑',
+      '↓',
+      'Shift',
+      'Page Up',
+      'Page Down',
+      'Home',
+      'End',
+      'Space',
+      'J',
+      'K',
+      'L',
+      'Esc',
+      '?',
+      'Tab',
+    ])
       expect(flat).toContain(key);
   });
 

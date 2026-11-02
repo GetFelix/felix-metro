@@ -19,6 +19,8 @@ export interface Status {
   playHidden(hidden: boolean): void;
   /** How long ago the moment on screen was. */
   ago(text: string): void;
+  /** The pace when it is not plain 1x forward, such as `2x` or `Rewind 4x`; empty hides it. */
+  rate(text: string): void;
   onPlay(cb: () => void): void;
   onBackToLive(cb: () => void): void;
 }
@@ -28,9 +30,11 @@ export function createStatus(): Status {
   const notice = byId('notice');
   const row = byId('past');
   const ago = byId('past-ago');
+  const rate = byId('past-rate');
   const play = byId<HTMLButtonElement>('play');
   let wasPast: boolean | null = null;
   let agoShown = '';
+  let rateShown = '';
   return {
     link(down) {
       pill.textContent = down ? 'Reconnecting…' : 'LIVE';
@@ -57,6 +61,11 @@ export function createStatus(): Status {
     },
     ago(text) {
       if (text !== agoShown) ago.textContent = agoShown = text;
+    },
+    rate(text) {
+      if (text === rateShown) return;
+      rate.textContent = rateShown = text;
+      rate.hidden = text === '';
     },
     onPlay: (cb) => play.addEventListener('click', cb),
     onBackToLive: (cb) => byId('back-live').addEventListener('click', cb),

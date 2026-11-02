@@ -14,10 +14,12 @@ import { parseCity, type City } from './layout';
 import { beforeSignIn, fetchOidc, signIn } from './auth';
 import { CityState, type Building } from './city';
 import { TICKS_PER_HOUR, TickClock, cityTime } from './clock';
-import { connectLive } from './live';
+import { connectLive, onOldLog } from './live';
 import { Gateway, GatewayError } from './gateway';
 import { Playback, handOver } from './playback';
 import { IDLE_MS, SeekError, Seeker, fold, tryFoldMore, type SeekResult } from './seek';
+import { neighbours } from './rewind';
+import { rateText, shuttle, shuttleKey, type ShuttleKey } from './shuttle';
 import { Latest } from './scrub';
 import { agoText, createGuess, createTimeline, moveRange, stepTick, clampTick, type Range } from './timeline';
 import { createLoader, type Loader } from './ui/loader';
@@ -84,7 +86,7 @@ declare global {
         ms: number;
         /** The part of `ms` spent finding and folding, before the city was drawn. */
         seekMs: number;
-        /** The ms until every car and walker of the moment has a model, which is after the first frame. */
+        /** The ms until the first frame is drawn with every car and walker of the moment placed. */
         settledMs: number;
         reads: number;
         stats: { readMs: number; slowestMs: number; pageSize: number };
@@ -104,9 +106,13 @@ declare global {
       holdSeeks(ms: number): void;
       /** Play or pause from the past on screen; false when there is nothing to play. */
       play(): Promise<boolean>;
+      /** Press J, K or L from the past on screen; false when there is nothing to play. */
+      shuttle(key: 'j' | 'k' | 'l'): Promise<boolean>;
       /** The playback behind the past on screen: where it started, every record it applied, and the tick it joined live at. */
       playback(): {
         playing: boolean;
+        /** Multiples of the city's speed, negative while rewinding. */
+        rate: number | null;
         catchingUp: boolean;
         head: number | null;
         started: number | null;
@@ -188,6 +194,12 @@ async function follow(
     state.onRecord = (d, t, r) => window.__trace!.push([d, t, r]);
   }
   const picker = createPicker(name, DEFAULT_DISTRICTS);
+  onOldLog(() => {
+    const notice = document.getElementById('notice')!;
+    notice.textContent =
+      'This city’s log was written before the compact tick layout and can’t be read. Start a fresh city.';
+    notice.classList.remove('hidden');
+  });
   const live = await connectLive({
     url,
     oidc,
@@ -423,8 +435,7 @@ async function main() {
   };
   /** The state the live connection feeds, which keeps taking records while the page is held in the past. */
   const liveState = state;
-  const traffic =
-    state && fleet ? new Traffic(fleet, city ? (city.tiles - 1) / 2 : 0, undefined, city?.lots ?? []) : null;
+  const traffic = state && fleet ? new Traffic(fleet, city ? (city.tiles - 1) / 2 : 0, city?.lots ?? []) : null;
   if (traffic) traffic.cap = settingsFor(quality.tier).movers;
   if (state && traffic) {
     // The sun follows the tick the page draws, so the slider is only a readout.
@@ -601,6 +612,20 @@ async function main() {
       const p = new Playback(session, target, from, {
         tail: () => liveState!.latest,
         onFail: (err) => console.warn('playback could not go on', err),
+        fresh: () => new CityState(city!, metro, districts * districts),
+        onState: (next, seek) => {
+          next.onRecord = state!.onRecord;
+          swap(next, seek.tick);
+          // Space after a failed scrub starts from the state on screen, not from the seek it began at.
+          shownResult = seek;
+        },
+        hourAt: async (tick, signal) => {
+          const s = await seeker();
+          if (!s) throw new Error('nothing here answers like a gateway');
+          return s.peek(tick, { signal });
+        },
+        oldest: () => range?.oldest ?? 0,
+        onEdge: () => note('That is as far back as the city goes.'),
         release: () => {
           held?.close();
           held = null;
@@ -657,6 +682,7 @@ async function main() {
     };
     /** Show the live city at once, in place of the past. */
     const snapLive = () => {
+      cancelAhead();
       stopPlayback();
       resumeFrom = null;
       swap(liveState!, null);
@@ -669,11 +695,32 @@ async function main() {
       if (!canToggle()) return false;
       if (playback) {
         playback.paused = !playback.paused;
+        if (playback.paused) readAhead();
         return true;
       }
       const p = await openPlayback();
       if (!p) return false;
       p.paused = false;
+      return true;
+    };
+
+    /**
+     * Apply a J, K or L press from the past on screen: a playback is opened if there is none, and its rate and direction
+     * follow the key. Rewinding does not need records from the session, but going forward again does.
+     */
+    const shuttleBy = async (key: ShuttleKey): Promise<boolean> => {
+      if (!canToggle()) return false;
+      let p = playback;
+      if (!p) {
+        p = await openPlayback();
+        if (!p) return false;
+        // The past on screen was paused before there was a playback to say so.
+        p.paused = true;
+      }
+      const next = shuttle({ rate: p.rate, paused: p.paused }, key);
+      p.rate = next.rate;
+      p.paused = next.paused;
+      if (next.paused) readAhead();
       return true;
     };
 
@@ -744,6 +791,29 @@ async function main() {
       }
       shownResult = result;
       prewarm();
+      readAhead();
+    };
+    /** Once the past has rested on screen, the hours either side are read into the seeker's cache. */
+    let ahead: { timer: ReturnType<typeof setTimeout>; stop: AbortController } | null = null;
+    const AHEAD_MS = 400;
+    const cancelAhead = () => {
+      if (!ahead) return;
+      clearTimeout(ahead.timer);
+      ahead.stop.abort();
+      ahead = null;
+    };
+    const readAhead = () => {
+      cancelAhead();
+      const stop = new AbortController();
+      const timer = setTimeout(async () => {
+        const s = opened;
+        if (!s || pastTick === null || scrubTarget !== null || !range) return;
+        for (const tick of neighbours(pastTick, range.oldest, tipTick())) {
+          if (stop.signal.aborted || pastTick === null) return;
+          await s.prefetch(tick, stop.signal);
+        }
+      }, AHEAD_MS);
+      ahead = { timer, stop };
     };
     /** The nearest keyframe on hand, drawn at once while the handle moves. */
     const preview = (tick: number) => {
@@ -795,9 +865,20 @@ async function main() {
       // The tip is the live city: a step or a release within a city minute of it is going back to it.
       if (hasLive && !moving && to >= tip - LIVE_SNAP_TICKS) return goLive();
       stopPlayback();
+      cancelAhead();
       scrubTarget = to;
       preview(to);
       scrubLatest.want(to, moving);
+    };
+    const rewindFromLive = async () => {
+      if (!hasLive || scrubTarget !== null) return;
+      if (!range) await refreshRange();
+      if (!range || pastTick !== null) return;
+      go(stepTick({ oldest: range.oldest, newest: tipTick() }, handleAt(), -1, false), false);
+      // A drag or another step since stops playbacks, which moves the mark; then the rewind is no longer wanted.
+      const mark = playMark;
+      await scrubLatest.settled();
+      if (mark === playMark && scrubTarget === null && pastTick !== null) await shuttleBy('j');
     };
     let refresher: ReturnType<typeof setInterval> | null = null;
     const bar = createTimeline(document.getElementById('scrub')!, {
@@ -830,6 +911,20 @@ async function main() {
       e.preventDefault();
       void togglePlay();
     });
+    addEventListener('keydown', (e) => {
+      const key = shuttleKey(e);
+      if (!key || e.repeat || (shell?.isOpen ?? false)) return;
+      if (pastTick === null) {
+        // J from the live city steps back and starts rewinding from there.
+        if (key !== 'j') return;
+        e.preventDefault();
+        void rewindFromLive();
+        return;
+      }
+      if (!canToggle()) return;
+      e.preventDefault();
+      void shuttleBy(key);
+    });
     let barShown = false;
     const guess = createGuess();
     timelineFrame = (tick) => {
@@ -859,6 +954,8 @@ async function main() {
         status.playLabel(playback && !playback.paused ? 'Pause' : 'Play');
         status.playHidden(!hasLive || (playback?.catchingUp ?? false));
         status.ago(usable ? agoText(tip - at) : 'Earlier');
+        // Plain 1x forward is what Play already says; any other pace or direction is named.
+        status.rate(playback && !playback.paused && playback.rate !== 1 ? rateText(playback.rate) : '');
       }
     };
     /** Notice a failure or the tip after the playback moved on; the tick to draw, or null when nothing is playing. */
@@ -933,9 +1030,6 @@ async function main() {
           if (!draw) return report(seekMs);
           await new Promise<void>((done) => frameWaiters.push(done));
           const drawnMs = performance.now() - started;
-          // Cars and walkers are made a share a frame, so the city fills in over the frames after the first.
-          let frames = 0;
-          while (traffic.waiting > 0 && frames++ < 600) await new Promise<void>((done) => frameWaiters.push(done));
           return report(drawnMs);
         } catch (err) {
           if (!(err instanceof DOMException && err.name === 'AbortError')) note(whyNot(err));
@@ -951,10 +1045,12 @@ async function main() {
         holdSeeks = ms;
       },
       play: () => togglePlay(),
+      shuttle: (key) => shuttleBy(key),
       warm: () => warm?.alive === true,
       closeWarm: dropWarm,
       playback: () => ({
         playing: playback !== null && !playback.paused,
+        rate: playback?.rate ?? null,
         catchingUp: playback?.catchingUp ?? false,
         head: playback?.head ?? null,
         started: replay.started,
@@ -991,6 +1087,10 @@ async function main() {
     move(cars, dt, true);
     move(people, dt, false);
     for (const p of people) p.mixer.update(dt);
+    // The camera first, so the fleet leaves out what this frame's view cannot see.
+    if (capture) camera.lookAt(controls.target);
+    else controls.update();
+    fleet?.view(camera);
     if (state && traffic && liveInfo) {
       // The clock runs on real time even when frames are slow, so it stays with the sim.
       const played = playFrame?.(still ? 0 : frameMs / 1000) ?? null;
@@ -1022,8 +1122,8 @@ async function main() {
         });
       }
     }
-    if (capture) camera.lookAt(controls.target);
-    else controls.update();
+    // A frame with no tick has no update to draw a voyage that just ended away.
+    traffic?.sync();
     if (paint) post!.render(controls.target);
     for (const done of frameWaiters.splice(0)) done();
     // A live state the page has left keeps taking records; let its finished trips go.
@@ -1106,8 +1206,6 @@ async function main() {
         lastMs = tMs;
         captureDt = dt;
         draw(performance.now(), 1000 / 30, dt, false);
-        // Cars and walkers get their models a share a frame; update on, without drawing, until all of them have one.
-        for (let i = 0; i < 600 && traffic && traffic.waiting > 0; i++) draw(performance.now(), 0, 0, false);
         draw(performance.now(), 0, 0);
         // With ?picture the canvas is read out now and shown as a picture under the overlay, for a machine whose GL is
         // software and too slow to screenshot.

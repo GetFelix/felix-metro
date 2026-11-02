@@ -23,7 +23,8 @@ the ones already there.
   shown again in that browser.
 - **Reach everything with the keyboard.** Every control can be focused with `Tab` and used with `Enter`,
   `Space` or the arrow keys. The focused control gets a cyan ring. With an earlier moment on screen, `Space` plays
-  or pauses it, unless a button or field has focus, in which case it does that control's own job.
+  or pauses it, unless a button or field has focus, in which case it does that control's own job. `J`, `K` and `L`
+  rewind, stop and speed up the playback, as in a video editor.
 
 These page parameters change the overlay:
 

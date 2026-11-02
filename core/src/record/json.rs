@@ -90,24 +90,20 @@ fn event(out: &mut String, e: &Event) {
                 "{{\"type\":\"activity\",\"resident\":{resident},\"kind\":{kind},\"until\":{until}"
             );
         }
-        Event::Left {
-            resident,
-            district,
-            vehicle: v,
+        Event::Left { resident, district } => {
+            let _ = write!(
+                out,
+                "{{\"type\":\"left\",\"resident\":{resident},\"district\":{district}"
+            );
         }
-        | Event::Entered {
+        Event::Entered {
             resident,
             district,
             vehicle: v,
         } => {
-            let name = if matches!(e, Event::Left { .. }) {
-                "left"
-            } else {
-                "entered"
-            };
             let _ = write!(
                 out,
-                "{{\"type\":\"{name}\",\"resident\":{resident},\"district\":{district},"
+                "{{\"type\":\"entered\",\"resident\":{resident},\"district\":{district},"
             );
             vehicle(out, v);
         }

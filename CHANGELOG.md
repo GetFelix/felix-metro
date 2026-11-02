@@ -23,6 +23,19 @@
   the other opt-in features of that release; the page uses `shard` on `state_get` and none of the others yet.
 - The overlay's styles moved from `web/index.html` into `web/src/ui/*.css`, and the picker, loading screen and frame-time
   display into `web/src/ui/`. `docs/ui.md` describes the kit, the motion rules and the wording rules.
+- The log's busiest minute is under the 10 KB/s goal. A 20,000-resident city is estimated to write 9.96 KB/s in the evening rush
+  (was 17.1) and 8.1 KB/s in the morning (was 13.8), and to average 5.1 KB/s a day (was 8.1). The figures are
+  extrapolated, scaled from measured cities of 522 and 5,568 residents, and hold at 4 ticks a second (the sim also
+  accepts 8 and 16, which multiplies them). They charge every record the largest header, 22 bytes. Tick records have
+  a new layout, kind 4: ids, counts and ticks are varints, times in an event are deltas from the record's tick, an
+  `arrived` and the `activity` after it are one entry, and `left` no longer carries the vehicle (the JSON `left`
+  event has no `vehicle`, `progress` or `route` fields). A tick with nothing in it is 16 to 22 bytes (the tick and the keyframe offset are varints that grow), not 31. Kind 1 is
+  refused, so a log written before this cannot be read: the page shows "Start a fresh city" and the history stays
+  unreadable. The dev stack keeps no state between runs. Spreading the
+  keyframes over the hour was measured and does not lower the busiest minute, so they stay on the hour (design.md,
+  "Log size").
+- `report_load` also prints the day mean at 20,000 residents and a denser harbor city, and a test holds the busiest
+  minute under 10 KB/s.
 
 ### The page
 
@@ -39,6 +52,20 @@
 - Space plays or pauses an earlier moment from the timeline too, and does nothing while the settings sheet is open.
 - Brand tints in the overlay's CSS are tokens in `kit.css` (`--coral-wash`, `--amber-wash`, `--violet-glow`, `--cyan-glow`).
 - Short messages, such as "That moment is no longer kept.", now sit above the timeline in the page's glass style.
+- Cars and walkers are drawn as instances (#91). One draw call covers every car of a kind's mesh, one every walker of a
+  model's mesh, and three more cover all the car lights, so the first cars and walkers on screen add a fixed 219 draw
+  calls on the high tier (155 on medium, 59 on low) and more add none, where each used to add about 18. Cars and walkers
+  more than 1.5 tiles outside the view are not drawn. Walkers no longer carry bones: the walk clip is baked into a
+  texture per model and a shared clock, offset for each resident, picks the pose (`web/src/walk.ts`). The tier limits on
+  cars and walkers drawn at once go from 40 to 80 on low and from 80 to 160 on medium; high is still unlimited. They are
+  not measured against a GPU. `web/traffic-load.html` and `web/scripts/check-traffic.mjs` count the draw calls for N
+  movers, and `check-traffic-pictures.mjs` compares a car and a walker close up with renders in `web/references`; CI
+  runs both. [docs/art.md](docs/art.md#cars-and-walkers) has the details and the numbers.
+- A visible look change: car headlights, taillights and the light on the road ahead now show at night on the high and
+  medium tiers, and they feed the bloom. They were made after the first frame, so the pass that hides the glows for
+  ambient occlusion and the distance blur left them hidden for good. A dense night at 800 movers on high does not blow
+  out: the lights read as small points, below the street lamps' pools.
+- A car or walker whose trip has just ended is no longer drawn for a frame after it when the page has no new tick.
 - Camera controls. Left-drag turns and tilts, right-drag or Shift-drag slides, the wheel and a pinch zoom toward the
   point under the pointer, one finger turns and two fingers slide on a touch screen, and `W` `A` `S` `D`, `Q` `E`,
   `+` `-` and `0` do the same from the keyboard (`0` goes back to the opening view). The point the camera looks at
@@ -56,6 +83,12 @@
   hardcoded `harbor`, so the picker was empty whenever that city was missing or closed to the person. It now joins
   `lobby`, which `dev/seed.mjs` creates for this and nothing else. A stack started before this change has no lobby, so
   its picker is empty for a refused city until it is restarted with `dev/up.sh`. The dev-stack check opens `/#nowhere` and wants the cities listed.
+- Backward playback and speeds. From an earlier moment, `L` plays forward and each press doubles the speed to 8x, `J`
+  rewinds the same way, and `K` stops; Space still plays and pauses. Forward runs from 0.5x to 8x, backward from 1x to
+  8x, and the status line names any speed but plain 1x. A rewind refolds the city from the hour's keyframe to each
+  tick it passes, reads the hour before ahead, and stops with a note at the oldest moment the log holds. The seeker reads
+  the hours on either side of the one on screen while the page is idle and now caches three hours of records per
+  district instead of two. `J` on the live city steps back 15 minutes and rewinds from there.
 
 ### Tools
 

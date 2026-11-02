@@ -15,8 +15,9 @@ and play forward from there.
 >   part after the live head dimmed. Drag the handle, or step with `←` and `→` (`Shift` for an hour).
 > - A settings button under the clock chooses the quality (Automatic, High, Medium or Low), `?` lists every key and a
 >   hint on a first visit points at the timeline ([docs/ui.md](docs/ui.md)).
-> - Space plays forward from an earlier moment at the city's speed. Back to live races to the live city and joins it
->   with no gap and no reload.
+> - Space plays forward from an earlier moment at the city's speed, and `J`, `K` and `L` rewind, stop and speed it up
+>   (see [Playing the past](#playing-the-past)). Back to live races to the live city and joins it with no gap and no
+>   reload.
 > - Builders change the city through its command stream: the sim applies `build` and `demolish`, each building rises
 >   in a scaffold or falls in dust, and `dev/builder-bot.mjs` grows a neighbourhood on each city's development area.
 > - The sim resumes a city from its log after a restart.
@@ -33,9 +34,9 @@ and play forward from there.
 ## What you will be able to do
 
 - Look around the city: turn, tilt, slide and zoom with a mouse, trackpad, touch or the keyboard (see [Camera controls](#camera-controls))
-- Watch a generated city go about its day in 3D: residents commute, shop and go home, and the sun rises and sets. Rush hour at 08:00 and 17:15 puts about 23 to 29 cars and 24 to 36 walkers on the streets of the busiest district, and about 70 cars and 70 walkers across the harbor city at 2 by 2 (522 residents; `cargo run --release -p felix-metro-core --example density -- harbor 2` prints the counts). The log is estimated at about 8 KB/s averaged over a day at 20,000 residents (`design.md` has the arithmetic); the measured harbor city of 522 residents in 4 districts averages 656 B/s, and scaled to 20,000 residents in 16 districts the busiest minute of the rush peaks near 17 KB/s, from the hourly snapshots of each district landing together, which #95 tracks (`cargo test -p felix-metro-sim --release report_load -- --ignored --nocapture` measures it).
+- Watch a generated city go about its day in 3D: residents commute, shop and go home, and the sun rises and sets. Rush hour at 08:00 and 17:15 puts about 23 to 29 cars and 24 to 36 walkers on the streets of the busiest district, and about 70 cars and 70 walkers across the harbor city at 2 by 2 (522 residents; `cargo run --release -p felix-metro-core --example density -- harbor 2` prints the counts). The log is small: extrapolated to 20,000 residents in 16 districts (nothing that size has run), it averages 5.1 KB/s over a day and writes 9.96 KB/s in the busiest minute of the rush, just under the 10 KB/s goal, at 4 ticks a second. That is scaled from the measured harbor city of 522 residents in 4 districts, which averages 449 B/s, and from a city of 5,568 residents. The figure counts a record header of 22 bytes, the most it reaches (it is 16 on a young log). `cargo test -p felix-metro-sim --release report_load -- --ignored --nocapture` prints it, and `docs/design.md` has the arithmetic.
 - Drag the timeline back to any moment the log holds and see the city exactly as it was
-- Let go and watch it play forward and catch up to live
+- Let go and watch it play forward and catch up to live, or rewind an evening and watch it run backwards
 - Follow one resident or car through their day
 - Place roads, zones and buildings, with every change recorded with who made it
 - Fork the city at a past moment and compare the two timelines side by side
@@ -66,22 +67,41 @@ To show an earlier moment, the browser reads each district's nearest keyframe
 and the events after it, up to that moment. To play forward, it subscribes from
 there. [docs/design.md](docs/design.md) has the details.
 
+## Playing the past
+
+Once the timeline has taken the city back to an earlier moment, three keys play it. They work like the shuttle keys of
+a video editor: `L` goes faster forward, `J` goes slower or backward, and `K` stops.
+
+| Key     | What it does                                                                                                 |
+| ------- | ------------------------------------------------------------------------------------------------------------ |
+| `L`     | Play forward at 1x. Each press after that doubles the speed, up to 8x. While rewinding, it slows the rewind. |
+| `J`     | Rewind at 1x. Each press after that doubles the speed, up to 8x. While playing forward, it slows the play.   |
+| `K`     | Stop. Space starts again at the speed you left.                                                              |
+| `Space` | Play or pause, as before.                                                                                    |
+
+Speeds run 8x, 4x, 2x, 1x backward, then stop, then 0.5x, 1x, 2x, 4x, 8x forward, and 1x is the city's own speed. The
+status line next to the Play button names any speed other than 1x forward, such as `4x` or `Rewind 2x`. Pressing `J`
+on the live city steps back 15 minutes and starts rewinding from there. Rewinding stops at the oldest moment the log
+still holds, with a note. The keys are ignored while you type in a field or hold Ctrl, Cmd or Alt. They need a live
+connection, so a page opened with `?at` cannot play or rewind.
+
 ## Status
 
 | M   | Milestone           | State                                                                                                                                                                                                                                                                         |
 | --- | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 0   | The look, locked    | In progress: style frame, assets, daylight, post-processing, quality tiers, the UI shell (settings sheet, key list, first-visit hint, rolling clock) and camera controls done; instanced traffic open                                                                         |
+| 0   | The look, locked    | In progress: style frame, assets, daylight, post-processing, quality tiers, the UI shell (settings sheet, key list, first-visit hint, rolling clock), camera controls and instanced traffic done                                                                         |
 | 1   | A live city         | Done                                                                                                                                                                                                                                                                          |
-| 2   | Time travel         | In progress: keyframes, seeking, the timeline scrubber and rewind then follow done                                                                                                                                                                                            |
+| 2   | Time travel         | In progress: keyframes, seeking, the timeline scrubber, rewind then follow, and backward playback with speeds built, smoothness not yet measured                                                                                                                              |
 | 3   | Follow a life       | Planned                                                                                                                                                                                                                                                                       |
 | 4   | Build               | In progress: the sim applies build, demolish and speed commands and records who sent them, and the page animates a building going up (scaffold) or coming down (dust) over 8 ticks, backwards when you rewind; placement tools in the page, roads and zones are not built yet |
 | 5   | Branching timelines | Planned                                                                                                                                                                                                                                                                       |
-| 6   | Scale and failover  | In progress: a restarted sim resumes from its log; 20,000 residents, 16 districts and broker loss are open |
+| 6   | Scale and failover  | In progress: a restarted sim resumes from its log; 20,000 residents, 16 districts and broker loss are open                                                                                                                                                                    |
 | 7   | Self-hosting        | Planned                                                                                                                                                                                                                                                                       |
-| 8   | A first chapter     | In progress: the sim resumes from its log after a restart (nothing built is lost, no tick repeated or missing, commands run once); money, factions, policy, goals and investigations are planned (see [docs/game.md](docs/game.md))                                                                                  |
+| 8   | A first chapter     | In progress: the sim resumes from its log after a restart (nothing built is lost, no tick repeated or missing, commands run once); money, factions, policy, goals and investigations are planned (see [docs/game.md](docs/game.md))                                           |
 
 What runs today: the sim, which picks up where it left off after a restart, the dev stack and a browser page that shows a city live, with
-cars and walkers moving in time with the sim and the sun following the tick. The page
+cars and walkers moving in time with the sim and the sun following the tick. They are drawn as instances
+of their models, so draw calls do not grow with the number on the road ([how](docs/art.md#cars-and-walkers)). The page
 opens on a loading screen that fills in district by district, then drifts down onto the
 city. If the connection drops, a `Reconnecting…` pill shows, the city keeps moving, and
 the page reads what it missed from the log and carries on in order. If retention has
@@ -95,17 +115,17 @@ builder's token is applied by the sim and shows up in the page, rising over 8 ti
 
 Drag to turn the view, scroll to zoom toward the pointer, and slide with the right button or Shift. The view stays inside the city.
 
-| Input | What it does |
-| ----- | ------------ |
-| Mouse: left-drag | Turn and tilt the view |
-| Mouse: right-drag, or Shift and drag | Slide the view across the city |
+| Input                                            | What it does                            |
+| ------------------------------------------------ | --------------------------------------- |
+| Mouse: left-drag                                 | Turn and tilt the view                  |
+| Mouse: right-drag, or Shift and drag             | Slide the view across the city          |
 | Mouse wheel, trackpad pinch or two-finger scroll | Zoom toward the point under the pointer |
-| Touch: one finger | Turn and tilt |
-| Touch: two fingers | Slide, and pinch to zoom |
-| Keyboard: `W` `A` `S` `D` | Slide forward, left, back and right |
-| Keyboard: `Q` `E` | Turn left and right |
-| Keyboard: `+` `-` | Zoom in and out |
-| Keyboard: `0` | Back to the view the page opened on |
+| Touch: one finger                                | Turn and tilt                           |
+| Touch: two fingers                               | Slide, and pinch to zoom                |
+| Keyboard: `W` `A` `S` `D`                        | Slide forward, left, back and right     |
+| Keyboard: `Q` `E`                                | Turn left and right                     |
+| Keyboard: `+` `-`                                | Zoom in and out                         |
+| Keyboard: `0`                                    | Back to the view the page opened on     |
 
 The arrow keys and Space belong to the timeline, and keys typed into a text field are left alone.
 [docs/art.md](docs/art.md#camera) explains how the camera works and the calls the rest of the page uses to move it.
@@ -284,19 +304,19 @@ was applied, or refused because the lot was never emptied), `false` when the res
 it got no answer or the bot exited mid-turn (a second signal, or an error).
 `dev/check-builder-bot.mjs` fails on any orphan that is not `true`.
 
-| Flag | Default | |
-|---|---|---|
-| `--interval <s>` | 2 | wall seconds after each build that took |
-| `--count <n>` | 12 | buildings to raise before stopping |
-| `--district <n>` | the development area's, else the district with the most lots it may change | where to grow |
-| `--centre <x,z>` | the middle of the development area, else the densest spot of such lots | tile to grow around |
-| `--rebuild` | off | also demolish and rebuild lots that hold a building |
-| `--demolish-after <s>` | off | once done, wait this long and take buildings down again, newest first |
-| `--demolish <n>` | 3 | how many to take down |
-| `--json <path or ->` | off | a line of JSON for the start, each command with its tick, any orphan, and the end |
-| `--side <n>` | 2 (the square root of `DISTRICTS`) | districts a side of the city has; the sim's default |
-| `--city-file <path>` | run the example | the example's output, saved |
-| `--result-timeout <s>` | 30 | how long a command may go unanswered before it counts as lost |
+| Flag                   | Default                                                                    |                                                                                   |
+| ---------------------- | -------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| `--interval <s>`       | 2                                                                          | wall seconds after each build that took                                           |
+| `--count <n>`          | 12                                                                         | buildings to raise before stopping                                                |
+| `--district <n>`       | the development area's, else the district with the most lots it may change | where to grow                                                                     |
+| `--centre <x,z>`       | the middle of the development area, else the densest spot of such lots     | tile to grow around                                                               |
+| `--rebuild`            | off                                                                        | also demolish and rebuild lots that hold a building                               |
+| `--demolish-after <s>` | off                                                                        | once done, wait this long and take buildings down again, newest first             |
+| `--demolish <n>`       | 3                                                                          | how many to take down                                                             |
+| `--json <path or ->`   | off                                                                        | a line of JSON for the start, each command with its tick, any orphan, and the end |
+| `--side <n>`           | 2 (the square root of `DISTRICTS`)                                         | districts a side of the city has; the sim's default                               |
+| `--city-file <path>`   | run the example                                                            | the example's output, saved                                                       |
+| `--result-timeout <s>` | 30                                                                         | how long a command may go unanswered before it counts as lost                     |
 
 SIGINT or SIGTERM stops after the lot the bot is working on and writes the end line, which carries the mean tile of
 what was built for aiming a camera. A second signal exits at once, still writing it. The bot exits 1 if a command got
@@ -343,6 +363,17 @@ The Felix release this repo builds on is in [`.felix-version`](.felix-version).
 When Felix publishes a release, a bot opens a "chore: use Felix <version>" PR
 that moves every pin listed in [`.github/felix-bump.sh`](.github/felix-bump.sh)
 and the lockfiles, and merges it once CI passes. Prereleases are skipped.
+
+Every night a workflow
+([`felix-nightly.yml`](.github/workflows/felix-nightly.yml)) points the Felix
+crates listed in `.felix-version` at the commit behind Felix's `nightly` tag and
+runs [`.github/felix-nightly.sh`](.github/felix-nightly.sh): it starts the sim's
+test stack and the dev stack from the `:nightly` Felix images, runs a city for a
+day, and runs the dev-stack checks that need no browser. When a run on `main`
+fails it opens an issue labelled `felix-nightly`, and a green run closes it, so
+a Felix change that breaks this repo shows up before the next release. See the
+latest run with `gh run list -R GetFelix/felix-metro --workflow "Felix nightly"
+--limit 1`, or start one from the Actions tab.
 
 The gateway is pinned on its own, by image tag in [`dev/compose.yml`](dev/compose.yml) (0.8.0 today). Move that tag
 when a gateway release adds something the page needs.

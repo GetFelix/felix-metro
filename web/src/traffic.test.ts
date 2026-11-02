@@ -1,4 +1,3 @@
-import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
 import type { Journey, Voyage } from './city';
 import { LANE, PAVEMENT, Traffic, poseBetween, type Fleet } from './traffic';
@@ -42,13 +41,35 @@ function journey(from: number, to: number): Journey {
   };
 }
 
+interface Placed {
+  car: boolean;
+  id: number;
+  x: number;
+  y: number;
+  z: number;
+  heading: number;
+  size: number;
+}
+
+/** A fleet that remembers what the last update placed, and the dt it was given. */
 function fleet() {
-  const made = { cars: 0, people: 0 };
+  const placed: Placed[] = [];
+  const seen = { rounds: 0, dt: NaN, open: false };
   const f: Fleet = {
-    car: () => (made.cars++, { o: new THREE.Object3D() }),
-    person: () => (made.people++, { o: new THREE.Object3D() }),
+    view() {},
+    begin(dt) {
+      placed.length = 0;
+      seen.rounds++;
+      seen.dt = dt;
+      seen.open = true;
+    },
+    car: (id, x, y, z, heading, size) => placed.push({ car: true, id, x, y, z, heading, size }),
+    person: (id, x, y, z, heading, size) => placed.push({ car: false, id, x, y, z, heading, size }),
+    end() {
+      seen.open = false;
+    },
   };
-  return { f, made };
+  return { f, placed, seen };
 }
 
 const voyage = (resident: number, vehicle: number, from: number, to: number): Voyage => ({
@@ -70,16 +91,31 @@ describe('Traffic', () => {
     expect(car!.z).toBeCloseTo(-LANE);
   });
 
-  it('walks on the pavement and a walker is not a car', () => {
-    const { f, made } = fleet();
+  it('hands the fleet each voyage once, as a car of its kind or as the resident walking', () => {
+    const { f, placed, seen } = fleet();
     const traffic = new Traffic(f, 0);
-    traffic.update(2, 0, [voyage(5, 0, 0, 10)]);
-    expect(made).toEqual({ cars: 0, people: 1 });
+    traffic.update(2, 0.25, [voyage(5, 0, 0, 10), voyage(6, 3, 0, 10)]);
+    expect(placed).toEqual([
+      expect.objectContaining({ car: false, id: 5, y: 0, z: expect.closeTo(-PAVEMENT), size: 1 }),
+      expect.objectContaining({ car: true, id: 3, y: 0.036, z: expect.closeTo(-LANE), size: 1 }),
+    ]);
     expect(traffic.where()[0]).toMatchObject({ car: false, z: expect.closeTo(-PAVEMENT) });
+    expect(seen).toEqual({ rounds: 1, dt: 0.25, open: false });
   });
 
-  it('draws nothing before a trip leaves or after it arrives, and reuses the model', () => {
-    const { f, made } = fleet();
+  it('starts every round afresh, so a voyage that ended is not drawn again', () => {
+    const { f, placed } = fleet();
+    const traffic = new Traffic(f, 0);
+    const a = voyage(1, 2, 0, 10);
+    const b = voyage(2, 2, 0, 20);
+    traffic.update(5, 0, [a, b]);
+    expect(placed).toHaveLength(2);
+    traffic.update(15, 0, [a, b]);
+    expect(placed.map((p) => p.id)).toEqual([2]);
+  });
+
+  it('draws nothing before a trip leaves or after it arrives', () => {
+    const { f } = fleet();
     const traffic = new Traffic(f, 0);
     const a = voyage(1, 3, 10, 20);
     traffic.update(5, 0, [a]);
@@ -90,7 +126,6 @@ describe('Traffic', () => {
     expect(traffic.drawn).toBe(0);
     traffic.update(33, 0, [voyage(2, 3, 30, 40)]);
     expect(traffic.drawn).toBe(1);
-    expect(made.cars).toBe(1);
   });
 
   // A road along z = 0; lot 0 is a tile to its north, lot 1 a tile to its south, both at x = 5.
@@ -105,10 +140,9 @@ describe('Traffic', () => {
     journey: { ...journey(from, to), lots: (out) => ((out[0] = ends[0]), (out[1] = ends[1])) },
   });
   const drawn = (v: Voyage, tick: number, vehicle = v.vehicle) => {
-    const model = new THREE.Object3D();
-    const traffic = new Traffic({ car: () => ({ o: model }), person: () => ({ o: model }) }, 0, 16, lots);
-    traffic.update(tick, 0, [v]);
-    return { x: model.position.x, z: model.position.z, scale: model.scale.x, vehicle };
+    const { f, placed } = fleet();
+    new Traffic(f, 0, lots).update(tick, 0, [v]);
+    return { x: placed[0]!.x, z: placed[0]!.z, scale: placed[0]!.size, vehicle };
   };
 
   it('turns onto the lot it leaves and the lot it enters, whichever side of the road that is', () => {
@@ -158,52 +192,82 @@ describe('Traffic', () => {
   it('draws a zero length trip never', () => {
     const v = trip(5, 5, [0, 1]);
     for (const tick of [4.9, 5, 5.1]) {
-      const model = new THREE.Object3D();
-      const traffic = new Traffic({ car: () => ({ o: model }), person: () => ({ o: model }) }, 0, 16, lots);
+      const { f, placed } = fleet();
+      const traffic = new Traffic(f, 0, lots);
       traffic.update(tick, 0, [v]);
       expect(traffic.drawn).toBe(0);
+      expect(placed).toEqual([]);
     }
   });
 
-  it('makes only so many new models in one update and the rest in the ones after it', () => {
-    const { f, made } = fleet();
-    const traffic = new Traffic(f, 0, 3);
-    const trips = Array.from({ length: 8 }, (_, i) => voyage(i, 2, 0, 100));
+  it('places every voyage in the update it first appears in, however many there are', () => {
+    const { f, placed } = fleet();
+    const traffic = new Traffic(f, 0);
+    const trips = Array.from({ length: 800 }, (_, i) => voyage(i, i % 7, 0, 100));
     traffic.update(5, 0, trips);
-    expect(traffic.drawn).toBe(3);
-    expect(traffic.waiting).toBe(5);
-    traffic.update(5, 0, trips);
-    traffic.update(5, 0, trips);
-    expect(traffic.drawn).toBe(8);
-    expect(traffic.waiting).toBe(0);
-    expect(made.cars).toBe(8);
-    // Models the pool already holds cost nothing, so they are not held to the share.
-    traffic.update(200, 0, trips);
-    traffic.update(5, 0, trips);
-    expect(traffic.drawn).toBe(8);
-    expect(made.cars).toBe(8);
+    expect(traffic.drawn).toBe(800);
+    expect(placed).toHaveLength(800);
+  });
+
+  it('stops drawing a released voyage on the next sync, though no update follows', () => {
+    const { f, placed } = fleet();
+    const traffic = new Traffic(f, 0);
+    const a = voyage(1, 2, 0, 10);
+    const b = voyage(2, 2, 0, 10);
+    traffic.update(5, 0, [a, b]);
+    expect(placed).toHaveLength(2);
+    traffic.sync();
+    expect(placed).toHaveLength(2);
+    traffic.release(a);
+    traffic.sync();
+    expect(placed.map((p) => p.id)).toEqual([2]);
+  });
+
+  it('does not draw again for a release inside an update, which draws at its end', () => {
+    const { f, seen } = fleet();
+    const traffic = new Traffic(f, 0);
+    const a = voyage(1, 2, 0, 10);
+    traffic.update(5, 0, [a]);
+    traffic.update(12, 0, [a]);
+    expect(seen.rounds).toBe(2);
+    traffic.sync();
+    expect(seen.rounds).toBe(2);
   });
 
   it('draws no more than its cap, counts the rest, and draws them as room is made', () => {
-    const { f, made } = fleet();
+    const { f, placed } = fleet();
     const traffic = new Traffic(f, 0);
     traffic.cap = 3;
     const trips = Array.from({ length: 5 }, (_, i) => voyage(i, 2, 0, 10 + i));
     traffic.update(5, 0, trips);
     expect(traffic.drawn).toBe(3);
     expect(traffic.capped).toBe(2);
-    // The two over the cap are not model-pool waits, which a seek holds the frame for.
-    expect(traffic.waiting).toBe(0);
-    expect(made.cars).toBe(3);
-    // The first to arrive hands over its model, and the next in line takes it.
+    expect(placed).toHaveLength(3);
+    // The first to arrive makes room, and the next in line is drawn.
     traffic.update(10.5, 0, trips);
     expect(traffic.drawn).toBe(3);
     expect(traffic.capped).toBe(1);
-    expect(made.cars).toBe(3);
+    expect(placed).toHaveLength(3);
+  });
+
+  it('keeps a standing trip facing the way it last moved', () => {
+    const { f, placed } = fleet();
+    const traffic = new Traffic(f, 0);
+    // Moves east for the first tick, then stands still.
+    const v: Voyage = {
+      resident: 1,
+      vehicle: 2,
+      depart: 0,
+      journey: { ...journey(0, 10), positionAt: (tick, out) => ((out[0] = Math.min(tick, 1) * 1000), (out[1] = 0)) },
+    };
+    traffic.update(0.5, 0, [v]);
+    expect(placed[0]!.heading).toBeCloseTo(Math.PI / 2);
+    traffic.update(5.5, 0, [v]);
+    expect(placed[0]!.heading).toBeCloseTo(Math.PI / 2);
   });
 
   it('keeps drawing a trip while the resident’s next one waits to leave', () => {
-    const { f, made } = fleet();
+    const { f } = fleet();
     const traffic = new Traffic(f, 0);
     const first = voyage(1, 2, 0, 10);
     const next = voyage(1, 2, 12, 20);
@@ -214,7 +278,6 @@ describe('Traffic', () => {
     expect(traffic.drawn).toBe(0);
     traffic.update(13, 0, [first, next]);
     expect(traffic.where()[0]!.x).toBeCloseTo(13);
-    expect(made.cars).toBe(1);
   });
 
   it('centres the map’s tiles on the middle', () => {
