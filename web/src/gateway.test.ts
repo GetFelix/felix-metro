@@ -223,21 +223,38 @@ describe('Gateway', () => {
     expect(sent()).toHaveLength(4);
   });
 
-  it('reads a state key under the entity that picks the shard', async () => {
+  it('reads a state key in the named shard, without an entity', async () => {
     const { gateway, socket } = await joined();
-    const value = gateway.stateGet('events', 'keyframe', 'd01.3');
-    expect(socket.sent[1]).toMatchObject({ type: 'state_get', stream: 'events', key: 'keyframe', entity: 'd01.3' });
+    const value = gateway.stateGet('events', 'keyframe', 3);
+    expect(socket.sent[1]).toEqual({
+      type: 'state_get',
+      stream: 'events',
+      key: 'keyframe',
+      shard: 3,
+      id: socket.sent[1]!.id,
+    });
     socket.say({
       type: 'state_value',
       id: socket.sent[1]!.id,
+      shard: 3,
       payload: base64(Uint8Array.from([9])),
       version: 40,
       as_of: 44,
     });
     expect(await value).toMatchObject({ version: 40, asOf: 44 });
-    const none = gateway.stateGet('events', 'keyframe', 'd02');
-    socket.say({ type: 'state_value', id: socket.sent[2]!.id, payload: null, version: null, as_of: 44 });
+    const none = gateway.stateGet('events', 'keyframe', 2);
+    socket.say({ type: 'state_value', id: socket.sent[2]!.id, shard: 2, payload: null, version: null, as_of: 44 });
     expect((await none).payload).toBeNull();
+  });
+
+  it('refuses a state answer for another shard, as an older gateway gives', async () => {
+    const { gateway, socket } = await joined();
+    const older = gateway.stateGet('events', 'keyframe', 3);
+    socket.say({ type: 'state_value', id: socket.sent[1]!.id, payload: null, version: null, as_of: 44 });
+    await expect(older).rejects.toMatchObject({ code: 'state_shard' });
+    const other = gateway.stateGet('events', 'keyframe', 3);
+    socket.say({ type: 'state_value', id: socket.sent[2]!.id, shard: 0, payload: null, version: null, as_of: 44 });
+    await expect(other).rejects.toMatchObject({ code: 'state_shard' });
   });
 
   it('never has a fifth read on the wire, however the answers interleave', async () => {
@@ -282,7 +299,7 @@ describe('Gateway', () => {
     gateway.onError = (e) => seen.push(e);
     const subscribed = gateway.subscribe('events', 'd00', 0, 'live', () => {});
     const reads = Array.from({ length: 6 }, () => gateway.read('events', 0, 0));
-    const state = gateway.stateGet('events', 'keyframe', 'd00');
+    const state = gateway.stateGet('events', 'keyframe', 0);
     socket.dispatchEvent(new Event('close'));
     for (const p of [subscribed, ...reads, state]) await expect(p).rejects.toMatchObject({ code: 'closed' });
     await expect(gateway.read('events', 0, 0)).rejects.toMatchObject({ code: 'closed' });

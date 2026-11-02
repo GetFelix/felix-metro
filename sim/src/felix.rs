@@ -7,8 +7,6 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use felix_client::{ClientConfig, ClusterClient, CommitOp, ConditionalWrite};
-use felix_metro_core::{Routing, district_key};
-use felix_wire::routing::ShardRouting;
 use tracing::warn;
 
 use crate::commands::{Incoming, commands_stream};
@@ -80,23 +78,20 @@ pub fn events_stream(city: &str) -> String {
     format!("metro.events.{city}")
 }
 
-/// Entity keys that put district `i` on shard `i` of a stream with `shards`
-/// shards mapped by `routing`. See [`felix_metro_core::keys`].
-pub fn district_keys(shards: u32, routing: ShardRouting, districts: usize) -> Result<Vec<String>> {
+/// The entity key a district's commits carry. With an explicit shard it only
+/// labels the commit; the shard is the district's number.
+fn entity_key(district: u16) -> String {
+    format!("d{district:02}")
+}
+
+/// Whether a stream with `shards` shards has a shard of its own for each of
+/// `districts`.
+fn ensure_shards(shards: u32, districts: usize) -> Result<()> {
     anyhow::ensure!(
         shards as usize >= districts,
         "the stream has {shards} shards for {districts} districts; a district needs a shard of its own"
     );
-    let routing = match routing {
-        ShardRouting::Modulo => Routing::Modulo,
-        ShardRouting::JumpHash => Routing::JumpHash,
-    };
-    (0..districts)
-        .map(|district| {
-            district_key(district as u32, shards, routing)
-                .with_context(|| format!("no entity key routes district {district} to its shard"))
-        })
-        .collect()
+    Ok(())
 }
 
 /// A city's event stream on a cluster.
@@ -107,7 +102,6 @@ pub struct FelixLog {
     namespace: Arc<str>,
     stream: Arc<str>,
     commands: Arc<str>,
-    keys: Arc<[String]>,
 }
 
 impl FelixLog {
@@ -120,20 +114,19 @@ impl FelixLog {
         districts: usize,
     ) -> Result<Self> {
         let stream = events_stream(city);
-        let (shards, routing) = client
+        let (shards, _) = client
             .client()
             .await
             .stream_routing(&connection.tenant, &connection.namespace, &stream)
             .await
             .with_context(|| format!("ask how {stream} is sharded"))?;
-        let keys = district_keys(shards, routing, districts)?;
+        ensure_shards(shards, districts)?;
         Ok(FelixLog {
             client,
             tenant: connection.tenant.as_str().into(),
             namespace: connection.namespace.as_str().into(),
             stream: stream.into(),
             commands: commands_stream(city).into(),
-            keys: keys.into(),
         })
     }
 }
@@ -154,10 +147,16 @@ impl Log for FelixLog {
                 expected.to_le_bytes().to_vec(),
             ));
         }
-        let key = &self.keys[usize::from(district)];
         let written = self
             .client
-            .commit_if(&self.tenant, &self.namespace, key.as_bytes(), ops, expected)
+            .commit_if_on_shard(
+                &self.tenant,
+                &self.namespace,
+                u32::from(district),
+                entity_key(district).as_bytes(),
+                ops,
+                expected,
+            )
             .await?;
         Ok(match written {
             ConditionalWrite::Written { .. } => Write::Written,
@@ -166,7 +165,6 @@ impl Log for FelixLog {
     }
 
     async fn read(&self, district: u16, offset: u64) -> Result<Option<Vec<u8>>> {
-        // The district's keys put it on the shard of its own number.
         let page = self
             .client
             .read(
@@ -187,14 +185,13 @@ impl Log for FelixLog {
     }
 
     async fn keyframe(&self, district: u16) -> Result<Option<u64>> {
-        let key = &self.keys[usize::from(district)];
         let state = self
             .client
-            .state_get(
+            .state_get_on_shard(
                 &self.tenant,
                 &self.namespace,
                 &self.stream,
-                key.as_bytes(),
+                u32::from(district),
                 "keyframe",
             )
             .await?;
@@ -259,55 +256,18 @@ impl Log for FelixLog {
 
 #[cfg(test)]
 mod tests {
-    use felix_wire::routing::shard_for_routing;
-
     use super::*;
 
-    const MODES: [ShardRouting; 2] = [ShardRouting::Modulo, ShardRouting::JumpHash];
-
     #[test]
-    fn each_district_gets_the_shard_of_its_number_under_felixs_own_hash() {
-        for routing in MODES {
-            for (shards, districts) in [(4, 4), (16, 16), (64, 16), (5, 3)] {
-                let keys = district_keys(shards, routing, districts).unwrap();
-                for (district, key) in keys.iter().enumerate() {
-                    assert!(key.starts_with(&format!("d{district:02}")));
-                    let shard = shard_for_routing(routing, shards, Some(key.as_bytes()));
-                    assert_eq!(shard as usize, district, "{routing:?} {key}");
-                }
-            }
-        }
+    fn a_district_needs_a_shard_of_its_own() {
+        assert!(ensure_shards(4, 4).is_ok());
+        assert!(ensure_shards(64, 16).is_ok());
+        assert!(ensure_shards(3, 4).is_err());
     }
 
     #[test]
-    fn core_hashes_like_felix() {
-        for (mode, routing) in [
-            (ShardRouting::Modulo, Routing::Modulo),
-            (ShardRouting::JumpHash, Routing::JumpHash),
-        ] {
-            for shards in [1, 2, 3, 7, 16, 64] {
-                for n in 0..500 {
-                    let key = format!("d{n:02}.{n}");
-                    assert_eq!(
-                        felix_metro_core::keys::shard_for(routing, shards, key.as_bytes()),
-                        shard_for_routing(mode, shards, Some(key.as_bytes())),
-                    );
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn plain_keys_collide_and_are_salted() {
-        // Hashing d00 to d03 over four shards puts two districts on one.
-        for routing in MODES {
-            let keys = district_keys(4, routing, 4).unwrap();
-            assert!(keys.iter().any(|k| k.contains('.')), "{routing:?}");
-        }
-    }
-
-    #[test]
-    fn refuses_fewer_shards_than_districts() {
-        assert!(district_keys(3, ShardRouting::Modulo, 4).is_err());
+    fn a_commit_names_its_district() {
+        assert_eq!(entity_key(0), "d00");
+        assert_eq!(entity_key(13), "d13");
     }
 }

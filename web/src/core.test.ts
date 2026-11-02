@@ -1,13 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { beforeAll, describe, expect, it } from 'vitest';
-import {
-  Metro,
-  decodeRecord,
-  districtKey,
-  hash as cityHash,
-  initSync,
-  residentDayHash,
-} from './core/felix_metro_core.js';
+import { Metro, decodeRecord, hash as cityHash, initSync, residentDayHash } from './core/felix_metro_core.js';
 
 const built = (name: string) => readFileSync(new URL(`./core/${name}`, import.meta.url));
 
@@ -87,17 +80,6 @@ describe('trips in WebAssembly', () => {
     expect(place(metro, t, [])).toBeUndefined();
     expect(place(metro, t, [[4_000_000_000, 100]])).toBeUndefined();
     expect(metro.trip(4_000_000_000, 1, t.depart, Uint32Array.from(t.route.flat()))).toBeUndefined();
-  });
-});
-
-describe('district keys in WebAssembly', () => {
-  it('names a key for each district under either routing', () => {
-    for (const routing of ['modulo', 'jump_hash']) {
-      for (let district = 0; district < 4; district++) {
-        expect(districtKey(district, 4, routing)).toMatch(new RegExp(`^d0${district}`));
-      }
-    }
-    expect(() => districtKey(4, 4, 'modulo')).toThrow();
   });
 });
 
