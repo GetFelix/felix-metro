@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-11-02
+
 ### The sim
 
 - A restarted sim carries on from its log instead of starting the city over. It rebuilds the world from the newest
@@ -16,12 +18,71 @@
   refused with result 10. The sim records a `ledger` event per district per day and per paid command, and a `balance`
   event per district on every keyframe tick; a restart restores the account. The page shows the funds beside the clock,
   and shows the funds of the moment you scrub to.
+- The city has a council of three factions: commuters, the shore's residents and shops. Each day the sim scores how
+  well the city met what they ask for (a trip to work or school of 12 minutes or less, 80% of residents living away
+  from factories, 5 visits a day for each shop). A faction unhappy for 3 days in a row recalls the mayor; the city carries
+  on. The sim writes a `council` event on every keyframe tick and a restart restores it. The page folds the council to a
+  line below the funds that opens to the demands and a countdown to a recall.
+- A `policy` command sets shop hours (0 to 3 hours later than usual) or the speed limit on avenues or on streets
+  (30 to 100 percent of their speed). Later hours keep shopkeepers at work longer and raise shop tax; a limit slows
+  every trip that drives that class of road. Each policy can change once a city day, otherwise the command is refused
+  (result 11; result 12 for the value it already has). The sim writes a `policy` event when one changes and on every
+  keyframe tick after the first change, and a restart restores the values and cooldowns. The page lists them under the council.
+- A first chapter, the city `pier`: it opens with the avenue limit at 40% and the street limit at 60%, so commuters
+  average 24 minutes and the council recalls the mayor in 3 days unless the limits are raised. A chapter's first tick
+  is the sim's first tick (no warm-up), and a restart before any policy change keeps the chapter's opening limits.
+  The dev stack seeds `pier` and holds it back; `dev/city.sh pier` starts it.
+- `place road` (command tag 1) and the new `remove road` (tag 8) are carried out. A road joins two existing
+  intersections in one row or column over bare ground, at most 12 tiles long, costs $100 a tile, and never crosses or
+  touches another road; only a road a builder added can be removed, for $100. Segment ids are never reused. Each is a `roadwork` event (extended
+  kind 6), and keyframes list every built road, removed ones included, so a restart or a late page rebuilds the same
+  city. When a road goes, every vehicle whose way used it is sent another way from the intersection it was heading for,
+  in the same tick, with a `replan` event (now `resident, vehicle, node, route`). Results 22 to 26 are new refusals.
 
 ### Added
 
 - Moments: a **Share this moment** button copies a link such as `/?at=<tick>&cam=<x,z,distance,azimuth,polar>#harbor`
   that opens the city at that tick from that camera view (`?cam` is new). `H` is photo mode and hides every control.
   A page left alone for 60 seconds turns the camera slowly (`?attract=<seconds>`, `0` turns it off).
+- Follow a life: click a car or walker (tap on a touch screen, or press `F` for the one nearest the middle of the view)
+  and the camera follows that resident, with a card under the city name that shows their name, what kind of resident
+  they are, what they are doing now and their day. The resident is known by number, so the follow holds across districts
+  and through seeks, scrubs and rewinds; indoors the camera stays on their building and the card says what they are
+  doing there. `Esc`, the card's button or moving the view lets go; turning and zooming keep the follow.
+  `?follow=<resident>` opens a page on one, and **Share this moment** adds it to the link. The key list has a Following
+  group. `core`'s WebAssembly `Metro` gains `population()` and `profile(resident)`, a resident's name, kind and day as
+  JSON.
+- A resident's day from the log: the follow card now lists the trips and stays the sim wrote for the resident, a day at a
+  time, instead of their schedule. Arrows move to the day before or after, a click on an entry seeks the timeline to
+  that moment, and while the day is today new trips and arrivals appear as they happen. A trip that left late or a stay
+  that ran long shows the time it really did. A page with no log still lists the schedule, labelled as their usual day.
+  `Seeker.scan` reads a range of records without caching them.
+- Timeline markers: a row of buttons above the timeline marks the rush hours (08:00 and 17:15 each day) and every
+  building a builder put up or took down, with their name. A click seeks to the moment; marks too close together
+  share one numbered button, and clicking it again goes to the next moment in it. The row is a toolbar of its own with
+  an accessible name on every button. The sim writes each city day's builder markers to the events stream's state
+  (`markers.<day>`, a new record kind 5 in district 0's shard, one value a day under 20 KB), in the same commit as the tick that made the change;
+  tick records and their headers are unchanged. A city with no markers stored reads as before.
+- City stats: a panel on the left edge shows the residents, how many are on the road (in cars and on foot) and the
+  buildings by kind (homes, shops and offices, towers, factories) for the moment on screen, so the numbers change as you
+  scrub, rewind or seek. Press `C` or use the switch in the settings sheet; the choice is remembered. A test follows the
+  sim's own log of a morning and checks the count against the sim at every tick.
+- The page's own building tools: **Build** and **Demolish** buttons beside the settings button (keys `B` and `X`), a
+  panel to choose the building, `R` to turn it and `[` `]` to step through them, and a ghost of the building that follows
+  the pointer from lot to lot. Click, or tap, to place it. Commands go out only from the live city, only for a sign-in that
+  may build, and only on the development area; the panel says in plain words what became of each one. `?as=mayor` signs
+  in as the builder at the dev stack's stand-in sign-in. Zones are not built yet. The dev stack's seed takes
+  `METRO_BUILDERS`, and CI checks two builders editing at once.
+- A **Road** tool beside Build and Demolish (key `Y`). Click a crossing, then another in the same row or column, and a
+  ghost of the road lies between them: cyan where it fits, red with the reason in the panel where it does not. A second
+  click sends `place road`. Clicking a road a builder laid sends `remove road`; the city's own streets stay. `Esc` drops
+  the first end. On a touch screen a road or a removal takes a second tap to confirm. The page offers only the cleared
+  ground and filler lots with no door, so a stock city has one place for a road; the sim's own refusals are told in
+  plain words.
+- The page draws the roads builders lay and take away, in the live city and in the past: a rewind or a seek to before a
+  road takes it off the screen, and one past its removal puts the trees and plots back. A car on a road that is taken
+  away is sent another way from its next crossing at once, as the sim's `replan` event says. Zones are still not built.
+- The design notes now say what history the dev stack keeps (7 days or 1 GiB per stream) and link the Felix issue for reading offloaded history back.
 
 ### Changed
 
@@ -116,6 +177,8 @@
   tick it passes, reads the hour before ahead, and stops with a note at the oldest moment the log holds. The seeker reads
   the hours on either side of the one on screen while the page is idle and now caches three hours of records per
   district instead of two. `J` on the live city steps back 15 minutes and rewinds from there.
+- The council lists a chapter's goals (the commute, no recall, funds above zero) with the day or the outcome, and calls
+  the chapter won or lost once day 3 is scored. The chapter's numbers come from core, the same table the sim plays.
 
 ### Tools
 
@@ -130,6 +193,14 @@
   stand-in for the sim.
 - `clip-local.mjs` points the builder bot at the moved gateway port, and runs its stack as its own compose project so
   its cleanup cannot remove a felix-metro stack started by hand.
+- The frame-time overlay (`?hud`) shows the frame rate. `web/traffic-load.html` takes `?run=1` to keep drawing with the frame rate on the page, `?districts=4` for the 16 districts of the scale goal and `?cap=tier` to hold the movers drawn to the tier's cap; the CI traffic check runs it.
+- Changelog entries go in `changelog.d/<name>.<section>.md` instead of `CHANGELOG.md`, so parallel pull requests stop
+  conflicting on it. `.github/scripts/changelog-assemble.py <version>` folds them in before a tag (`--check` validates
+  them; CI runs it), and the release workflow refuses a tag while fragments remain. See `changelog.d/README.md`.
+- The two-builders page check opens its pages together instead of one after another, because a page already drawing starves one that is still loading (about 50 s against 10 s), and reopens a page that does not draw in 2 minutes. A failure says what the page was doing and where the browser's CPU went. The check no longer depends on the page answering to give up: a renderer that hung outright left Playwright's waits pending for good, so the step ran to its time limit in silence. Its own timers now fail a stalled step and name it.
+- The placement check's touch confirmations (demolish, take a road away) now tap back to back at the place the first tap found. On a slow runner each round trip to the page took seconds, so the confirming tap came after the page had dropped the pick (it does so after 5 s) and only picked again, however often it was retried.
+- The placement check taps a touch demolish again when a slow runner lets the first tap's pick lapse, instead of waiting two minutes for an answer to a command that was never sent.
+- The check that the past plays forward and joins live waits until the frames around the join are drawn instead of a fixed 1.5 s, so a software renderer at a few frames a second no longer fails it.
 
 ## [0.2.2] - 2026-10-25
 

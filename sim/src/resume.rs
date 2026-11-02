@@ -376,6 +376,16 @@ impl History {
         self.cursor_at(self.top)
     }
 
+    /// The forks the history names, as `(tick, name, principal)`. A fork is
+    /// recorded in district 0.
+    pub(crate) fn forks(&self) -> Vec<(u32, String, u64)> {
+        self.ticks
+            .values()
+            .filter_map(|records| records[0].as_ref())
+            .flat_map(|record| crate::fork::forked_in(&record.events))
+            .collect()
+    }
+
     /// The command stream offset in force after `tick`.
     pub(crate) fn cursor_at(&self, tick: u32) -> Option<u64> {
         self.cursors

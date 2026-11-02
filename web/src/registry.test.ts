@@ -4,7 +4,7 @@ import { GatewayError, type EventFrame, type Gateway, type Subscribed } from './
 vi.mock('./core/felix_metro_core.js', () => ({
   decodeRecord: (bytes: Uint8Array) => new TextDecoder().decode(bytes),
 }));
-const { Registry, citySize, displayName, parseEntry } = await import('./registry');
+const { Registry, citySize, displayName, felixName, parseEntry } = await import('./registry');
 
 const created = (name: string, districts = 2) =>
   new TextEncoder().encode(
@@ -128,6 +128,14 @@ describe('parseEntry', () => {
     expect(parseEntry(created('harbor', 4))).toMatchObject({ name: 'harbor', districts: 4, parent: null });
     expect(parseEntry(forked('harbor~a', 'harbor'))).toMatchObject({ name: 'harbor~a', parent: 'harbor' });
     expect(parseEntry(new TextEncoder().encode('{"kind":"tick"}'))).toBeNull();
+  });
+});
+
+describe('felixName', () => {
+  it('leaves a city alone and turns the tilde of a fork into an underscore', () => {
+    expect(felixName('harbor')).toBe('harbor');
+    expect(felixName('harbor~bridge-closed')).toBe('harbor_bridge-closed');
+    expect(felixName('harbor~a~b')).toBe('harbor_a_b');
   });
 });
 

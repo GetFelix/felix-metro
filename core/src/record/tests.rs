@@ -26,7 +26,7 @@ fn name(rng: &mut Rng) -> String {
 
 fn event(rng: &mut Rng) -> Event {
     let resident = rng.next_u64() as u32;
-    match rng.below(18) {
+    match rng.below(19) {
         0 => Event::Trip {
             resident,
             vehicle: rng.below(6) as u8,
@@ -112,6 +112,11 @@ fn event(rng: &mut Rng) -> Event {
                     built: rng.next_u64() as u32,
                 })
                 .collect(),
+        },
+        17 => Event::Forked {
+            tick: rng.next_u64() as u32,
+            name: name(rng),
+            principal: rng.next_u64(),
         },
         15 => Event::Policy {
             settings: std::array::from_fn(|_| PolicySetting {
@@ -258,6 +263,7 @@ fn registry_record(rng: &mut Rng) -> RegistryRecord {
             parent: name(rng),
             tick: rng.next_u64() as u32,
             wall_us: rng.next_u64(),
+            principal: rng.next_u64(),
         }
     }
 }
@@ -421,6 +427,7 @@ fn names_over_the_limit_are_refused() {
         parent: long.clone(),
         tick: 1,
         wall_us: 2,
+        principal: 3,
     };
     assert_eq!(registry.encode(), Err(EncodeError::StringTooLong));
     let event = Event::Command {
@@ -907,6 +914,41 @@ fn an_author_name_over_the_limit_is_refused() {
     assert_eq!(
         plain_tick(vec![event]).encode(),
         Err(EncodeError::StringTooLong)
+    );
+}
+
+#[test]
+fn a_fork_is_an_event_and_a_registry_record_with_who_made_it() {
+    let forked = Event::Forked {
+        tick: 480,
+        name: "harbor~bridge".into(),
+        principal: 255,
+    };
+    let bytes = plain_tick(vec![forked.clone()]).encode().unwrap();
+    assert_eq!(TickRecord::decode(&bytes).unwrap().events, [forked]);
+    assert_eq!(
+        plain_tick(vec![Event::Forked {
+            tick: 480,
+            name: "harbor~bridge".into(),
+            principal: 255,
+        }])
+        .to_json()
+        .split("\"events\":")
+        .nth(1),
+        Some(
+            r#"[{"type":"forked","tick":480,"name":"harbor~bridge","principal":"00000000000000ff"}]}"#
+        )
+    );
+    let listed = RegistryRecord::Forked {
+        name: "harbor~bridge".into(),
+        parent: "harbor".into(),
+        tick: 480,
+        wall_us: 9,
+        principal: 255,
+    };
+    assert_eq!(
+        decode_json(&listed.encode().unwrap()).unwrap(),
+        r#"{"kind":"registry","type":"forked","name":"harbor~bridge","parent":"harbor","tick":480,"wallUs":9,"principal":"00000000000000ff"}"#
     );
 }
 

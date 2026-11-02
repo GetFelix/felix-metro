@@ -20,6 +20,12 @@ export const TOO_LONG = 23;
 export const ROAD_EXISTS = 24;
 export const ROAD_BLOCKED = 25;
 export const NOT_BUILT = 26;
+export const BAD_FORK_NAME = 16;
+export const FORK_TOO_DEEP = 17;
+export const FORK_TICK = 18;
+export const FORK_EXISTS = 19;
+export const FORK_TRIMMED = 20;
+export const FORK_LIMIT = 21;
 export const RESULT_NAMES = {
   0: "applied",
   1: "malformed",
@@ -34,12 +40,21 @@ export const RESULT_NAMES = {
   10: "no-funds",
   11: "cooldown",
   12: "unchanged",
+  16: "bad-fork-name",
+  17: "fork-too-deep",
+  18: "fork-tick",
+  19: "fork-exists",
+  20: "fork-trimmed",
+  21: "fork-limit",
   22: "not-straight",
   23: "too-long",
   24: "road-exists",
   25: "road-blocked",
   26: "not-built",
 };
+
+/** The name a city has at the gateway and in its stream names: a fork's `~` becomes `_`. */
+export const felixName = (city) => city.replaceAll("~", "_");
 
 /** What a `roadwork` event's change says: a builder added the road, or took it away. */
 export const ROAD_ADDED = 2;
@@ -94,6 +109,25 @@ function keyframe(bytes, at) {
   }
   for (let n = 0; n < 4; n++) varint(bytes, at);
   return { buildings, roads };
+}
+
+/** A registry record (`created` or `forked`), or null for another kind of record. */
+export function decodeRegistry(bytes) {
+  if (bytes[0] !== 3) return null;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let i = 2;
+  const str = () => {
+    const size = bytes[i++];
+    const text = Buffer.from(bytes.subarray(i, i + size)).toString();
+    i += size;
+    return text;
+  };
+  if (bytes[1] === 1) return { type: "created", name: str(), seed: str() };
+  if (bytes[1] !== 2) return null;
+  const name = str();
+  const parent = str();
+  const tick = view.getUint32(i, true);
+  return { type: "forked", name, parent, tick, principal: view.getBigUint64(i + 12, true) };
 }
 
 /** A tick record's header, its keyframe's building diff (or null) and its events. */
@@ -154,6 +188,14 @@ export function decode(bytes) {
         const segment = varint(raw, ext);
         const change = raw[ext.i++];
         out.events.push({ type: "roadwork", segment, change, a: varint(raw, ext), b: varint(raw, ext) });
+      } else if (kind === 7) {
+        // A fork: its tick, name and the principal who made it.
+        const tick = varint(raw, ext);
+        const size = raw[ext.i++];
+        const name = Buffer.from(raw.subarray(ext.i, ext.i + size)).toString();
+        ext.i += size;
+        const principal = new DataView(raw.buffer, raw.byteOffset + ext.i, 8).getBigUint64(0, true);
+        out.events.push({ type: "forked", tick, name, principal });
       }
     }
   }
@@ -207,6 +249,15 @@ export const demolish = (lot) => {
 };
 /** A `policy` command: `kind` 0 shop hours, 1 avenue limit, 2 street limit. */
 export const policy = (kind, value) => Buffer.from([7, kind, value]);
+/** A `fork` command: the last tick to keep, and the fork's name. */
+export const fork = (tick, name) => {
+  const text = Buffer.from(name);
+  const b = Buffer.alloc(6);
+  b[0] = 6;
+  b.writeUInt32LE(tick, 1);
+  b[5] = text.length;
+  return Buffer.concat([b, text]);
+};
 export const placeRoad = (a, z) => {
   const b = Buffer.alloc(9);
   b[0] = 1;
@@ -263,6 +314,9 @@ export class Session {
   message(m) {
     if (m.type === "hello") {
       this.onHello?.(m);
+    } else if (m.type === "event" && m.slot === "cities") {
+      const record = decodeRegistry(Buffer.from(m.payload, "base64"));
+      if (record) this.onCity?.(record);
     } else if (m.type === "event") {
       const record = decode(Buffer.from(m.payload, "base64"));
       if (!record) return;
@@ -286,6 +340,12 @@ export class Session {
       const from = offsets?.[shard] ?? "live";
       this.ws.send(JSON.stringify({ type: "subscribe", stream: "events", from, shard, slot: `d${shard}` }));
     }
+  }
+
+  /** Follows the registry of cities from its first record; `onRecord` is told each decoded one. */
+  followCities(onRecord) {
+    this.onCity = onRecord;
+    this.ws.send(JSON.stringify({ type: "subscribe", stream: "cities", from: 0, shard: 0, slot: "cities" }));
   }
 
   publish(payload) {

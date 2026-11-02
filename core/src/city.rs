@@ -242,6 +242,7 @@ fn road_tile(mask: &[u8], n: i32, x: i32, z: i32) -> RoadTile {
 impl City {
     /// Grows the city for `seed`. A seed is one or more parts joined by `~`
     /// (a fork's lineage), each 1 to 32 characters of `a-z`, `0-9` and `-`.
+    /// Only the first part shapes the city and its people, so a fork has its parent's, and `seed` on the result is that part.
     pub fn generate(seed: &str, districts_per_side: u16) -> Result<City, GenerateError> {
         build(seed, districts_per_side, None)
     }
@@ -435,9 +436,11 @@ pub(crate) fn build(
     }
     let d = i32::from(districts_per_side);
     let n = DISTRICT_TILES as i32 * d + 1;
-    let seed_hash = fnv1a(FNV_OFFSET, seed.as_bytes());
+    // A fork is its parent's city, so only the root part of the lineage draws the layout.
+    let root = seed.split('~').next().unwrap_or(seed);
+    let seed_hash = fnv1a(FNV_OFFSET, root.as_bytes());
 
-    let has_water = seed == "harbor" || below(mix(seed_hash, noise::SHORE, &[0]), 3) == 0;
+    let has_water = root == "harbor" || below(mix(seed_hash, noise::SHORE, &[0]), 3) == 0;
     let edge = below(mix(seed_hash, noise::SHORE, &[1]), 4) as u8;
     let shore = wet.unwrap_or(has_water).then_some(edge);
 
@@ -542,7 +545,7 @@ pub(crate) fn build(
     );
 
     Ok(City {
-        seed: seed.to_string(),
+        seed: root.to_string(),
         districts_per_side,
         districts,
         lots,

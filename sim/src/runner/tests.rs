@@ -41,6 +41,8 @@ struct Memory {
     /// `(district, offset)` of every append, in the order they happened.
     order: Arc<Mutex<Vec<(u16, u64)>>>,
     script: Script,
+    /// The first offset each district still holds, as retention leaves it.
+    floors: Arc<Mutex<HashMap<u16, u64>>>,
     /// Called with `(district, offset)` after each append.
     hook: Arc<dyn Fn(u16, u64) + Send + Sync>,
 }
@@ -54,6 +56,7 @@ impl Memory {
             commands: Arc::default(),
             sends: Arc::default(),
             order: Arc::default(),
+            floors: Arc::default(),
             script: Arc::new(script),
             hook: Arc::new(|_, _| {}),
         }
@@ -79,6 +82,20 @@ impl Memory {
 
     fn healthy() -> Memory {
         Memory::new(|_, _, _| None)
+    }
+
+    /// Drops what retention would: `district` no longer holds offsets below `floor`.
+    fn trim(&self, district: u16, floor: u64) {
+        self.floors.lock().unwrap().insert(district, floor);
+    }
+
+    fn floor(&self, district: u16) -> u64 {
+        self.floors
+            .lock()
+            .unwrap()
+            .get(&district)
+            .copied()
+            .unwrap_or(0)
     }
 
     fn records(&self, district: u16) -> Vec<TickRecord> {
@@ -161,10 +178,20 @@ impl Log for Memory {
     }
 
     async fn read(&self, district: u16, offset: u64) -> Result<Option<Vec<u8>>> {
+        let floor = self.floor(district);
+        if offset < floor {
+            // What Felix answers for an offset retention has passed.
+            return Err(felix_client::SubscribeCursorError {
+                reason: felix_wire::CursorErrorReason::TooOld,
+                requested: offset,
+                available: floor,
+            }
+            .into());
+        }
         let shards = self.shards.lock().unwrap();
-        Ok(shards
-            .get(&district)
-            .and_then(|shard| shard.get(offset as usize).cloned()))
+        let shard = shards.get(&district);
+        past_the_tail(offset, shard.map_or(0, Vec::len))?;
+        Ok(shard.and_then(|shard| shard.get(offset as usize).cloned()))
     }
 
     async fn keyframe(&self, district: u16) -> Result<Option<u64>> {
@@ -172,7 +199,9 @@ impl Log for Memory {
     }
 
     async fn read_from(&self, district: u16, offset: u64, max: u32) -> Result<Vec<(u64, Vec<u8>)>> {
+        let offset = offset.max(self.floor(district));
         let shards = self.shards.lock().unwrap();
+        past_the_tail(offset, shards.get(&district).map_or(0, Vec::len))?;
         Ok(shards.get(&district).map_or_else(Vec::new, |shard| {
             shard
                 .iter()
@@ -194,6 +223,19 @@ impl Log for Memory {
             .filter_map(|(at, payload)| Incoming::from_payload(payload, Some(at as u64)))
             .collect())
     }
+}
+
+/// Felix answers a read at the tail with nothing and one past it with an error.
+fn past_the_tail(offset: u64, len: usize) -> Result<()> {
+    if offset > len as u64 {
+        return Err(felix_client::SubscribeCursorError {
+            reason: felix_wire::CursorErrorReason::InFuture,
+            requested: offset,
+            available: len as u64,
+        }
+        .into());
+    }
+    Ok(())
 }
 
 fn city() -> City {
@@ -844,6 +886,7 @@ async fn a_city_that_starts_paused_skips_the_warmup() {
     assert_whole(&log, 10);
 }
 
+mod forked;
 mod resumed;
 
 mod builders {

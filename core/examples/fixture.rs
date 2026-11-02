@@ -221,6 +221,7 @@ fn records() -> Vec<(&'static str, Vec<u8>)> {
             parent: "harbor".into(),
             tick: 960,
             wall_us: 1_760_000_240_000_000,
+            principal: 0x00c0_ffee,
         },
     ];
     let mut out = vec![
