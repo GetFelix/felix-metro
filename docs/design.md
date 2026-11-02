@@ -482,11 +482,11 @@ for every other command.
 | 8      | the lot is one residents go to                                                         |
 | 9      | sent while the city was paused with more commands waiting than it holds; send it again |
 | 10     | `build`, `demolish`, `place road` or `remove road` the funds cannot pay for            |
-| 11     | `place road` between nodes that are the same, or not in one row or column              |
-| 12     | `place road` longer than 12 tiles                                                      |
-| 13     | `place road` between two nodes a road already joins                                    |
-| 14     | `place road` over a tile that is not bare ground, or beside a road; `build` on a road  |
-| 15     | `remove road` of a segment that is not a builder's road, or is already removed         |
+| 20     | `place road` between nodes that are the same, or not in one row or column              |
+| 21     | `place road` longer than 12 tiles                                                      |
+| 22     | `place road` between two nodes a road already joins                                    |
+| 23     | `place road` over a tile that is not bare ground, or beside a road; `build` on a road  |
+| 24     | `remove road` of a segment that is not a builder's road, or is already removed         |
 
 Lots residents go to (homes, workplaces, parks) cannot be built over or demolished,
 because the schedules that send people there do not change.
@@ -506,7 +506,7 @@ fit 64 bytes too, so a fork too deep to name is refused the same way.
 | 4   | demolish    | lot `u32`                            |
 | 5   | speed       | ticks per second `u8`                |
 | 6   | fork        | tick `u32`, name                     |
-| 7   | remove road | segment `u32`                        |
+| 8   | remove road | segment `u32`                        |
 
 A registry record is the kind byte, a tag and fields: `1` created (name, seed,
 districts `u16`, `wall_us` `u64`) or `2` forked (name, parent, tick `u32`,

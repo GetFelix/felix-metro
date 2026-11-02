@@ -40,7 +40,7 @@ const CMD_BUILD: u8 = 3;
 const CMD_DEMOLISH: u8 = 4;
 const CMD_SPEED: u8 = 5;
 const CMD_FORK: u8 = 6;
-const CMD_REMOVE_ROAD: u8 = 7;
+const CMD_REMOVE_ROAD: u8 = 8;
 
 const REG_CREATED: u8 = 1;
 const REG_FORKED: u8 = 2;

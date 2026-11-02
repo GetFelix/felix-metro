@@ -524,14 +524,14 @@ fn the_legacy_road_event_still_decodes() {
 }
 
 #[test]
-fn a_remove_road_command_is_tag_7() {
+fn a_remove_road_command_is_tag_8() {
     let c = CommandRecord {
         id: 9,
         name: "m".into(),
         command: Command::RemoveRoad { segment: 300 },
     };
     let bytes = c.encode().unwrap();
-    assert_eq!(&bytes[bytes.len() - 5..], [7, 44, 1, 0, 0]);
+    assert_eq!(&bytes[bytes.len() - 5..], [8, 44, 1, 0, 0]);
     assert_eq!(CommandRecord::decode(&bytes).unwrap(), c);
 }
 

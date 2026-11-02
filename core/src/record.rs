@@ -71,16 +71,16 @@ pub const REFUSED_BUSY: u8 = 9;
 /// `build` or `demolish` that the city's account cannot pay for.
 pub const REFUSED_NO_FUNDS: u8 = 10;
 /// `place road` between a node and itself, or two nodes not in one row or column.
-pub const REFUSED_NOT_STRAIGHT: u8 = 11;
+pub const REFUSED_NOT_STRAIGHT: u8 = 20;
 /// `place road` longer than 12 tiles.
-pub const REFUSED_TOO_LONG: u8 = 12;
+pub const REFUSED_TOO_LONG: u8 = 21;
 /// `place road` between two nodes a road already joins.
-pub const REFUSED_ROAD_EXISTS: u8 = 13;
+pub const REFUSED_ROAD_EXISTS: u8 = 22;
 /// `place road` over a tile that is not bare ground or has a road beside it, or
 /// `build` on a lot a road covers.
-pub const REFUSED_ROAD_BLOCKED: u8 = 14;
+pub const REFUSED_ROAD_BLOCKED: u8 = 23;
 /// `remove road` of a segment that is generated or already removed.
-pub const REFUSED_NOT_BUILT: u8 = 15;
+pub const REFUSED_NOT_BUILT: u8 = 24;
 
 /// `ledger` event reasons.
 /// A city day's taxes in, and road and building upkeep out.
