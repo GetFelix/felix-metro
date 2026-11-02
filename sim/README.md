@@ -16,7 +16,7 @@ cargo run -p felix-metro-sim
 
 | Variable | Default | |
 |---|---|---|
-| `SIM_CITIES` | required | `name` or `name:districts`, comma or space separated. The name is the seed, and `districts` is how many districts a side has (2 by default) |
+| `SIM_CITIES` | required | `name` or `name:districts`, comma or space separated. A name uses letters, digits and `-`. The name is the seed, and `districts` is how many districts a side has (2 by default) |
 | `SIM_ON_DEMAND` | none | cities in the same format whose streams exist but that stay idle, and unlisted, until `POST /cities/<name>/start` on the control endpoint. A city that starts is written to the registry, `metro.cities`, as it does |
 | `SIM_FELIX_BROKERS` | `127.0.0.1:5000` | `host:port`, comma separated |
 | `SIM_FELIX_SERVER_NAME` | `localhost` | name the broker's certificate is checked against |
@@ -27,6 +27,7 @@ cargo run -p felix-metro-sim
 | `SIM_WARMUP_HOURS` | `40` | city hours of ticks a city with no history commits as fast as the log takes them before it goes live, so it starts at 16:00 on day 2 with history behind it; 0 starts at midnight. A city that starts paused, or already has records, skips it |
 | `SIM_CONTROL_ADDR` | `127.0.0.1:8090` | where the speed endpoint listens; loopback only, it has no authentication |
 | `SIM_FORK_PROVISION_URL` | none | `http://host:port` of the service that makes the streams of a fork (see [Forks](#forks)). Without it the sim refuses `fork` commands with result 7 |
+| `SIM_MAX_FORKS_PER_CITY` | `8` | the most forks one city may have, counting forks of its forks; the next `fork` is refused with result 21. 0 refuses every `fork` |
 
 ## Speed
 
@@ -124,6 +125,10 @@ It must answer 200 once the streams exist and are readable by the roles that can
 it must be safe to call again. `dev/provision.mjs` is the dev stack's. The sim's Felix token needs publish and subscribe
 on every stream of the namespace, since a token names the streams it was minted for. A fork's streams and its name at the
 gateway write `_` for `~`, so `harbor~bridge` is `metro.events.harbor_bridge`.
+
+A `fork` is refused when the name is bad (16), too deep (17), names a tick that has not happened (18) or a fork that
+exists (19), when the city's log no longer starts at tick 0 because retention trimmed it (20), and when the root city
+already has `SIM_MAX_FORKS_PER_CITY` forks (21).
 
 A sim that restarts finds the forks its parent's log records, finishes any the registry does not list, and runs every
 fork the registry lists. [docs/design.md](../docs/design.md#branching) has the details and the limits.

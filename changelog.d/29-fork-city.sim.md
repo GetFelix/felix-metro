@@ -5,3 +5,7 @@
   the dev stack runs `dev/provision.mjs`) or it refuses `fork` as before. A fork has its parent's seed, so `City::generate`
   and `resident_name` draw from the part of the name before the first `~`. The registry's `forked` record gains the
   forking principal. See docs/design.md, Branching.
+  Result 20 refuses a fork of a city whose log retention has trimmed, and 21 a fork past `SIM_MAX_FORKS_PER_CITY` (default
+  8, forks of forks counted against the root). A fork's copy leaves out its parent's `forked` events, a restart resumes
+  only a city's own forks, and a fork listed twice in the registry starts one city. City names in `SIM_CITIES` and
+  `SIM_ON_DEMAND` may no longer hold `_`.

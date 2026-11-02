@@ -14,7 +14,7 @@ use tracing::{error, info, warn};
 
 use crate::control::check_speed;
 use crate::felix::Connection;
-use crate::fork::Forks;
+use crate::fork::ForkGate;
 use crate::world::World;
 
 /// Commands applied in one tick. The rest wait for the next, so a flood of
@@ -182,7 +182,7 @@ pub(crate) fn apply_all_with(
     world: &mut World,
     incoming: Vec<Incoming>,
     wanted: &mut u8,
-    forks: Option<(&Forks, &str)>,
+    forks: Option<ForkGate<'_>>,
 ) -> Vec<Vec<Event>> {
     let mut out: Vec<Vec<Event>> = (0..world.districts()).map(|_| Vec::new()).collect();
     for item in incoming {
@@ -198,8 +198,13 @@ pub(crate) fn apply_all_with(
                 },
                 Command::Fork { tick, name: fork } => match forks {
                     None => (0, REFUSED_UNSUPPORTED, Vec::new(), name, id),
-                    Some((forks, city)) => match forks.decide(city, world.next_tick(), tick, &fork)
-                    {
+                    Some(gate) => match gate.forks.decide(
+                        gate.city,
+                        world.next_tick(),
+                        tick,
+                        &fork,
+                        gate.kept,
+                    ) {
                         Ok(child) => {
                             let forked = Event::Forked {
                                 tick,

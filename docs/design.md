@@ -521,6 +521,8 @@ for every other command.
 | 17     | `fork` whose lineage name `<parent>~<name>` is over 64 bytes                           |
 | 18     | `fork` at a tick the city has not committed yet                                        |
 | 19     | `fork` of a name the parent already has a fork of                                      |
+| 20     | `fork` of a city whose log no longer starts at its first tick                          |
+| 21     | `fork` of a city whose root already has the most forks the sim allows                  |
 
 Lots residents go to (homes, workplaces, parks) cannot be built over or demolished,
 because the schedules that send people there do not change.
@@ -803,6 +805,9 @@ in [Commands and the registry](#commands-and-the-registry), when:
 - `<parent>~<name>` is over 64 bytes, so a fork too deep to name (17);
 - the tick has not happened yet: it must be at or before the last tick the parent committed (18);
 - the parent already has a fork of that name, made or being made (19);
+- the parent's logs no longer hold their first records, because retention trimmed them, so there is nothing to copy
+  from tick 0 (20);
+- the root city already has the most forks the sim allows, forks of forks counted (21);
 - this sim has no way to create streams (7, as before).
 
 An applied command records a `forked` event (extended kind 7: tick varint, the fork's name, the principal hash) in
@@ -812,7 +817,9 @@ mark it.
 **What is copied.** The fork's log holds the parent's whole history up to the fork tick: each district's records from
 tick 0 through the fork tick are copied into the fork's own stream, in order, with two changes. A `command_cursor`
 event names a position on the parent's command stream, so it is rewritten to 0, the start of the fork's own. The
-`epoch` and `wall_us` stay as they were. Because the copy starts at tick 0 and every district commits one record
+`epoch` and `wall_us` stay as they were. The parent's `forked` events are left out, so a fork's timeline marks only
+the forks made from it, and a restarted fork never takes a sibling for its own child (a city resumes only forks whose
+name is its own plus one part). Because the copy starts at tick 0 and every district commits one record
 per tick, a record keeps its offset, so `keyframe_offset` and the `keyframe` state key stay true without being edited.
 
 The other design is to start the fork's log at the keyframe at or before the fork tick and have the page stitch the
@@ -848,7 +855,7 @@ because a Felix token lists the streams it was minted for and a new stream is co
 
 **Names at the gateway.** The gateway keeps scope values to letters, digits, `-` and `_`, so `~` cannot be in a
 stream name or a join. A fork's streams and its join name replace each `~` with `_`: `harbor~bridge-closed` is
-`metro.events.harbor_bridge-closed`. No city name has an `_` (a seed does not), so the mapping is one to one. The
+`metro.events.harbor_bridge-closed`. No city name has an `_` (the sim refuses one in `SIM_CITIES` and `SIM_ON_DEMAND`), so the mapping is one to one. The
 registry and the page's picker still show the lineage name; `felixName` in the web app and `felix_name` in the sim
 convert.
 
@@ -873,8 +880,14 @@ ticks than the restart reads back (five city hours) had passed is not found agai
 finishes it. A copy that already holds records past the new fork tick is refused with an error in the log, because the
 fork would hold a history the parent never had at that tick.
 
+**Limits.** The copy starts at tick 0 of the parent, so a parent whose retention has trimmed the front of any
+district's log cannot be forked: the command is refused with result 20 when it is read, instead of being applied and
+then failing to copy. Keep the parent's retention longer than the history worth branching from. A fork's own copy owes the parent nothing, so trimming the parent later does not touch forks already made.
+
 **Cost.** Every fork is a city that ticks, at 4 ticks a second unless paused, and keeps its own copy of the history.
-A pause (a `speed` command, or the operator's endpoint) is how to leave one idle.
+A pause (a `speed` command, or the operator's endpoint) is how to leave one idle. Because each fork costs that much,
+one root city may have at most 8 forks, forks of its forks included (`SIM_MAX_FORKS_PER_CITY` changes it); the next
+`fork` is refused with result 21. Forks that already exist count, so a lowered limit stops new forks without removing any.
 
 **Side by side.** The parent and fork can be shown with their timelines locked to the same tick. That is the page's
 part ([Seeking](#seeking) works on the fork's stream like any city's).

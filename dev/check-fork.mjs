@@ -122,15 +122,16 @@ for (let first = 0; first < 400 && lot === null; first += 8) {
   lot = lots.find((l) => seen.get(ID + 100 + l).result === APPLIED) ?? null;
 }
 if (lot === null) fail("no lot in the fork took a build");
-const mark = parent.newest;
-await waitFor("the parent to tick on", 60_000, () => parent.newest > mark + 8);
+const parentMark = parent.newest;
+await waitFor("the parent to tick on", 60_000, () => parent.newest > parentMark + 8);
 if (parent.results.has(ID + 100 + lot)) fail("the parent recorded the fork's build");
 console.log(`${city}: lot ${lot} built in the fork and not in the parent`);
 
 // And the other way: a command in the parent never reaches the fork.
 const there = await parent.command(ID + 30, build(4_000_000_000));
 if (!there || there.result === APPLIED) fail("the parent should have refused a build past the last lot");
-await waitFor("the fork to tick on", 60_000, () => child.newest > mark + 8);
+const childMark = child.newest;
+await waitFor("the fork to tick on", 60_000, () => child.newest > childMark + 8);
 if (child.results.has(ID + 30)) fail("the fork recorded a command sent to the parent");
 
 parent.close();

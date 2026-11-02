@@ -18,6 +18,8 @@ export const BAD_FORK_NAME = 16;
 export const FORK_TOO_DEEP = 17;
 export const FORK_TICK = 18;
 export const FORK_EXISTS = 19;
+export const FORK_TRIMMED = 20;
+export const FORK_LIMIT = 21;
 export const RESULT_NAMES = {
   0: "applied",
   1: "malformed",
@@ -33,6 +35,8 @@ export const RESULT_NAMES = {
   17: "fork-too-deep",
   18: "fork-tick",
   19: "fork-exists",
+  20: "fork-trimmed",
+  21: "fork-limit",
 };
 
 /** The name a city has at the gateway and in its stream names: a fork's `~` becomes `_`. */

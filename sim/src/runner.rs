@@ -15,7 +15,7 @@ use tracing::{info, warn};
 
 use crate::commands::{Incoming, MAX_HELD, MAX_PER_TICK, MAX_REFUSED, apply_all_with, refuse_busy};
 use crate::control::check_speed;
-use crate::fork::{Forks, forked_in};
+use crate::fork::{ForkGate, Forks, forked_in};
 use crate::latency::Window;
 use crate::resume::{History, LOOKBACK, read_history, retrying};
 use crate::world::World;
@@ -276,7 +276,16 @@ pub async fn run_with_history<L: Log>(
             let said = history.cursor_event(tick);
             cursor = said.or(cursor);
             let mut wanted = at;
-            let fork_gate = settings.forks.as_ref().map(|forks| (forks, name));
+            let districts = world.districts();
+            let fork_gate = ForkGate::of(
+                settings.forks.as_ref(),
+                name,
+                &log,
+                districts,
+                retry,
+                &incoming,
+            )
+            .await?;
             let commanded = apply_all_with(&mut world, incoming, &mut wanted, fork_gate);
             let forked = forked_in(&commanded[0]);
             let step = world.step();
@@ -404,7 +413,16 @@ pub async fn run_with_history<L: Log>(
         let taken: Vec<Incoming> = queue.drain(..queue.len().min(MAX_PER_TICK)).collect();
         let room = MAX_PER_TICK - taken.len();
         let mut moved = advance(&mut cursor, &taken);
-        let fork_gate = settings.forks.as_ref().map(|forks| (forks, name));
+        let districts = world.districts();
+        let fork_gate = ForkGate::of(
+            settings.forks.as_ref(),
+            name,
+            &log,
+            districts,
+            retry,
+            &taken,
+        )
+        .await?;
         let mut commanded = apply_all_with(&mut world, taken, &mut wanted, fork_gate);
         // Commands the paused city had no room for are refused once its queue is clear.
         if queue.is_empty() {

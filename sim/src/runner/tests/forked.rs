@@ -2,8 +2,9 @@
 
 use felix_metro_core::City;
 use felix_metro_core::record::{
-    Command, Event, REFUSED_FORK_EXISTS, REFUSED_FORK_NAME, REFUSED_FORK_TICK,
-    REFUSED_FORK_TOO_DEEP, REFUSED_UNSUPPORTED, RESULT_APPLIED, TickRecord, principal_hash,
+    Command, Event, REFUSED_FORK_EXISTS, REFUSED_FORK_LIMIT, REFUSED_FORK_NAME, REFUSED_FORK_TICK,
+    REFUSED_FORK_TOO_DEEP, REFUSED_FORK_TRIMMED, REFUSED_UNSUPPORTED, RESULT_APPLIED, TickRecord,
+    principal_hash,
 };
 use tokio::sync::mpsc::{self, UnboundedReceiver};
 
@@ -243,7 +244,11 @@ async fn a_fork_log_that_holds_more_than_the_fork_tick_is_refused_for_good() {
 }
 
 fn forking(taken: &[&str]) -> (Forks, UnboundedReceiver<Request>) {
-    Forks::new(taken.iter().map(|s| s.to_string()))
+    limited(taken, 8)
+}
+
+fn limited(taken: &[&str], limit: usize) -> (Forks, UnboundedReceiver<Request>) {
+    Forks::new(taken.iter().map(|s| s.to_string()), limit)
 }
 
 fn fork_command(log: &Memory, id: u32, tick: u32, name: &str) -> Incoming {
@@ -430,7 +435,7 @@ async fn a_restart_hands_over_a_fork_the_log_recorded_and_applies_nothing_twice(
     assert_eq!(results(&log), vec![(1, RESULT_APPLIED)]);
     // The name stays taken across the restart, so the same name cannot make a second history.
     assert_eq!(
-        forks.decide("harbor", 150, 10, "bridge"),
+        forks.decide("harbor", 150, 10, "bridge", true),
         Err(REFUSED_FORK_EXISTS)
     );
 }
@@ -496,17 +501,157 @@ async fn a_fork_in_a_tick_some_districts_missed_is_made_once() {
 #[test]
 fn a_fork_may_take_the_name_of_another_cities_fork() {
     let (forks, _requests) = forking(&["lakeside~bridge"]);
-    assert!(forks.decide("harbor", 10, 5, "bridge").is_ok());
+    assert!(forks.decide("harbor", 10, 5, "bridge", true).is_ok());
     assert_eq!(
-        forks.decide("harbor", 10, 5, "bridge"),
+        forks.decide("harbor", 10, 5, "bridge", true),
         Err(REFUSED_FORK_EXISTS)
     );
     assert_eq!(
-        forks.decide("harbor", 10, 10, "other"),
+        forks.decide("harbor", 10, 10, "other", true),
         Err(REFUSED_FORK_TICK)
     );
     assert_eq!(
-        forks.decide("harbor", 10, 9, "other"),
+        forks.decide("harbor", 10, 9, "other", true),
         Ok("harbor~other".into())
+    );
+}
+
+fn forked_events(log: &Memory) -> Vec<String> {
+    (0..4)
+        .flat_map(|d| log.records(d))
+        .flat_map(|r| r.events)
+        .filter_map(|e| match e {
+            Event::Forked { name, .. } => Some(name),
+            _ => None,
+        })
+        .collect()
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_forks_copy_leaves_out_the_forks_of_its_parent() {
+    let log = Memory::healthy();
+    let (forks, _requests) = forking(&[]);
+    let commands = vec![fork_command(&log, 1, 0, "a"), fork_command(&log, 2, 0, "b")];
+    run_forking("harbor", &log, Some(forks), commands).await;
+    assert_eq!(forked_events(&log), ["harbor~a", "harbor~b"]);
+
+    let fork = Memory::healthy();
+    copy_history(&log, &fork, 4, 299, retry()).await.unwrap();
+    for district in 0..4 {
+        assert_eq!(fork.records(district).len(), 300, "district {district}");
+    }
+    assert_eq!(forked_events(&fork), Vec::<String>::new());
+    // The command that made them is still part of the history it keeps.
+    assert_eq!(results(&fork), [(1, RESULT_APPLIED), (2, RESULT_APPLIED)]);
+}
+
+/// A fork made before the copy left them out holds its parent's other forks, and is not their parent.
+#[tokio::test(start_paused = true)]
+async fn a_restarted_fork_does_not_make_its_siblings_its_own() {
+    let log = Memory::healthy();
+    let (forks, _requests) = forking(&[]);
+    let commands = vec![fork_command(&log, 1, 0, "a"), fork_command(&log, 2, 0, "b")];
+    run_forking("harbor", &log, Some(forks), commands).await;
+
+    let (forks, mut requests) = forking(&["harbor~a", "harbor~b"]);
+    let history = load_history(&log, 4, &quick(0)).await.unwrap();
+    assert_eq!(history.as_ref().unwrap().forks().len(), 2);
+    let mut settings = quick(310);
+    settings.forks = Some(forks);
+    let (_send, inbox) = mpsc::channel(4);
+    run_with_history(
+        "harbor~b",
+        fork_city(),
+        settings,
+        log.clone(),
+        Some(inbox),
+        history,
+    )
+    .await
+    .unwrap();
+    assert!(requests.try_recv().is_err());
+}
+
+#[test]
+fn only_a_citys_own_forks_are_resumed() {
+    let (forks, mut requests) = forking(&[]);
+    let logged = |names: &[&str]| -> Vec<(u32, String, u64)> {
+        names.iter().map(|n| (5, n.to_string(), 1)).collect()
+    };
+    forks.resume(
+        "harbor~b",
+        2,
+        logged(&["harbor~a", "harbor~b~c", "harbor~bb", "harbor"]),
+    );
+    assert_eq!(requests.try_recv().unwrap().child, "harbor~b~c");
+    assert!(requests.try_recv().is_err());
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_city_whose_log_was_trimmed_refuses_to_fork() {
+    let mut log = Memory::healthy();
+    run_city("harbor", harbor(), quick(300), log.clone())
+        .await
+        .unwrap();
+    let (forks, mut requests) = forking(&[]);
+    let history = load_history(&log, 4, &quick(0)).await.unwrap();
+    let (send, inbox) = mpsc::channel(8);
+    send.try_send(fork_command(&log, 1, 0, "whole")).unwrap();
+    // Retention takes the front of one district while the city runs, then a fork asks for it.
+    let (published, trimmed) = (log.clone(), log.clone());
+    log.hook = Arc::new(move |district, offset| {
+        if district == 0 && offset == 349 {
+            trimmed.trim(2, 10);
+            send.try_send(fork_command(&published, 2, 20, "late"))
+                .unwrap();
+        }
+    });
+    let mut settings = quick(400);
+    settings.forks = Some(forks);
+    run_with_history(
+        "harbor",
+        harbor(),
+        settings,
+        log.clone(),
+        Some(inbox),
+        history,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        results(&log),
+        [(1, RESULT_APPLIED), (2, REFUSED_FORK_TRIMMED)]
+    );
+    assert_eq!(requests.try_recv().unwrap().child, "harbor~whole");
+    assert!(requests.try_recv().is_err());
+}
+
+#[test]
+fn a_root_city_has_a_limited_number_of_forks_forks_of_forks_included() {
+    let (forks, _requests) = limited(&["harbor~a", "lakeside~a"], 3);
+    assert_eq!(
+        forks.decide("harbor", 10, 5, "b", true),
+        Ok("harbor~b".into())
+    );
+    // A fork of a fork counts against the root, which now has three.
+    assert_eq!(
+        forks.decide("harbor~a", 10, 5, "c", true),
+        Ok("harbor~a~c".into())
+    );
+    assert_eq!(
+        forks.decide("harbor", 10, 5, "d", true),
+        Err(REFUSED_FORK_LIMIT)
+    );
+    // A name already taken is that refusal, whatever the count.
+    assert_eq!(
+        forks.decide("harbor", 10, 5, "a", true),
+        Err(REFUSED_FORK_EXISTS)
+    );
+    // Another root has its own count.
+    assert!(forks.decide("lakeside", 10, 5, "b", true).is_ok());
+    let (none, _requests) = limited(&[], 0);
+    assert_eq!(
+        none.decide("harbor", 10, 5, "a", true),
+        Err(REFUSED_FORK_LIMIT)
     );
 }

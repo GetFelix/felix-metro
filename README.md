@@ -154,7 +154,7 @@ node dev/check-fork.mjs pinecrest
 
 That forks `pinecrest` through the gateway, waits for the fork to be listed, and checks that the fork holds the parent's
 history, runs on, and is independent. A fork is joined at the gateway as `pinecrest_<name>`, because the gateway allows
-no `~` in a name. How it works, and the new result codes 16 to 19, are in
+no `~` in a name. How it works, and the new result codes 16 to 21, are in
 [docs/design.md](docs/design.md#branching). The sim makes a fork's streams through a provisioner service the
 deployment runs (`SIM_FORK_PROVISION_URL`); the dev stack has one.
 

@@ -78,6 +78,11 @@ pub const REFUSED_FORK_TOO_DEEP: u8 = 17;
 pub const REFUSED_FORK_TICK: u8 = 18;
 /// `fork` of a name the parent already has a fork of.
 pub const REFUSED_FORK_EXISTS: u8 = 19;
+/// `fork` of a city whose log no longer holds its first records, which a fork
+/// copies from.
+pub const REFUSED_FORK_TRIMMED: u8 = 20;
+/// `fork` of a city whose root already has the most forks the sim allows.
+pub const REFUSED_FORK_LIMIT: u8 = 21;
 
 /// `ledger` event reasons.
 /// A city day's taxes in, and road and building upkeep out.

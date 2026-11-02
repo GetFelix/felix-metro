@@ -72,6 +72,7 @@ async fn main() -> Result<()> {
                 config.connection.clone(),
                 provisioner,
                 &sides,
+                config.max_forks,
             )
             .await?,
         );

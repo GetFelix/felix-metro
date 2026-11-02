@@ -13,6 +13,9 @@ pub(crate) struct CitySpec {
 /// Districts on a side when `SIM_CITIES` does not say: the first milestone's 2 by 2.
 const DEFAULT_SIDE: u16 = 2;
 
+/// Forks one city may have when `SIM_MAX_FORKS_PER_CITY` does not say.
+const DEFAULT_MAX_FORKS: usize = 8;
+
 /// The sim's settings, from `SIM_*` variables.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct Config {
@@ -40,6 +43,9 @@ pub(crate) struct Config {
     /// `SIM_FORK_PROVISION_URL`: `http://host:port` of the service that makes
     /// the streams of a fork. Without it the sim refuses `fork` commands.
     pub(crate) fork_provision_url: Option<String>,
+    /// `SIM_MAX_FORKS_PER_CITY`: the most forks one city may have, counting
+    /// forks of its forks. Default 8; 0 refuses every `fork`.
+    pub(crate) max_forks: usize,
 }
 
 impl Config {
@@ -115,6 +121,12 @@ impl Config {
             ),
             None => None,
         };
+        let max_forks = match var("SIM_MAX_FORKS_PER_CITY") {
+            Some(value) => value.trim().parse().with_context(|| {
+                format!("SIM_MAX_FORKS_PER_CITY: {value:?} is not a whole number")
+            })?,
+            None => DEFAULT_MAX_FORKS,
+        };
         Ok(Self {
             connection: Connection {
                 brokers,
@@ -132,6 +144,7 @@ impl Config {
             warmup_hours,
             control_addr,
             fork_provision_url,
+            max_forks,
         })
     }
 }
@@ -144,12 +157,9 @@ fn parse_cities(var: &str, items: Vec<String>) -> Result<Vec<CitySpec>> {
             Some((name, side)) => (name, Some(side)),
             None => (item.as_str(), None),
         };
-        if name.is_empty()
-            || !name
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
-        {
-            bail!("{var}: {name:?} may use only letters, digits, '-' and '_'");
+        // A fork's stream name writes `_` for `~`, so a city with an `_` could share one.
+        if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+            bail!("{var}: {name:?} may use only letters, digits and '-'");
         }
         let districts_per_side = match side {
             Some(side) => side
@@ -205,6 +215,37 @@ mod tests {
         assert_eq!(config.warmup_hours, 40);
         assert_eq!(config.control_addr, "127.0.0.1:8090".parse().unwrap());
         assert_eq!(config.fork_provision_url, None);
+        assert_eq!(config.max_forks, 8);
+    }
+
+    #[test]
+    fn the_forks_a_city_may_have_are_set_by_the_operator() {
+        let with = |value| {
+            config(&[
+                ("SIM_CITIES", "a"),
+                ("SIM_FELIX_TOKEN_FILE", "/t"),
+                ("SIM_MAX_FORKS_PER_CITY", value),
+            ])
+        };
+        assert_eq!(with("3").unwrap().max_forks, 3);
+        assert_eq!(with("0").unwrap().max_forks, 0);
+        for bad in ["-1", "many", "2.5"] {
+            assert!(with(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn a_city_name_cannot_hold_what_a_fork_name_is_made_of() {
+        for bad in ["har~bor", "har_bor", "~"] {
+            let result = config(&[("SIM_CITIES", bad), ("SIM_FELIX_TOKEN_FILE", "/t")]);
+            assert!(result.is_err(), "{bad}");
+            let result = config(&[
+                ("SIM_CITIES", "a"),
+                ("SIM_ON_DEMAND", bad),
+                ("SIM_FELIX_TOKEN_FILE", "/t"),
+            ]);
+            assert!(result.is_err(), "{bad}");
+        }
     }
 
     #[test]

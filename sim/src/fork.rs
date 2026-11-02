@@ -8,12 +8,13 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use anyhow::{Context, Result, ensure};
 use felix_metro_core::record::{
-    Event, REFUSED_FORK_EXISTS, REFUSED_FORK_NAME, REFUSED_FORK_TICK, REFUSED_FORK_TOO_DEEP,
-    TickRecord,
+    Command, Event, REFUSED_FORK_EXISTS, REFUSED_FORK_LIMIT, REFUSED_FORK_NAME, REFUSED_FORK_TICK,
+    REFUSED_FORK_TOO_DEEP, REFUSED_FORK_TRIMMED, TickRecord,
 };
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 
+use crate::commands::Incoming;
 use crate::resume::retrying;
 use crate::runner::{Log, Retry, commit_until_written};
 
@@ -85,18 +86,48 @@ impl Request {
 pub struct Forks {
     taken: Arc<Mutex<HashSet<String>>>,
     requests: mpsc::UnboundedSender<Request>,
+    /// Forks one root city may have, forks of forks included.
+    limit: usize,
+}
+
+/// What a city needs to check a `fork` command, beyond its own tick.
+#[derive(Clone, Copy)]
+pub(crate) struct ForkGate<'a> {
+    pub(crate) forks: &'a Forks,
+    pub(crate) city: &'a str,
+    /// Whether every district's log still holds offset 0, which the copy starts at.
+    pub(crate) kept: bool,
+}
+
+impl<'a> ForkGate<'a> {
+    /// The gate for `incoming`, or `None` when the sim cannot fork. Reads the
+    /// logs only when a `fork` is among the commands.
+    pub(crate) async fn of<L: Log>(
+        forks: Option<&'a Forks>,
+        city: &'a str,
+        log: &L,
+        districts: usize,
+        retry: Retry,
+        incoming: &[Incoming],
+    ) -> Result<Option<ForkGate<'a>>> {
+        let Some(forks) = forks else { return Ok(None) };
+        let kept = !asks_to_fork(incoming) || history_kept(log, districts, retry).await?;
+        Ok(Some(ForkGate { forks, city, kept }))
+    }
 }
 
 impl Forks {
-    /// `taken` is every fork the registry lists. The receiver goes to
-    /// [`make::supervise`].
+    /// `taken` is every fork the registry lists, and `limit` the most forks a
+    /// root city may have. The receiver goes to [`make::supervise`].
     pub fn new(
         taken: impl IntoIterator<Item = String>,
+        limit: usize,
     ) -> (Forks, mpsc::UnboundedReceiver<Request>) {
         let (requests, receive) = mpsc::unbounded_channel();
         let forks = Forks {
             taken: Arc::new(Mutex::new(taken.into_iter().collect())),
             requests,
+            limit,
         };
         (forks, receive)
     }
@@ -109,28 +140,43 @@ impl Forks {
 
     /// Decides a `fork` command that `parent`, about to step tick `next`,
     /// read: the fork's lineage name, which is now taken, or the refusal.
+    /// `kept` is whether the parent's logs still start at offset 0.
     pub(crate) fn decide(
         &self,
         parent: &str,
         next: u32,
         tick: u32,
         name: &str,
+        kept: bool,
     ) -> Result<String, u8> {
         let child = lineage(parent, name)?;
         if tick >= next {
             return Err(REFUSED_FORK_TICK);
         }
-        if !self.taken().insert(child.clone()) {
+        if !kept {
+            return Err(REFUSED_FORK_TRIMMED);
+        }
+        let mut taken = self.taken();
+        if taken.contains(&child) {
             return Err(REFUSED_FORK_EXISTS);
         }
+        let root = root_of(parent);
+        if taken.iter().filter(|fork| root_of(fork) == root).count() >= self.limit {
+            return Err(REFUSED_FORK_LIMIT);
+        }
+        taken.insert(child.clone());
         Ok(child)
     }
 
     /// Takes the forks `parent` (with `side` districts a side) logged, as
     /// `(tick, name, principal)`, and hands the supervisor each to make, which
-    /// it does once however often it is asked.
+    /// it does once however often it is asked. Only `parent`'s own forks count:
+    /// a fork's copied history can hold forks of its ancestors.
     pub(crate) fn resume(&self, parent: &str, side: u16, forked: Vec<(u32, String, u64)>) {
         for (tick, child, principal) in forked {
+            if child.rsplit_once('~').map(|(of, _)| of) != Some(parent) {
+                continue;
+            }
             self.taken().insert(child.clone());
             let request = Request {
                 parent: parent.to_owned(),
@@ -160,12 +206,36 @@ pub(crate) fn forked_in(events: &[Event]) -> Vec<(u32, String, u64)> {
         .collect()
 }
 
+/// Whether a batch of commands holds a `fork`.
+pub(crate) fn asks_to_fork(incoming: &[Incoming]) -> bool {
+    incoming.iter().any(|item| {
+        item.command
+            .as_ref()
+            .is_some_and(|record| matches!(record.command, Command::Fork { .. }))
+    })
+}
+
+/// Whether every district of `log` still holds offset 0, where a fork's copy
+/// starts. Retention trims a log from the front.
+pub(crate) async fn history_kept<L: Log>(log: &L, districts: usize, retry: Retry) -> Result<bool> {
+    for district in 0..districts {
+        let first = retrying(retry, "read the first record of a district", || {
+            log.read(district as u16, 0)
+        })
+        .await?;
+        if first.is_none() {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
 /// Copies every district's records `0..=through` from `parent` to `child`.
 /// Picks up where an earlier copy stopped, so a repeat finishes the job and a
 /// finished copy writes nothing. A record keeps its offset, because every
 /// district commits one per tick from tick 0, which keeps `keyframe_offset`
-/// true; only the command stream position is rewritten, to the start of the
-/// fork's own.
+/// true; the command stream position is rewritten to the start of the fork's
+/// own, and the `forked` events of the parent's other forks are left out.
 pub(crate) async fn copy_history<L: Log>(
     parent: &L,
     child: &L,
@@ -236,6 +306,10 @@ async fn copy_district<L: Log>(
                     *next = 0;
                 }
             }
+            // The fork's own timeline holds only the forks made from it.
+            record
+                .events
+                .retain(|event| !matches!(event, Event::Forked { .. }));
             let keyframe = record.keyframe.is_some();
             let bytes = record.encode().context("encode a copied record")?;
             commit_until_written(child, district, next, bytes, keyframe, retry).await?;

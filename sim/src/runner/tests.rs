@@ -39,6 +39,8 @@ struct Memory {
     /// `(district, offset)` of every append, in the order they happened.
     order: Arc<Mutex<Vec<(u16, u64)>>>,
     script: Script,
+    /// The first offset each district still holds, as retention leaves it.
+    floors: Arc<Mutex<HashMap<u16, u64>>>,
     /// Called with `(district, offset)` after each append.
     hook: Arc<dyn Fn(u16, u64) + Send + Sync>,
 }
@@ -51,6 +53,7 @@ impl Memory {
             commands: Arc::default(),
             sends: Arc::default(),
             order: Arc::default(),
+            floors: Arc::default(),
             script: Arc::new(script),
             hook: Arc::new(|_, _| {}),
         }
@@ -76,6 +79,20 @@ impl Memory {
 
     fn healthy() -> Memory {
         Memory::new(|_, _, _| None)
+    }
+
+    /// Drops what retention would: `district` no longer holds offsets below `floor`.
+    fn trim(&self, district: u16, floor: u64) {
+        self.floors.lock().unwrap().insert(district, floor);
+    }
+
+    fn floor(&self, district: u16) -> u64 {
+        self.floors
+            .lock()
+            .unwrap()
+            .get(&district)
+            .copied()
+            .unwrap_or(0)
     }
 
     fn records(&self, district: u16) -> Vec<TickRecord> {
@@ -140,6 +157,9 @@ impl Log for Memory {
     }
 
     async fn read(&self, district: u16, offset: u64) -> Result<Option<Vec<u8>>> {
+        if offset < self.floor(district) {
+            return Ok(None);
+        }
         let shards = self.shards.lock().unwrap();
         Ok(shards
             .get(&district)
@@ -151,6 +171,7 @@ impl Log for Memory {
     }
 
     async fn read_from(&self, district: u16, offset: u64, max: u32) -> Result<Vec<(u64, Vec<u8>)>> {
+        let offset = offset.max(self.floor(district));
         let shards = self.shards.lock().unwrap();
         Ok(shards.get(&district).map_or_else(Vec::new, |shard| {
             shard

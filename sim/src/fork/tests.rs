@@ -107,3 +107,41 @@ async fn a_provisioner_that_refuses_is_an_error_with_its_reason() {
         .unwrap_err();
     assert!(format!("{err:#}").contains("http://"), "{err:#}");
 }
+
+fn listed_fork(name: &str) -> felix_metro_core::record::RegistryRecord {
+    felix_metro_core::record::RegistryRecord::Forked {
+        name: name.into(),
+        parent: "harbor".into(),
+        tick: 3,
+        wall_us: 1,
+        principal: 1,
+    }
+}
+
+#[test]
+fn a_fork_listed_twice_starts_one_city() {
+    use felix_metro_core::record::RegistryRecord::Created;
+    let listed = vec![
+        Created {
+            name: "lakeside".into(),
+            seed: "lakeside".into(),
+            districts: 3,
+            wall_us: 1,
+        },
+        listed_fork("harbor~a"),
+        listed_fork("harbor~b"),
+        listed_fork("harbor~a"),
+        listed_fork("lakeside~c"),
+        listed_fork("unknown~d"),
+        listed_fork("harbor~b"),
+    ];
+    let sides = std::collections::HashMap::from([("harbor".to_owned(), 2)]);
+    assert_eq!(
+        make::existing_forks(&listed, &sides),
+        [
+            ("harbor~a".to_owned(), 2),
+            ("harbor~b".to_owned(), 2),
+            ("lakeside~c".to_owned(), 3),
+        ]
+    );
+}

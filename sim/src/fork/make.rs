@@ -42,36 +42,19 @@ pub struct Started {
 
 /// Reads the registry and starts making the forks that cities hand over, using
 /// the provisioner at `provisioner`. `sides` is the districts on a side of each
-/// city the sim runs, by name; a fork has its root's.
+/// city the sim runs, by name; a fork has its root's. A root city may have
+/// `limit` forks, forks of forks included.
 pub async fn start(
     client: Arc<ClusterClient>,
     connection: Connection,
     provisioner: String,
     sides: &HashMap<String, u16>,
+    limit: usize,
 ) -> Result<Started> {
     let listed = registry::list(&client, &connection).await?;
-    let mut created: HashMap<&str, u16> = HashMap::new();
-    for record in &listed {
-        if let RegistryRecord::Created {
-            name, districts, ..
-        } = record
-        {
-            created.insert(name, *districts);
-        }
-    }
-    let mut existing = Vec::new();
-    for record in &listed {
-        let RegistryRecord::Forked { name, .. } = record else {
-            continue;
-        };
-        let root = root_of(name);
-        match sides.get(root).or_else(|| created.get(root)) {
-            Some(side) => existing.push((name.clone(), *side)),
-            None => warn!(fork = %name, "a fork of a city this sim does not know is not run"),
-        }
-    }
+    let existing = existing_forks(&listed, sides);
     let names: HashSet<String> = existing.iter().map(|(name, _)| name.clone()).collect();
-    let (forks, requests) = Forks::new(names.iter().cloned());
+    let (forks, requests) = Forks::new(names.iter().cloned(), limit);
     let (ready_send, ready) = mpsc::unbounded_channel();
     let maker = Maker {
         client,
@@ -84,6 +67,40 @@ pub async fn start(
         existing,
         ready,
     })
+}
+
+/// The forks `listed` holds, once each however many records name them, with
+/// the districts on a side of their root. A name listed twice must start one
+/// city: two would share a log, and the second would be refused its commits.
+pub(super) fn existing_forks(
+    listed: &[RegistryRecord],
+    sides: &HashMap<String, u16>,
+) -> Vec<(String, u16)> {
+    let mut created: HashMap<&str, u16> = HashMap::new();
+    for record in listed {
+        if let RegistryRecord::Created {
+            name, districts, ..
+        } = record
+        {
+            created.insert(name, *districts);
+        }
+    }
+    let mut existing: Vec<(String, u16)> = Vec::new();
+    let mut seen: HashSet<&str> = HashSet::new();
+    for record in listed {
+        let RegistryRecord::Forked { name, .. } = record else {
+            continue;
+        };
+        if !seen.insert(name) {
+            continue;
+        }
+        let root = root_of(name);
+        match sides.get(root).or_else(|| created.get(root)) {
+            Some(side) => existing.push((name.clone(), *side)),
+            None => warn!(fork = %name, "a fork of a city this sim does not know is not run"),
+        }
+    }
+    existing
 }
 
 /// Makes each fork that arrives on `requests`, one task apiece, and sends it on
