@@ -2,9 +2,9 @@
 
 use super::wire::{Reader, Writer};
 use super::{
-    BuildingDiff, Command, CommandRecord, Counts, DecodeError, Doing, EncodeError, Event,
+    BuildingDiff, Command, CommandRecord, Counts, DecodeError, Doing, EncodeError, Event, FACTIONS,
     FLAG_KEYFRAME, Header, KIND_COMMAND, KIND_REGISTRY, KIND_TICK, Keyframe, Leg, MAX_PROGRESS,
-    RegistryRecord, ResidentState, RoadDiff, TickRecord, Vehicle,
+    RegistryRecord, ResidentState, RoadDiff, Standing, Tally, TickRecord, Vehicle,
 };
 use crate::city::City;
 
@@ -31,6 +31,7 @@ const EV_ARRIVAL: u8 = 13;
 const EV_EXTENDED: u8 = 15;
 const EXT_LEDGER: u64 = 1;
 const EXT_BALANCE: u64 = 2;
+const EXT_COUNCIL: u64 = 3;
 
 const CMD_PLACE_ROAD: u8 = 1;
 const CMD_ZONE: u8 = 2;
@@ -357,6 +358,26 @@ fn put_event(w: &mut Writer, e: &Event, tick: u32) -> Result<(), EncodeError> {
             b.svarint(*amount);
             Ok(())
         }),
+        Event::Council {
+            days,
+            patience,
+            standings,
+            tally,
+        } => w.framed(EV_EXTENDED, EVENT_TAG_BITS, |b| {
+            b.varint(EXT_COUNCIL);
+            b.varint(u64::from(*days));
+            b.u8(*patience);
+            for s in standings {
+                b.varint(u64::from(s.demand));
+                b.varint(u64::from(s.measure));
+                b.u8(s.satisfaction);
+                b.u8(s.unhappy_days);
+            }
+            b.varint(u64::from(tally.commutes));
+            b.varint(tally.commute_ticks);
+            b.varint(u64::from(tally.visits));
+            Ok(())
+        }),
     }
 }
 
@@ -439,6 +460,29 @@ fn get_entry(r: &mut Reader, tick: u32, out: &mut Vec<Event>) -> Result<(), Deco
             EXT_BALANCE => Event::Balance {
                 amount: r.svarint()?,
             },
+            EXT_COUNCIL => {
+                let days = r.varint_u32()?;
+                let patience = r.u8()?;
+                let mut standings = [Standing::default(); FACTIONS];
+                for s in &mut standings {
+                    *s = Standing {
+                        demand: r.varint_u32()?,
+                        measure: r.varint_u32()?,
+                        satisfaction: r.u8()?,
+                        unhappy_days: r.u8()?,
+                    };
+                }
+                Event::Council {
+                    days,
+                    patience,
+                    standings,
+                    tally: Tally {
+                        commutes: r.varint_u32()?,
+                        commute_ticks: r.varint()?,
+                        visits: r.varint_u32()?,
+                    },
+                }
+            }
             _ => return Ok(()),
         },
         _ => return Ok(()),

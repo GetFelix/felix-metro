@@ -573,6 +573,15 @@ fn balances(step: &[DistrictTick]) -> Vec<i64> {
         .collect()
 }
 
+/// The council a keyframe tick wrote.
+fn council(step: &[DistrictTick]) -> Council {
+    step[0]
+        .events
+        .iter()
+        .find_map(Council::from_event)
+        .expect("a keyframe tick writes the council")
+}
+
 #[test]
 fn a_world_restored_from_a_keyframe_steps_as_the_original_does() {
     // From an hour of the night, the rush hours and the middle of the day, in cities of 4 and 9 districts.
@@ -611,8 +620,9 @@ fn a_world_restored_from_a_keyframe_steps_as_the_original_does() {
                 }
             }
             let balances = balances(&ticks[at as usize]);
+            let council = council(&ticks[at as usize]);
             let mut restored =
-                World::restore(city.clone(), at, &frames, &balances, &departures).unwrap();
+                World::restore(city.clone(), at, &frames, &balances, council, &departures).unwrap();
             assert_eq!(restored.next_tick(), at + 1);
             for tick in at + 1..at + 400 {
                 assert!(
@@ -635,7 +645,8 @@ fn a_keyframe_with_nobody_on_the_road_to_say_where_from_is_refused() {
         .map(|d| d.keyframe.clone().unwrap())
         .collect();
     let balances = balances(&ticks[at as usize]);
-    let Err(err) = World::restore(city, at, &frames, &balances, &HashMap::new()) else {
+    let council = council(&ticks[at as usize]);
+    let Err(err) = World::restore(city, at, &frames, &balances, council, &HashMap::new()) else {
         panic!("restored with no trip events");
     };
     assert!(format!("{err:#}").contains("no trip event"), "{err:#}");

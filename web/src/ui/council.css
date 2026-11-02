@@ -1,0 +1,52 @@
+.council {
+  display: block;
+  width: 236px;
+  padding: 10px 14px;
+  font:
+    500 12px/1.4 Inter,
+    sans-serif;
+}
+.council h3 {
+  margin: 0 0 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+.council ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.council li + li {
+  margin-top: 8px;
+}
+.council .faction-head {
+  display: flex;
+  justify-content: space-between;
+}
+.council .faction-head span {
+  font-family: 'JetBrains Mono', monospace;
+}
+.council .bar {
+  height: 4px;
+  margin: 3px 0;
+  border-radius: 2px;
+  background: var(--line);
+}
+.council .bar i {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--cyan);
+}
+.council li.unhappy .bar i {
+  background: var(--coral);
+}
+.council small {
+  color: var(--muted);
+  font-size: 11px;
+}
+.council .recall {
+  margin: 10px 0 0;
+  color: var(--coral);
+}
