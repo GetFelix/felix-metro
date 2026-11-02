@@ -82,23 +82,62 @@ await page.evaluate(() => {
   window.__copied = null;
   if (navigator.clipboard) navigator.clipboard.writeText = async (text) => void (window.__copied = text);
 });
-let car = null;
-for (let i = 0; i < 60 && !car; i++) {
-  car = await page.evaluate(() => {
+// A click picks among the cars drawn in the last frame, and a runner draws only a few frames a second while the sim runs
+// at 16x, so a car has moved on from where it was drawn by the time the click lands. Aim at the car that moved least
+// between two looks, and click again at a fresh one when that missed.
+const carsInView = () =>
+  page.evaluate(() => {
     const onScreen = (s) => s && s.x > 40 && s.x < innerWidth - 40 && s.y > 120 && s.y < innerHeight - 140;
+    const found = [];
     for (const w of window.__live.where().filter((w) => w.car)) {
       const s = window.__following.screenOf(w.resident);
-      if (onScreen(s)) return s;
+      if (onScreen(s)) found.push({ resident: w.resident, x: s.x, y: s.y });
     }
-    return null;
+    return found;
   });
-  if (!car) await page.waitForTimeout(500);
+const aim = async () => {
+  const before = await carsInView();
+  await page.waitForTimeout(250);
+  const after = new Map((await carsInView()).map((c) => [c.resident, c]));
+  const steady = before
+    .filter((c) => after.has(c.resident))
+    .map((c) => ({
+      ...after.get(c.resident),
+      drift: Math.hypot(after.get(c.resident).x - c.x, after.get(c.resident).y - c.y),
+    }))
+    .sort((a, b) => a.drift - b.drift);
+  return steady[0] ?? null;
+};
+const CLICKS = 8;
+let followedNobody = 0;
+for (
+  let attempt = 1;
+  attempt <= CLICKS && (await page.evaluate(() => window.__following.resident())) === null;
+  attempt++
+) {
+  let car = null;
+  for (let i = 0; i < 60 && !car; i++) {
+    car = await aim();
+    if (!car) await page.waitForTimeout(500);
+  }
+  if (!car) await fail('no car was in view to click');
+  await page.mouse.click(car.x, car.y);
+  const hit = await page
+    .waitForFunction(() => window.__following.resident() !== null, null, { polling: 100, timeout: 3000 })
+    .then(
+      () => true,
+      () => false,
+    );
+  if (!hit) {
+    followedNobody++;
+    console.log(
+      `click ${attempt} at ${car.x.toFixed(0)}, ${car.y.toFixed(0)} (a car drifting ${car.drift.toFixed(1)} px in 250 ms) followed nobody, ${(await page.evaluate(() => window.__live.fps)).toFixed(1)} fps`,
+    );
+  }
 }
-if (!car) await fail('no car was in view to click');
-await page.mouse.click(car.x, car.y);
-await page
-  .waitForFunction(() => window.__following.resident() !== null, null, { polling: 100, timeout: 5000 })
-  .catch(() => fail(`clicking at ${car.x.toFixed(0)}, ${car.y.toFixed(0)} followed nobody`));
+if ((await page.evaluate(() => window.__following.resident())) === null)
+  await fail(`${CLICKS} clicks on a car followed nobody`);
+if (followedNobody) console.log(`${followedNobody} clicks missed before one followed`);
 const followed = await page.evaluate(() => window.__following.resident());
 await page
   .waitForFunction(() => !document.getElementById('follow').hidden, null, { polling: 100, timeout: 5000 })
