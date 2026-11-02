@@ -23,8 +23,24 @@
 - Only comment where the code is unclear, such as a constraint the code can't show.
 - Write docs in plain sentences, and update them in the same pull request as the behaviour they describe.
 
+## Changelog
+
+Do not edit `CHANGELOG.md` in a pull request. Add a fragment, `changelog.d/<name>.<section>.md`, so parallel pull requests
+stop conflicting on the same lines:
+
+```bash
+echo '- Every event names the resident who caused it.' > changelog.d/142-attribution.sim.md
+```
+
+`<section>` is `sim`, `page`, `tools`, `added`, `changed` or `fixed`. The file is bullets, written as they should read,
+with no `#` headings. [changelog.d/README.md](changelog.d/README.md) has the details and what a release does with them.
+CI checks the names with `python3 .github/scripts/changelog-assemble.py --check`.
+
+The README's status table and feature list are still edited by hand.
+
 ## Pull requests
 
 - CI must pass before merge. Merges are squash only.
+- Add a changelog fragment for any change a user or a contributor would notice.
 - No AI attribution in commits or pull request descriptions.
 - List design calls under "Review notes", and Felix gaps you hit under "Felix gaps found", with the issue each one is filed as.
