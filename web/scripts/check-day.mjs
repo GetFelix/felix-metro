@@ -118,20 +118,35 @@ async function matchesLog(which, what) {
   await fail(`${what}: the card lists\n${got}\nbut the log has\n${want}`);
 }
 
+const label = () => page.locator('#follow [data-label]').textContent();
 const labelIs = (n) =>
   page.waitForFunction((n) => document.querySelector('#follow [data-label]')?.textContent.startsWith(`Day ${n}`), n, {
     polling: 250,
     timeout: 2 * MINUTE,
   });
+// The sim runs at 16x, so the live city can cross midnight while this check runs, and a card on today then moves to the
+// next day by itself. An arrow is pressed from the day the card shows, not from the one this check expects, and a card
+// that has been paged back stays on its day.
+const walkTo = async (n) => {
+  for (let step = 0; step < 8; step++) {
+    const here = Number((await label()).match(/^Day (\d+)/)?.[1]);
+    if (here === n) return;
+    const arrow = here > n ? 'prev' : 'next';
+    await page.locator(`#follow [data-${arrow}]`).click();
+    await labelIs(here > n ? here - 1 : here + 1).catch(async () =>
+      fail(
+        `the ${arrow} arrow on "${await label()}" did not move the card, live at tick ${await page.evaluate(() => window.__live.tick)}`,
+      ),
+    );
+  }
+  await fail(`the card never reached day ${n}, it shows "${await label()}"`);
+};
 await page.evaluate((r) => window.__following.start(r), resident);
 // The card opens on the day the city is in; the arrows walk it back to the day being checked.
 await labelIs(today + 1).catch(async () =>
   fail(`the card never showed day ${today + 1}: ${await page.locator('#follow').innerText()}`),
 );
-for (let d = today; d > day; d--) {
-  await page.locator('#follow [data-prev]').click();
-  await labelIs(d);
-}
+await walkTo(day + 1);
 const rows = await matchesLog(day, `day ${day + 1}`);
 console.log(`day ${day + 1}: ${rows.length} entries match the log`);
 await page.screenshot({ path: join(out, 'day.png') });
@@ -141,20 +156,10 @@ const prev = page.locator('#follow [data-prev]');
 if (day === 0) {
   if ((await prev.getAttribute('aria-disabled')) === 'false') await fail('the first day has a day before it');
 } else {
-  await prev.click();
-  await page.waitForFunction(
-    (n) => document.querySelector('#follow [data-label]').textContent.startsWith(`Day ${n}`),
-    day,
-    { timeout: 2 * MINUTE },
-  );
+  await walkTo(day);
   await matchesLog(day - 1, `day ${day}`);
   console.log(`day ${day}: matches the log`);
-  await page.locator('#follow [data-next]').click();
-  await page.waitForFunction(
-    (n) => document.querySelector('#follow [data-label]').textContent.startsWith(`Day ${n}`),
-    day + 1,
-    { timeout: MINUTE },
-  );
+  await walkTo(day + 1);
   await matchesLog(day, `day ${day + 1} again`);
 }
 
