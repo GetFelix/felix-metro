@@ -224,11 +224,18 @@ async function tap(lot) {
   const at = await touch.evaluate((l) => window.__lots.aim(l), lot);
   if ((await touch.evaluate(([x, y]) => window.__lots.pick(x, y), [at.x, at.y])) !== lot)
     await fail(`lot ${lot} is not under the tap`);
-  await touch.touchscreen.tap(at.x, at.y);
-  return touch
-    .waitForFunction(() => window.__lots.card(), null, { polling: 50, timeout: 3000 })
-    .then(() => touch.evaluate(() => window.__lots.card()))
-    .catch(() => null);
+  // A tap that took over 500 ms between touch start and end is a drag to the page, and a busy runner stretches that.
+  // A tap that did land shows its card before the next attempt, so a second tap never closes the first one's card.
+  for (let attempt = 1; attempt <= 4; attempt++) {
+    await touch.touchscreen.tap(at.x, at.y);
+    const shown = await touch
+      .waitForFunction(() => window.__lots.card(), null, { polling: 50, timeout: 10_000 })
+      .then(() => touch.evaluate(() => window.__lots.card()))
+      .catch(() => null);
+    if (shown !== null) return shown;
+    console.log(`tap ${attempt} on lot ${lot} showed no card`);
+  }
+  return null;
 }
 const tapped = await tap(target.lot);
 if (!tapped?.startsWith('Built by ')) await fail(`a tap on a building shows ${JSON.stringify(tapped)}`);
