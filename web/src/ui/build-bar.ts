@@ -19,7 +19,8 @@ export const BUILD_LABEL = 'Build';
 export const DEMOLISH_LABEL = 'Demolish';
 export const HINTS: Record<Tool, string> = {
   build: 'Click or tap a bare lot on the cleared ground to build.',
-  demolish: 'Click or tap a building on the cleared ground to take it down.',
+  demolish:
+    'Click a building on the cleared ground to take it down. On a touch screen, tap it to pick it and tap again to confirm.',
 };
 /** How long "Built." stays before the line goes quiet. */
 const DONE_MS = 4000;
@@ -40,6 +41,7 @@ function toolButton(id: string, label: string, key: string, icon: string): HTMLB
   button.setAttribute('aria-pressed', 'false');
   button.setAttribute('aria-controls', 'build-panel');
   button.dataset.key = key;
+  button.setAttribute('aria-keyshortcuts', key);
   button.innerHTML = icon;
   return button;
 }
@@ -147,6 +149,8 @@ export function createBuildBar(tools: HTMLElement, placement: Placement, sheetOp
   addEventListener('keydown', (e) => {
     const action = buildAction(e, sheetOpen());
     if (!action || document.body.classList.contains(PHOTO_CLASS)) return;
+    // The city list took this Esc.
+    if (action === 'cancel' && e.defaultPrevented) return;
     if (action === 'cancel') {
       if (placement.tool === null) return;
       placement.select(null);

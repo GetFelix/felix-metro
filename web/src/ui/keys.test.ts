@@ -62,7 +62,7 @@ describe('the key list', () => {
   it('has a row for every key the building tools answer to', () => {
     const actions = SHORTCUTS.flatMap((g) => g.rows.map((r) => r.action));
     for (const key of BUILD_KEYS) {
-      expect(flat).toContain(key.keycap);
+      for (const cap of key.keycaps) expect(flat).toContain(cap);
       expect(actions).toContain(key.label);
     }
   });

@@ -398,7 +398,8 @@ export async function createCity(
         const job = place(...args);
         mine.jobs.push(job);
         void job.then((o) => mine.objects.push(o));
-        jobs.push(job);
+        // A preview is redrawn as the pointer moves; the page does not wait on it to load.
+        if (!apart) jobs.push(job);
         return job;
       };
       const putBuilding = (...args: Parameters<typeof place>) => void put(...args).then((o) => (mine.building = o));

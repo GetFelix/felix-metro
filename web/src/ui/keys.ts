@@ -60,7 +60,7 @@ export const SHORTCUTS: readonly ShortcutGroup[] = [
     title: 'Building',
     when: 'In the live city, on a sign-in that may build. Click or tap a lot to use the tool.',
     // Built from the tools' own table, like the camera's.
-    rows: BUILD_KEYS.map((key) => ({ keys: [[key.keycap]], action: key.label })),
+    rows: BUILD_KEYS.map((key) => ({ keys: key.keycaps.map((cap) => [cap]), action: key.label })),
   },
   {
     title: 'Anywhere',

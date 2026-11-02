@@ -73,18 +73,25 @@ const frames = (page) =>
  * Hold `tool` over `lot` and use it: with the mouse, or with a tap. Resolves with the state once the city has answered,
  * which the number of answers moves past.
  */
-async function use(page, tool, lot, { kind = null, touch = false } = {}) {
+async function use(page, tool, lot, { kind = null, touch = false, confirm = false } = {}) {
   await page.evaluate((l) => window.__build.focus(l), lot);
   await frames(page);
   const at = await page.evaluate((l) => window.__build.screenOf(l), lot);
   if (!at) await fail(`${page.label}: lot ${lot} is not on screen`);
-  const before = (await state(page)).answered;
+  const { answered: before, sent } = await state(page);
   const button = tool === 'build' ? '#build-button' : '#demolish-button';
   if ((await state(page)).tool !== tool) await page.click(button);
   await until(page, (t) => window.__build.state().tool === t, tool, `the ${tool} tool was not picked`);
   if (kind !== null) await page.selectOption('#build-kind', String(kind));
   if (touch) {
     await page.touchscreen.tap(at.x, at.y);
+    if (confirm) {
+      // A touch demolish picks the building with the first tap and takes it down with the second.
+      await until(page, (l) => window.__build.state().preview?.lot === l, lot, `the first tap never picked lot ${lot}`);
+      const picked = await state(page);
+      check(picked.sent === sent && picked.pending === 0, 'the first tap of a touch demolish sends nothing');
+      await page.touchscreen.tap(at.x, at.y);
+    }
   } else {
     await page.mouse.move(at.x, at.y);
     await until(page, (l) => window.__build.state().preview?.lot === l, lot, `the pointer never found lot ${lot}`);
@@ -207,10 +214,30 @@ console.log(`building on lots ${lotA} (A), ${lotB} (B) and ${lotC} (both)`);
     !preview.ok && /nothing here/.test(preview.why),
     `a demolish on bare ground is refused in the page: ${preview.why}`,
   );
-  const before = (await state(a.page)).answered;
+  const before = await state(a.page);
   await a.page.mouse.click(at.x, at.y);
   const s = await state(a.page);
-  check(s.pending === 0 && s.answered === before && /nothing here/.test(s.status), 'the refused demolish was not sent');
+  check(
+    s.pending === 0 && s.sent === before.sent && s.answered === before.answered + 1 && /nothing here/.test(s.status),
+    'the refused demolish was turned away in the page and not sent',
+  );
+}
+
+// 5b. B takes down lot C's building with two taps, and A sees it go.
+{
+  const before = await use(b.page, 'demolish', lotC, { touch: true, confirm: true });
+  const sb = await answer(b.page, before);
+  check(sb.status === 'Taken down.', `B is told: ${sb.status}`);
+  await until(
+    a.page,
+    (l) => {
+      const k = window.__build.kindOn(l);
+      return k === null || k === 65535 || k >= 38;
+    },
+    lotC,
+    'A never saw lot C’s building go',
+  );
+  check(true, 'A sees B take it down with a double tap');
 }
 
 // 6. Held at an earlier moment, the tools are off and say why; Back to live brings them back.

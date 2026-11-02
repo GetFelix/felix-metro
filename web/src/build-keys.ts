@@ -8,19 +8,20 @@ export interface BuildKey {
   action: BuildAction;
   /** `KeyboardEvent.key` values that trigger it, lower case. */
   keys: readonly string[];
-  /** What the key cap reads. */
-  keycap: string;
+  /** What the key caps read, one for each of `keys`. */
+  keycaps: readonly string[];
   /** What it does, in the words the key list shows. */
   label: string;
 }
 
+// `[` and `]` need AltGr on some layouts, so the comma and the full stop do the same.
 export const BUILD_KEYS: readonly BuildKey[] = [
-  { action: 'build', keys: ['b'], keycap: 'B', label: 'Pick the build tool, or put it away' },
-  { action: 'demolish', keys: ['x'], keycap: 'X', label: 'Pick the demolish tool, or put it away' },
-  { action: 'rotate', keys: ['r'], keycap: 'R', label: 'Turn the building a quarter turn' },
-  { action: 'previous', keys: ['['], keycap: '[', label: 'Choose the previous building' },
-  { action: 'next', keys: [']'], keycap: ']', label: 'Choose the next building' },
-  { action: 'cancel', keys: ['escape'], keycap: 'Esc', label: 'Put the tool away' },
+  { action: 'build', keys: ['b'], keycaps: ['B'], label: 'Pick the build tool, or put it away' },
+  { action: 'demolish', keys: ['x'], keycaps: ['X'], label: 'Pick the demolish tool, or put it away' },
+  { action: 'rotate', keys: ['r'], keycaps: ['R'], label: 'Turn the building a quarter turn' },
+  { action: 'previous', keys: ['[', ','], keycaps: ['[', ','], label: 'Choose the previous building' },
+  { action: 'next', keys: [']', '.'], keycaps: [']', '.'], label: 'Choose the next building' },
+  { action: 'cancel', keys: ['escape'], keycaps: ['Esc'], label: 'Put the tool away' },
 ];
 
 const BY_KEY = new Map(BUILD_KEYS.flatMap((row) => row.keys.map((key) => [key, row.action] as const)));

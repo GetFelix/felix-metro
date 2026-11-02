@@ -136,9 +136,13 @@ describe('the command records', () => {
 });
 
 describe('nameFrom', () => {
-  const token = (claims: object) => `h.${btoa(JSON.stringify(claims))}.s`;
+  /** A token's claims as base64url of their UTF-8 bytes, as an identity provider writes them. */
+  const token = (claims: object) => `h.${Buffer.from(JSON.stringify(claims)).toString('base64url')}.s`;
   it('reads the name claim', () => {
     expect(nameFrom(token({ name: ' Ana ', sub: 'a' }))).toBe('Ana');
+  });
+  it('reads a name with accents as written', () => {
+    expect(nameFrom(token({ name: 'José Müller' }))).toBe('José Müller');
   });
   it('falls back to the preferred username, then to a plain word', () => {
     expect(nameFrom(token({ preferred_username: 'ana' }))).toBe('ana');

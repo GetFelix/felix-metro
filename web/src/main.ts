@@ -162,8 +162,9 @@ declare global {
         preview: { lot: number; ok: boolean; why: string | null } | null;
         /** Commands sent and not yet answered, and what the panel says. */
         pending: number;
-        /** Commands answered so far: by the city, by a failed send or by waiting too long. */
+        /** Commands answered so far, by the city or by the page turning one away, and commands sent. */
         answered: number;
+        sent: number;
         status: string;
       };
       /** The lots set aside for builders. */
@@ -1200,6 +1201,7 @@ async function main() {
             },
             pending: placement.pending,
             answered: placement.answered,
+            sent: placement.sent,
             status: placement.status.state === 'idle' ? '' : placement.status.text,
           };
         },

@@ -84,8 +84,10 @@ export class Placement {
   /** A quarter turn the builder chose, or null to face the street. */
   private turn: number | null = null;
   status: Status = { state: 'idle' };
-  /** How many commands have been answered, by the city, by a failed send or by running out of patience. */
+  /** How many commands have been answered: by the city, by the page turning one away, by a failed send or by running out of patience. */
   answered = 0;
+  /** How many commands have gone out. */
+  sent = 0;
   private readonly waiting = new Map<number, Waiting>();
   private hovered: number | null = null;
   private listeners: (() => void)[] = [];
@@ -174,6 +176,7 @@ export class Placement {
     const preview = this.preview(lot);
     if (!preview) return 'Pick a tool first.';
     if (!preview.check.ok) {
+      this.answered++;
       this.status = { state: 'refused', text: preview.check.why };
       this.changed();
       return preview.check.why;
@@ -186,6 +189,7 @@ export class Placement {
         : demolishCommand(id, link.name, lot);
     const timer = setTimeout(() => this.late(id), ANSWER_MS);
     this.waiting.set(id, { tool: preview.tool, lot, timer });
+    this.sent++;
     this.status = { state: 'sending', text: SENDING };
     this.changed();
     try {

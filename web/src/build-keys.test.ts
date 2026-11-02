@@ -43,6 +43,10 @@ describe('the table', () => {
     for (const row of BUILD_KEYS) for (const key of row.keys) expect(taken.has(key), key).toBe(false);
   });
 
+  it('has a key cap for every key', () => {
+    for (const row of BUILD_KEYS) expect(row.keycaps).toHaveLength(row.keys.length);
+  });
+
   it('has each key once', () => {
     const keys = BUILD_KEYS.flatMap((k) => k.keys);
     expect(new Set(keys).size).toBe(keys.length);

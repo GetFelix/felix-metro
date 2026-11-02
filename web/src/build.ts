@@ -153,7 +153,10 @@ export const FIRST_KIND = 19;
 /** The name an ID token gives its holder, which commands carry; `fallback` when it has none. */
 export function nameFrom(token: string, fallback = 'Builder'): string {
   try {
-    const claims = JSON.parse(atob(token.split('.')[1]!.replace(/-/g, '+').replace(/_/g, '/')));
+    const bytes = Uint8Array.from(atob(token.split('.')[1]!.replace(/-/g, '+').replace(/_/g, '/')), (c) =>
+      c.charCodeAt(0),
+    );
+    const claims = JSON.parse(new TextDecoder().decode(bytes));
     const name = claims.name ?? claims.preferred_username;
     return typeof name === 'string' && name.trim() !== '' ? name.trim() : fallback;
   } catch {

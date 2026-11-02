@@ -110,18 +110,18 @@ shown with `?ui=0` or `?capture`. [docs/ui.md](docs/ui.md#sound) explains how it
 
 A builder changes the city from the page. The buttons under the clock are **Build** and **Demolish**, and each has a key.
 
-| Key   | What it does                                                        |
-| ----- | ------------------------------------------------------------------- |
-| `B`   | Pick the build tool, or put it away                                 |
-| `X`   | Pick the demolish tool, or put it away                              |
-| `R`   | Turn the building a quarter turn (it faces its street until you do) |
-| `[`   | Choose the previous building                                        |
-| `]`   | Choose the next building                                            |
-| `Esc` | Put the tool away                                                   |
+| Key        | What it does                                                        |
+| ---------- | ------------------------------------------------------------------- |
+| `B`        | Pick the build tool, or put it away                                 |
+| `X`        | Pick the demolish tool, or put it away                              |
+| `R`        | Turn the building a quarter turn (it faces its street until you do) |
+| `[` or `,` | Choose the previous building                                        |
+| `]` or `.` | Choose the next building                                            |
+| `Esc`      | Put the tool away                                                   |
 
 With a tool picked, a panel under the buttons lists the buildings to choose from (houses, commercial buildings,
 skyscrapers and factories) and a ghost of the building follows the pointer, snapped to the lot under it. The ghost is
-cyan where the building fits and red where it does not. Click, or tap on a touch screen, to place it. A demolish
+cyan where the building fits and red where it does not. Click, or tap on a touch screen, to place it. A touch demolish takes two taps, one to pick the building and one to confirm. A demolish
 shows a box round the building under the pointer. The panel then says what became of the command, in plain words:
 `Built.`, `Taken down.`, or why the city turned it down. The building itself rises in its scaffold when the sim
 applies the command, like any other.
@@ -133,7 +133,9 @@ short note saying why, when:
 - the page has no live city (`?live=0`, a city opened at a moment with `?at`, or no gateway), or you are looking at an
   earlier moment. Go back to live;
 - the sign-in may only watch. The stand-in sign-in of the dev stack signs in as `viewer`, who cannot build; open
-  `/?as=mayor#harbor` in a new tab to sign in as `mayor`, who can;
+  `/?as=mayor#harbor` in a new tab to sign in as `mayor`, who can. The `?as` parameter only picks which login the dev
+  stack's stand-in identity provider gives you. It grants nothing, and a real provider ignores it. A tab that is already
+  signed in keeps its token, so use a new tab to change who you are;
 - the connection to the city is down.
 
 The tools do not exist under `?ui=0` or `?capture`. Roads and zones are not built here: a road changes the graph that
@@ -287,7 +289,7 @@ over each time. Stop it with `docker compose -f dev/compose.yml down --volumes`
 (`podman compose` the same).
 
 Open <http://127.0.0.1:8088/#harbor>: the page signs in as `viewer` at the stand-in
-provider (add `?as=mayor`, as in <http://127.0.0.1:8088/?as=mayor#harbor>, to sign in as the builder; see [Building](#building)), follows the city through the gateway and draws its residents driving and
+provider (open it in a new tab with `?as=mayor`, as in <http://127.0.0.1:8088/?as=mayor#harbor>, to sign in as the builder instead; see [Building](#building)), follows the city through the gateway and draws its residents driving and
 walking in time with the sim, with the sun following the tick. A new city
 first commits a day and a half of ticks in a few seconds (`SIM_WARMUP_HOURS`, 40 by default),
 so it opens in the late afternoon of its second day with a day behind it to scrub through and

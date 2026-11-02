@@ -163,6 +163,8 @@ describe('sending', () => {
     placement.select('build');
     expect(await placement.commit(0)).toBe('Only the cleared ground can be built on.');
     expect(sent).toHaveLength(0);
+    expect(placement.sent).toBe(0);
+    expect(placement.answered).toBe(1);
     expect(placement.status).toMatchObject({ state: 'refused', text: 'Only the cleared ground can be built on.' });
     expect(placement.pending).toBe(0);
   });

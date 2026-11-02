@@ -27,7 +27,9 @@ controls looking like the ones already there.
   screen, from the same camera view. [Moments](../README.md#moments) shows the link and how it is read.
 - **Build and take down.** The two buttons at the left of the row under the clock, or `B` and `X`, pick the build and
   demolish tools. A panel under them picks the building, `R` turns it and the pointer moves a ghost of it from lot to
-  lot. Click, or tap, to place it. The buttons are off, with a note that says why, when the page has no live city, is
+  lot. Click, or tap, to place it. On a touch screen a demolish takes two taps, one to pick the building and one to confirm,
+  and the pick is dropped after a few seconds with no second tap. `H` (photo mode) puts the tools out of reach too: nothing is drawn
+  or placed while the controls are hidden. The buttons are off, with a note that says why, when the page has no live city, is
   showing an earlier moment, or is signed in as someone who may only watch. [Building](../README.md#building) says
   what a builder may do and why only the cleared ground.
 - **Hide the controls.** `H` hides every control, message and the frame times, for a clean picture. `H` or `Esc`
@@ -40,15 +42,15 @@ controls looking like the ones already there.
 
 These page parameters change the overlay:
 
-| Parameter        | Effect                                                                                                         |
-| ---------------- | -------------------------------------------------------------------------------------------------------------- |
-| `?tier=low`      | Forces a quality for this visit (`low`, `medium` or `high`). It overrides the saved choice                     |
-| `?ui=0`          | Hides the overlay: no chips, no buttons, no `?` or `M` key and no hint                                         |
-| `?capture&trace` | The same as `?ui=0` for the controls and the hint, since a clip must draw as is                                |
-| `?attract=30`    | Seconds with no input before the camera turns on its own (60 by default, `0` for never)                        |
-| `?live=0`        | Draws the city with no gateway; the timeline never appears, so there is no hint, and the build buttons are off |
-| `?as=mayor`      | Signs in as that person at the stand-in sign-in of the dev stack (`viewer` if left out). `mayor` may build     |
-| `?hud`           | Shows frame times under the Felix Metro chip, for tuning                                                       |
+| Parameter        | Effect                                                                                                                                                                                                                 |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `?tier=low`      | Forces a quality for this visit (`low`, `medium` or `high`). It overrides the saved choice                                                                                                                             |
+| `?ui=0`          | Hides the overlay: no chips, no buttons, no `?` or `M` key and no hint                                                                                                                                                 |
+| `?capture&trace` | The same as `?ui=0` for the controls and the hint, since a clip must draw as is                                                                                                                                        |
+| `?attract=30`    | Seconds with no input before the camera turns on its own (60 by default, `0` for never)                                                                                                                                |
+| `?live=0`        | Draws the city with no gateway; the timeline never appears, so there is no hint, and the build buttons are off                                                                                                         |
+| `?as=mayor`      | Picks which login the dev stack's stand-in identity provider signs in (`viewer` if left out); `mayor` may build. It grants nothing with a real provider, and a tab already signed in keeps its token, so use a new tab |
+| `?hud`           | Shows frame times under the Felix Metro chip, for tuning                                                                                                                                                               |
 
 ## How it is built
 

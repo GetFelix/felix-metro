@@ -6,6 +6,7 @@ import type { LotAccess } from './construction-fx';
 import type { City } from './layout';
 import { LotGrid, groundPoint, lotsAlong } from './lot-pick';
 import { createMarker } from './placement-ghost';
+import { PHOTO_CLASS } from './ui/photo';
 import type { Placement } from './placement';
 
 /** Taller than any building, in tiles: the ray is followed down from here. */
@@ -15,6 +16,23 @@ const MOUSE_SLOP = 5;
 const TOUCH_SLOP = 12;
 /** A press held longer than this is a look around, not a click. */
 const CLICK_MS = 600;
+/** A lot picked by a first tap with a touch demolish is dropped after this long with no second tap. */
+const CONFIRM_MS = 5000;
+
+/** Photo mode shows the city and nothing else, so nothing may be placed or drawn then. */
+const photo = () => document.body.classList.contains(PHOTO_CLASS);
+
+/** Points over a lot to aim at, as offsets from its middle and a height: its middle, then its corners, then higher. */
+const AIMS: readonly (readonly [number, number, number])[] = [
+  [0, 0, 0.3],
+  [0, 0, 0.9],
+  [0, 0, 0.05],
+  [0.3, 0.3, 0.3],
+  [-0.3, 0.3, 0.3],
+  [0.3, -0.3, 0.3],
+  [-0.3, -0.3, 0.3],
+  [0, 0, 1.6],
+];
 
 export interface PlacementViewDeps {
   dom: HTMLElement;
@@ -65,7 +83,7 @@ export function createPlacementView(deps: PlacementViewDeps): PlacementView {
   // Redraw the marker and ghost only when what they show changes.
   let shown = '';
   const draw = () => {
-    const preview = placement.preview();
+    const preview = photo() ? null : placement.preview();
     const key = preview ? `${preview.lot}|${preview.tool}|${preview.kind}|${preview.rotation}|${preview.check.ok}` : '';
     if (key === shown) return;
     shown = key;
@@ -92,6 +110,7 @@ export function createPlacementView(deps: PlacementViewDeps): PlacementView {
     );
   };
   placement.onChange(() => {
+    if (placement.tool !== 'demolish') disarm();
     dom.style.cursor = placement.tool ? 'crosshair' : '';
     draw();
   });
@@ -108,7 +127,7 @@ export function createPlacementView(deps: PlacementViewDeps): PlacementView {
     if (!touch) pointers.clear();
     pointers.add(e.pointerId);
     // A second finger, a button that is not the main one, or the pan modifier is the camera's.
-    if (!placement.tool || pointers.size > 1 || (!touch && (e.button !== 0 || e.shiftKey))) {
+    if (!placement.tool || photo() || pointers.size > 1 || (!touch && (e.button !== 0 || e.shiftKey))) {
       press = null;
       return;
     }
@@ -119,23 +138,57 @@ export function createPlacementView(deps: PlacementViewDeps): PlacementView {
       const slop = press.touch ? TOUCH_SLOP : MOUSE_SLOP;
       if (Math.hypot(e.clientX - press.x, e.clientY - press.y) > slop) press = null;
     }
-    if (e.pointerType === 'mouse' && e.buttons === 0) pointer = toNdc(e.clientX, e.clientY);
+    if (e.pointerType !== 'mouse') return;
+    if (e.buttons === 0) {
+      pointer = toNdc(e.clientX, e.clientY);
+    } else {
+      // A drag is the camera's: the ghost would sit where the pointer was when it began.
+      pointer = null;
+      placement.hover(null);
+    }
   };
   const onUp = (e: PointerEvent) => {
     pointers.delete(e.pointerId);
     const p = press;
-    if (!p || p.id !== e.pointerId || !placement.tool) return;
+    if (!p || p.id !== e.pointerId || !placement.tool || photo()) return;
     press = null;
     if (performance.now() - p.at > CLICK_MS) return;
     const at = toNdc(e.clientX, e.clientY);
     const lot = pick(at.x, at.y);
     if (lot === null) return;
     placement.hover(lot);
+    if (p.touch) {
+      // A finger cannot hover, so a demolish takes two taps: the first picks the building, the second takes it down.
+      if (placement.tool === 'demolish' && armed?.lot !== lot) {
+        arm(lot);
+        return;
+      }
+      armed = null;
+      held = { answered: placement.answered };
+    }
     void placement.commit(lot);
   };
   const onCancel = (e: PointerEvent) => {
     pointers.delete(e.pointerId);
     if (press?.id === e.pointerId) press = null;
+  };
+  /** The lot a touch demolish has picked and waits to be confirmed on. */
+  let armed: { lot: number; timer: ReturnType<typeof setTimeout> } | null = null;
+  /** After a tap, the answer to its command ends the ghost a finger left behind. */
+  let held: { answered: number } | null = null;
+  const disarm = () => {
+    if (armed) clearTimeout(armed.timer);
+    armed = null;
+  };
+  const arm = (lot: number) => {
+    disarm();
+    armed = {
+      lot,
+      timer: setTimeout(() => {
+        armed = null;
+        placement.hover(null);
+      }, CONFIRM_MS),
+    };
   };
   const onLeave = (e: PointerEvent) => {
     // A finger lifting also leaves; the lot it touched keeps its ghost while the command goes through.
@@ -153,16 +206,25 @@ export function createPlacementView(deps: PlacementViewDeps): PlacementView {
   return {
     update() {
       if (placement.tool && pointer) placement.hover(pick(pointer.x, pointer.y));
+      if (held && placement.answered > held.answered) {
+        held = null;
+        if (!pointer) placement.hover(null);
+      }
       // The city changes under a tool too: a building that has just gone up ends the ghost on its lot.
       draw();
     },
     pick,
     screenOf(lot) {
       const [x, z] = lots.centre(lot);
-      here.set(x, 0.3, z).project(camera);
-      if (Math.abs(here.x) > 1 || Math.abs(here.y) > 1 || here.z > 1) return null;
       const r = dom.getBoundingClientRect();
-      return { x: r.left + ((here.x + 1) / 2) * r.width, y: r.top + ((1 - here.y) / 2) * r.height };
+      // A taller neighbour can stand in front of the middle, so try a few points until the pointer would find the lot.
+      for (const [dx, dz, y] of AIMS) {
+        here.set(x + dx, y, z + dz).project(camera);
+        if (Math.abs(here.x) > 1 || Math.abs(here.y) > 1 || here.z > 1) continue;
+        if (pick(here.x, here.y) !== lot) continue;
+        return { x: r.left + ((here.x + 1) / 2) * r.width, y: r.top + ((1 - here.y) / 2) * r.height };
+      }
+      return null;
     },
   };
 }

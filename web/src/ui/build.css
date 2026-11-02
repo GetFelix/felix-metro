@@ -1,10 +1,10 @@
 /* The build and demolish buttons sit in the row under the clock; a held tool opens a panel beneath them. */
-.icon-button[aria-pressed='true'] {
+.icon-button#build-button[aria-pressed='true'] {
   background: var(--cyan-wash);
   border-color: var(--cyan);
   color: var(--cyan);
 }
-#demolish-button[aria-pressed='true'] {
+.icon-button#demolish-button[aria-pressed='true'] {
   background: var(--amber-wash);
   border-color: var(--amber);
   color: var(--amber);
