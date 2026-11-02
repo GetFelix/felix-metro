@@ -122,3 +122,26 @@ fn demolishing_costs_money_too() {
     assert_eq!(done.result, RESULT_APPLIED);
     assert_eq!(world.funds(), 0);
 }
+
+#[test]
+fn shops_open_late_pay_more_business_tax() {
+    let day = |hours: u8| {
+        let mut world = World::new(City::generate("harbor", 2).unwrap());
+        world.policy.set(0, hours, 0).unwrap();
+        world
+            .close_day()
+            .iter()
+            .map(|(earned, _)| earned)
+            .sum::<u64>()
+    };
+    let shops = World::new(City::generate("harbor", 2).unwrap())
+        .city
+        .lots
+        .iter()
+        .filter(|l| u16::from(l.kind.0) < u16::from(BuildingKind::SKYSCRAPER_FIRST))
+        .count() as u64;
+    assert_eq!(
+        day(3) - day(1),
+        shops * 2 * crate::world::policy::TAX_PER_LATE_HOUR
+    );
+}

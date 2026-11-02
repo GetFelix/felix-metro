@@ -1,4 +1,6 @@
 // How the page shows the council: what each faction asks for, how the city is doing by it, and the recall countdown.
+// The mayor's policies sit under it.
+import type { PolicyRow } from './policy';
 
 /** The council event of a record: factions in the order commuters, residents, shops. */
 export interface CouncilEvent {
@@ -96,6 +98,29 @@ export function recallText(recall: NonNullable<CouncilView['recall']>): string {
 /** A screen at least this tall (px) has room for the council opened. */
 export const TALL_SCREEN = 720;
 
+function policyList(rows: PolicyRow[]): HTMLElement {
+  const list = document.createElement('ul');
+  list.className = 'policies';
+  for (const row of rows) {
+    const li = document.createElement('li');
+    const head = document.createElement('div');
+    head.className = 'faction-head';
+    const name = document.createElement('b');
+    name.textContent = row.name;
+    const value = document.createElement('span');
+    value.textContent = row.value;
+    head.append(name, value);
+    li.append(head);
+    if (row.again) {
+      const small = document.createElement('small');
+      small.textContent = `Can change again from ${row.again}`;
+      li.append(small);
+    }
+    list.append(li);
+  }
+  return list;
+}
+
 /** The one line the council shows while folded away. */
 export function councilSummary(view: CouncilView): string {
   if (view.recall) return recallText(view.recall);
@@ -112,7 +137,12 @@ export function councilSummary(view: CouncilView): string {
  * push the controls below it off a short screen. A redraw updates it in place and keeps it as the player left it; the first
  * draw opens it only if `openFirst`.
  */
-export function renderCouncil(root: HTMLElement, view: CouncilView, openFirst: boolean): void {
+export function renderCouncil(
+  root: HTMLElement,
+  view: CouncilView,
+  openFirst: boolean,
+  policies: PolicyRow[] = [],
+): void {
   const previous = root.firstElementChild as HTMLDetailsElement | null;
   const rows = view.factions.map((f) => {
     const li = document.createElement('li');
@@ -143,6 +173,10 @@ export function renderCouncil(root: HTMLElement, view: CouncilView, openFirst: b
     // Keep the summary element so a focused summary stays focused through a redraw.
     previous.querySelector('summary > span')?.replaceWith(line);
     previous.querySelector('ul')?.replaceWith(list);
+    const shown = previous.querySelector('.policies');
+    if (policies.length === 0) shown?.remove();
+    else if (shown) shown.replaceWith(policyList(policies));
+    else previous.append(policyList(policies));
     return;
   }
   const summary = document.createElement('summary');
@@ -155,6 +189,7 @@ export function renderCouncil(root: HTMLElement, view: CouncilView, openFirst: b
   summary.addEventListener('click', () => {
     details.dataset.touched = '1';
   });
+  if (policies.length > 0) details.append(policyList(policies));
   root.replaceChildren(details);
 }
 

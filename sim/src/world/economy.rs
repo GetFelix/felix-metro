@@ -93,7 +93,12 @@ impl World {
                 continue;
             };
             if is_business(kind) {
-                day[usize::from(lot.district)].0 += TAX_PER_BUSINESS;
+                let late = if kind < u16::from(BuildingKind::SKYSCRAPER_FIRST) {
+                    self.policy.shop_hours() * super::policy::TAX_PER_LATE_HOUR
+                } else {
+                    0
+                };
+                day[usize::from(lot.district)].0 += TAX_PER_BUSINESS + late;
             } else if lot.zone == Zone::Park && kind >= u16::from(BuildingKind::TREE_FIRST) {
                 // Park land costs upkeep until something is built on it.
                 day[usize::from(lot.district)].1 += UPKEEP_PER_PARK;

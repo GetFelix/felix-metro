@@ -15,6 +15,7 @@ use felix_metro_core::{
 
 pub(crate) use council::Council;
 pub(crate) use economy::opening_share;
+pub(crate) use policy::Policy;
 pub(crate) use restore::Departure;
 
 /// Ticks between keyframes: one city hour.
@@ -77,6 +78,8 @@ pub(crate) struct World {
     upkeep: Vec<u64>,
     /// How the factions feel about the city.
     council: Council,
+    /// The shop hours and speed limits the mayor has set.
+    policy: Policy,
 }
 
 /// What a command did: the district it touched and the events to record there.
@@ -128,6 +131,7 @@ impl World {
                 .collect(),
             upkeep: economy::upkeep_base(&city),
             council: Council::new(),
+            policy: Policy::new(),
             city,
             people,
             tick: 0,
@@ -248,6 +252,14 @@ impl World {
             Command::Speed { .. } | Command::Fork { .. } => {
                 Applied::refused(0, REFUSED_UNSUPPORTED)
             }
+            Command::Policy { kind, value } => match self.policy.set(kind, value, self.tick) {
+                Ok(()) => Applied {
+                    district: 0,
+                    result: RESULT_APPLIED,
+                    events: vec![self.policy.event()],
+                },
+                Err(result) => Applied::refused(0, result),
+            },
         }
     }
 
@@ -279,7 +291,9 @@ impl World {
         let mut cars = vec![0u16; self.cars.len()];
         let city = &self.city;
         let planned_around = self.cars.clone();
-        let cong = Congestion::new(&planned_around);
+        let (avenue, street) = self.policy.limits();
+        let cong = Congestion::new(&planned_around).with_limits(avenue, street);
+        let late_close = self.policy.late_close();
         let council = &mut self.council;
         for person in &mut self.people {
             let id = person.resident.id;
@@ -325,8 +339,7 @@ impl World {
                         let home = city.lots[lot as usize].district;
                         let until = person
                             .resident
-                            .schedule
-                            .leave_tick(person.block, person.day)
+                            .leave_tick(person.block, person.day, late_close)
                             .max(tick);
                         let events = &mut out[usize::from(home)].events;
                         events.push(Event::Arrived { resident: id, lot });
@@ -343,8 +356,7 @@ impl World {
                 State::At { since } => {
                     let leave = person
                         .resident
-                        .schedule
-                        .leave_tick(person.block, person.day)
+                        .leave_tick(person.block, person.day, late_close)
                         .max(*since);
                     if tick < leave {
                         continue;
@@ -398,6 +410,7 @@ impl World {
                 standings: self.council.standings,
                 tally: self.council.tally,
             });
+            out[0].events.push(self.policy.event());
             for (district, keyframe) in self.keyframes(tick).into_iter().enumerate() {
                 out[district].keyframe = Some(keyframe);
             }
@@ -408,6 +421,7 @@ impl World {
 
     /// Every district's state at the end of `tick`.
     fn keyframes(&self, tick: u32) -> Vec<Keyframe> {
+        let late_close = self.policy.late_close();
         let mut frames: Vec<Keyframe> = (0..self.districts())
             .map(|_| Keyframe {
                 buildings: Vec::new(),
@@ -433,8 +447,7 @@ impl World {
                     let district = usize::from(self.city.lots[block.lot as usize].district);
                     let until = person
                         .resident
-                        .schedule
-                        .leave_tick(person.block, person.day)
+                        .leave_tick(person.block, person.day, late_close)
                         .max(*since);
                     let frame = &mut frames[district];
                     frame.residents.push(ResidentState {
@@ -518,6 +531,7 @@ fn count_car(city: &City, cars: &mut [u16], trip: &Trip, tick: u32) {
 
 mod council;
 mod economy;
+mod policy;
 mod restore;
 #[cfg(test)]
 mod tests;

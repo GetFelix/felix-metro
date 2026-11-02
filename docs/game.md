@@ -67,12 +67,12 @@ table stays fixed by the seed; a resident is either living in the city or not.
 ### Policy
 
 A policy is a command on the command stream, like `build` today, recorded with who set
-it. A first set, each with a visible effect and a cost:
+it. Each policy can change once a city day. A first set, each with a visible effect and a cost:
 
-- **Shop hours.** Later hours spread the evening rush and raise business tax, and
-  cost noise.
-- **Speed limits** on a street class. Slower streets are safer and quieter and raise
-  nearby land value, and slow the trips that use them.
+- **Shop hours.** Done (see Policy in design.md). Later hours spread the evening rush and
+  raise business tax. The noise they should cost is not built.
+- **Speed limits** on a street class. Done for avenues and streets: a lower limit lengthens
+  every trip that drives them. The safety, quiet and land value effects are not built.
 - **Parking** in a district. Fewer spaces push short trips onto foot and longer ones
   elsewhere.
 - **Tax rates.** Higher tax fills the account and slows moving in.
@@ -166,9 +166,10 @@ The numbers are placeholders until the economy is in the sim and measured.
   and the records after it (see Restart in design.md). The new state below has to be
   rebuilt the same way, so each new piece of state is restored in `sim/src/world/restore.rs`. The account is written as
   a `balance` event on keyframe ticks, not as a keyframe field, so the keyframe layout stays as it is.
-- **New events:** `moved` (a resident joining or leaving),
-  `policy` (a policy's value changed). Each is small and rare next to `trip`.
-- **Keyframe ticks carry** policy values and the set of residents living in
+- **Policy.** Done: the `policy` command, the `policy` event on a change and on every keyframe tick, and a cooldown
+  (see Policy in design.md).
+- **New events:** `moved` (a resident joining or leaving). It is small and rare next to `trip`.
+- **Keyframe ticks carry** the set of residents living in
   the city (a bitmap, 2.5 KB at 20,000 residents).
 - **Log budget.** None of this should move the per-second rate measurably; the check is
   `report_load` before and after.
@@ -183,7 +184,7 @@ The numbers are placeholders until the economy is in the sim and measured.
 2. Money and the `ledger` event, shown as one number on the page (done; the timeline does not draw it yet).
 3. Factions: three satisfaction numbers from the log, their demands, and the recall
    warning with its countdown (done).
-4. Policy commands, two of them, with a cooldown.
+4. Policy commands, two of them, with a cooldown (done).
 5. Goals and the first chapter, without forks: the player commits changes for real.
 6. Investigations, one or two, checked as a batch.
 7. Measure a fork's morning rush on one broker; then forks, what-ifs and policy

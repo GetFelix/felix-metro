@@ -2,6 +2,7 @@
 // ones `built` and `demolished` events and keyframes change; trips are handed on to whatever draws them.
 import { WINDOW, progress } from './construction';
 import type { CouncilEvent } from './council';
+import type { PolicyEvent } from './policy';
 import type { City } from './layout';
 
 /** A building kind that means the lot is empty. */
@@ -59,6 +60,7 @@ export type TickEvent =
   | LedgerEvent
   | BalanceEvent
   | CouncilEvent
+  | PolicyEvent
   | { type: 'other' };
 
 export interface TickRecord {
@@ -154,6 +156,8 @@ export class CityState {
   private readonly shares: (number | null)[];
   /** Where the council's factions stand, from the newest `council` event, or `null` before one. */
   council: CouncilEvent | null = null;
+  /** The mayor's policies, from the newest `policy` event, or `null` before one. */
+  policy: PolicyEvent | null = null;
   /** Trips the log described that no record has said arrived, by resident. */
   readonly voyages = new Map<number, Voyage>();
   /** Voyages a resident's next trip replaced before they arrived; still drawn until they do. */
@@ -272,6 +276,8 @@ export class CityState {
         this.shares[d] = e.amount;
       } else if (e.type === 'council') {
         this.council = e;
+      } else if (e.type === 'policy') {
+        this.policy = e;
       }
     }
     this.prune(d);
