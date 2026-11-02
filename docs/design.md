@@ -593,7 +593,7 @@ ends. That session is opened as soon as the past is on screen and kept while it 
 back on the live city, so Back to live finds it open (the page holds one live, up to two history and one playback session,
 well within the gateway's eight a person).
 
-Space and the pill's Play button play and pause from the past on screen. **Back to live** does not cut: the city's time
+Space and the pill's Play button play and pause from the past on screen, and `J`, `K` and `L` set the speed and the direction (see **Rewinding and speeds** below). **Back to live** does not cut: the city's time
 races forward with the cars moving, at the city's own pace plus a steady gain that closes the distance in about three
 seconds (at most 960 ticks a second in all), paced by the wall clock. A timer moves the playhead and applies its records every 40 ms, off the render loop, so a catch-up takes about three seconds even where frames come once a second or slower; frames only draw the state (and also step the playhead by wall-clock time, so nothing is applied twice). When the playhead is within a tick of the live state's newest tick the
 page hands over. Within a second of the tip it hands over at once. If the session is not open at the click, the race
@@ -604,6 +604,39 @@ ends and the page shows the live city. The playback's session is closed when the
 record all along, so nothing is folded a second time and nothing reloads; the live clock is set to the playhead
 first, so a car under way carries on from where it was drawn. Scrubbing while playing ends the playback; a page opened with `?at` has
 no live state to join and cannot play.
+
+**Rewinding and speeds.** `J`, `K` and `L` move along one ladder of rates, in multiples of the city's own speed: 8x, 4x, 2x
+and 1x backward, a stop, then 0.5x, 1x, 2x, 4x and 8x forward. `L` goes a rung faster forward (a rewind slows to a stop
+first), `J` goes a rung slower or faster backward, and `K` stops. From a stop each starts at 1x. A forward rate only scales
+the playhead's pace, so the pumps above feed it as before. At 8x on a city running at 16 ticks a second that is 128 ticks
+a second, which the pumps have not been measured against.
+
+A state only moves forward, so a rewind refolds. The playback keeps the records of the hour on screen, from its keyframe:
+those the seek that made the state read, plus every record played forward since. Going back, it folds a fresh state from
+the keyframe to two ticks past the playhead (the lead a forward play keeps) and puts it on screen in place of the old one,
+as a scrub does. A refold happens at most every 30 ms. Faster than that the playhead goes on and the state trails it by a
+few ticks, and a stop settles it on the tick drawn. Turning forward again resumes the pumps from the offsets of the tick
+last folded to.
+
+```mermaid
+flowchart LR
+    P["Playhead moves back"] --> H{"Hour on hand<br/>covers the tick?"}
+    H -->|yes| F["Fold a fresh state from the keyframe"]
+    H -->|"no, the hour before was fetched"| S["Switch to it"] --> F
+    H -->|"no, not yet"| W["Wait at the keyframe"]
+    F --> D["Draw it, fetch the hour before"]
+```
+
+The hour before is read ahead. When a rewind starts, and again each time it enters an hour, the playback asks the seeker
+for the hour before the one it is in; ending the playback abandons that read. Separately, 400 ms after the past comes to
+rest on screen (a seek lands, or a playback is paused), the seeker reads the last tick of the hour before and of the hour
+after, so a rewind or an hour step finds them cached. It holds three hours of records per district for this: the one on
+screen and one either side. Neither kind of read cancels a seek or is cancelled by one, except that starting a scrub or
+leaving the past stops the idle read-ahead. With the hour before on hand the playhead crosses the boundary in the step
+that reaches it. Without it, the playhead waits at the keyframe until it arrives. If retention has taken the hour before,
+the rewind stops at the oldest tick the log holds and says so. Any other failed read ends the playback and shows the live
+city, like any other playback failure. Districts need not keyframe on the same tick: the hour on hand reaches back to the
+latest of their keyframes. `J` from the live city steps back 15 minutes, as the left arrow does, and rewinds from there.
 
 **Scrubbing** draws the nearest keyframe on hand while the handle moves, with
 the sun and the clock at the handle's hour, and fills in events once it rests.

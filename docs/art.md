@@ -122,7 +122,7 @@ The opening drift (`startIntro`) places the camera through the same object and e
 ## Construction
 
 A building takes 8 ticks (two seconds at the default speed) to go up or come down, from the tick of its `built` or
-`demolished` event. Both are drawn from the tick on screen alone, so scrubbing plays them backwards.
+`demolished` event. Both are drawn from the tick on screen alone, so scrubbing and rewinding play them backwards.
 
 - **Rising:** the building grows from the ground to its height and a scaffold climbs round it: a square frame of four
   posts and four rails in warm timber (`0xd9a05b`), 0.94 tiles wide, standing a little taller than the wall and settling

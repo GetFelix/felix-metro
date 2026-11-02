@@ -61,6 +61,11 @@
 .past #play {
   margin-right: 8px;
 }
+.past .rate {
+  margin-right: 8px;
+  color: var(--cyan);
+  font-variant-numeric: tabular-nums;
+}
 .past button:hover {
   background: var(--coral-wash-strong);
 }
