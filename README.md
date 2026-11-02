@@ -385,6 +385,9 @@ a Felix change that breaks this repo shows up before the next release. See the
 latest run with `gh run list -R GetFelix/felix-metro --workflow "Felix nightly"
 --limit 1`, or start one from the Actions tab.
 
+The gateway is pinned on its own, by image tag in [`dev/compose.yml`](dev/compose.yml) (0.8.0 today). Move that tag
+when a gateway release adds something the page needs.
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md).
