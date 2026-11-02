@@ -8,7 +8,7 @@ use super::*;
 use crate::commands::tests::{city as harbor, free_lot};
 
 /// Runs as fast as the log answers.
-fn quick(stop: u32) -> Settings {
+pub(super) fn quick(stop: u32) -> Settings {
     Settings {
         paced: false,
         ..settings(stop)
@@ -17,7 +17,7 @@ fn quick(stop: u32) -> Settings {
 
 /// Every district's records, with the wall clock zeroed: the one thing a
 /// restart is allowed to change.
-fn records(log: &Memory) -> Vec<Vec<TickRecord>> {
+pub(super) fn records(log: &Memory) -> Vec<Vec<TickRecord>> {
     (0..4)
         .map(|district| {
             log.records(district)
@@ -42,7 +42,7 @@ async fn straight(settings: Settings) -> Memory {
 impl Memory {
     /// Appends a stamped command to the command stream and returns it as the
     /// follower would deliver it.
-    fn publish(&self, principal: &str, id: u32, command: Command) -> Incoming {
+    pub(super) fn publish(&self, principal: &str, id: u32, command: Command) -> Incoming {
         let record = CommandRecord {
             id,
             name: principal.to_owned(),
@@ -61,7 +61,7 @@ impl Memory {
     }
 }
 
-fn command_events(log: &Memory) -> Vec<(u32, u32, u8)> {
+pub(super) fn command_events(log: &Memory) -> Vec<(u32, u32, u8)> {
     let mut out = Vec::new();
     for district in 0..4 {
         for r in log.records(district) {
@@ -77,7 +77,7 @@ fn command_events(log: &Memory) -> Vec<(u32, u32, u8)> {
 }
 
 /// Cuts a run off after `wait`, as a killed process is.
-async fn killed(wait: Duration, run: impl Future<Output = Result<Done>>) {
+pub(super) async fn killed(wait: Duration, run: impl Future<Output = Result<Done>>) {
     tokio::time::timeout(wait, run)
         .await
         .expect_err("the run was meant to hang");

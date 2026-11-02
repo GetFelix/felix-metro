@@ -37,6 +37,9 @@ pub(crate) struct Config {
     /// `SIM_CONTROL_ADDR`: where the speed endpoint listens. Default
     /// `127.0.0.1:8090`; it has no authentication, so only loopback is accepted.
     pub(crate) control_addr: std::net::SocketAddr,
+    /// `SIM_FORK_PROVISION_URL`: `http://host:port` of the service that makes
+    /// the streams of a fork. Without it the sim refuses `fork` commands.
+    pub(crate) fork_provision_url: Option<String>,
 }
 
 impl Config {
@@ -102,6 +105,16 @@ impl Config {
                 })?,
             None => std::net::SocketAddr::from(([127, 0, 0, 1], 8090)),
         };
+        let fork_provision_url = match var("SIM_FORK_PROVISION_URL") {
+            Some(value) => Some(
+                Some(value.trim().to_owned())
+                    .filter(|v| v.starts_with("http://") && v.len() > "http://".len())
+                    .with_context(|| {
+                        format!("SIM_FORK_PROVISION_URL: {value:?} is not an http:// address")
+                    })?,
+            ),
+            None => None,
+        };
         Ok(Self {
             connection: Connection {
                 brokers,
@@ -118,6 +131,7 @@ impl Config {
             ticks_per_second,
             warmup_hours,
             control_addr,
+            fork_provision_url,
         })
     }
 }
@@ -190,6 +204,25 @@ mod tests {
         assert_eq!(config.ticks_per_second, 4);
         assert_eq!(config.warmup_hours, 40);
         assert_eq!(config.control_addr, "127.0.0.1:8090".parse().unwrap());
+        assert_eq!(config.fork_provision_url, None);
+    }
+
+    #[test]
+    fn forking_needs_an_http_provisioner() {
+        let with = |url| {
+            config(&[
+                ("SIM_CITIES", "a"),
+                ("SIM_FELIX_TOKEN_FILE", "/t"),
+                ("SIM_FORK_PROVISION_URL", url),
+            ])
+        };
+        assert_eq!(
+            with("http://provisioner:9500").unwrap().fork_provision_url,
+            Some("http://provisioner:9500".into())
+        );
+        for bad in ["provisioner:9500", "https://provisioner", "http://"] {
+            assert!(with(bad).is_err(), "{bad}");
+        }
     }
 
     #[test]

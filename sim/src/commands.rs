@@ -14,6 +14,7 @@ use tracing::{error, info, warn};
 
 use crate::control::check_speed;
 use crate::felix::Connection;
+use crate::fork::Forks;
 use crate::world::World;
 
 /// Commands applied in one tick. The rest wait for the next, so a flood of
@@ -61,7 +62,7 @@ impl Incoming {
 
 /// The name of a city's command stream.
 pub fn commands_stream(city: &str) -> String {
-    format!("metro.commands.{city}")
+    format!("metro.commands.{}", crate::fork::felix_name(city))
 }
 
 /// Follows a city's command stream from offset `from`, or from its tail when
@@ -165,10 +166,23 @@ pub(crate) fn refuse_busy(item: Incoming) -> Event {
 /// Applies `incoming` in order and returns, for each district, the `command`
 /// events and the changes they made. A `speed` command moves `wanted`; the
 /// runner turns that into the tick's speed change.
+#[cfg(test)]
 pub(crate) fn apply_all(
     world: &mut World,
     incoming: Vec<Incoming>,
     wanted: &mut u8,
+) -> Vec<Vec<Event>> {
+    apply_all_with(world, incoming, wanted, None)
+}
+
+/// Like [`apply_all`]. With `forks` (and the city's name), a `fork` command is
+/// carried out: it is checked and recorded as a `forked` event in district 0.
+/// Without, it is refused as unsupported.
+pub(crate) fn apply_all_with(
+    world: &mut World,
+    incoming: Vec<Incoming>,
+    wanted: &mut u8,
+    forks: Option<(&Forks, &str)>,
 ) -> Vec<Vec<Event>> {
     let mut out: Vec<Vec<Event>> = (0..world.districts()).map(|_| Vec::new()).collect();
     for item in incoming {
@@ -182,8 +196,21 @@ pub(crate) fn apply_all(
                     }
                     Err(_) => (0, REFUSED_BAD_SPEED, Vec::new(), name, id),
                 },
-                // Branching a city is not built yet.
-                Command::Fork { .. } => (0, REFUSED_UNSUPPORTED, Vec::new(), name, id),
+                Command::Fork { tick, name: fork } => match forks {
+                    None => (0, REFUSED_UNSUPPORTED, Vec::new(), name, id),
+                    Some((forks, city)) => match forks.decide(city, world.next_tick(), tick, &fork)
+                    {
+                        Ok(child) => {
+                            let forked = Event::Forked {
+                                tick,
+                                name: child,
+                                principal: item.principal,
+                            };
+                            (0, RESULT_APPLIED, vec![forked], name, id)
+                        }
+                        Err(refused) => (0, refused, Vec::new(), name, id),
+                    },
+                },
                 other => {
                     let applied = world.apply(&other);
                     (applied.district, applied.result, applied.events, name, id)

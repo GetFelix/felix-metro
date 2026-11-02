@@ -4,59 +4,35 @@
 // its rights, gives each city a watch and a build role, and writes the
 // broker's and the sim's tokens to the state directory. Also creates `lobby`, a
 // city with no sim that a page joins only to read the list of cities. Safe to run
-// again: existing objects are kept.
-import { createHash } from "node:crypto";
+// again: existing objects are kept. Forks made later get their streams from
+// dev/provision.mjs.
 import { chmod, mkdir, writeFile } from "node:fs/promises";
+import {
+  AUDIENCE,
+  CONTROL_PLANE,
+  NAMESPACE,
+  TENANT,
+  createCityStreams,
+  createStream,
+  exchange,
+  grant as grantOn,
+  issuer,
+  object,
+  principal,
+  request,
+  roles,
+} from "./lib/admin.mjs";
 
 const env = (name, fallback) => process.env[name] || fallback;
 
-const CONTROL_PLANE = env("METRO_FELIX_CONTROL_PLANE", "http://controlplane:8443");
+const STATE = env("METRO_STATE_DIR", "/state");
 const BOOTSTRAP = env("METRO_FELIX_BOOTSTRAP", "http://controlplane:9095");
 const BOOTSTRAP_TOKEN = env("METRO_FELIX_BOOTSTRAP_TOKEN", "dev-bootstrap");
-const IDP = env("METRO_IDP", "http://idp:9400");
-const STATE = env("METRO_STATE_DIR", "/state");
-const TENANT = env("METRO_TENANT", "metro");
-const NAMESPACE = env("METRO_NAMESPACE", "default");
 // City names with their districts: harbor:4 is a city of 4 districts.
 const CITIES = env("METRO_CITIES", "harbor:4,pinecrest:4").split(/[\s,]+/).filter(Boolean);
 // Who may watch every city, and who may also build in it.
 const WATCHERS = env("METRO_WATCHERS", "viewer").split(",").filter(Boolean);
 const BUILDERS = env("METRO_BUILDERS", "mayor").split(",").filter(Boolean);
-const AUDIENCE = "felix-metro";
-const RETENTION_SECONDS = 7 * 24 * 60 * 60;
-// Per stream, so a dev machine's disk is safe at any speed.
-const MAX_BYTES = 1024 ** 3;
-
-async function request(method, url, { token, headers = {}, body } = {}) {
-  const response = await fetch(url, {
-    method,
-    headers: {
-      "content-type": "application/json",
-      ...(token ? { authorization: `Bearer ${token}` } : {}),
-      ...headers,
-    },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-  const text = await response.text();
-  if (response.status === 409) {
-    console.log(`  ${method} ${url}: already exists`);
-    return null;
-  }
-  if (!response.ok) throw new Error(`${method} ${url} -> ${response.status}: ${text}`);
-  return text ? JSON.parse(text) : null;
-}
-
-const { issuer } = await request("GET", `${IDP}/.well-known/openid-configuration`);
-// Felix keys RBAC on sha256(issuer|subject), not on the subject itself.
-const principal = (subject) => createHash("sha256").update(`${issuer}|${subject}`).digest("hex");
-
-async function exchange(subject, body) {
-  const { id_token } = await request("GET", `${IDP}/token?sub=${subject}&aud=${AUDIENCE}`);
-  const url = `${CONTROL_PLANE}/v1/tenants/${TENANT}/token/exchange`;
-  return (await request("POST", url, { token: id_token, body })).felix_token;
-}
-
-const object = (kind, name) => `${kind}:${TENANT}/${NAMESPACE}/${name}`;
 
 console.log(`bootstrap tenant ${TENANT}`);
 await request("POST", `${BOOTSTRAP}/internal/bootstrap/tenants/${TENANT}/initialize`, {
@@ -86,39 +62,19 @@ await request("POST", `${BOOTSTRAP}/internal/bootstrap/tenants/${TENANT}/initial
 });
 
 const admin = await exchange("metro-admin", { audience: "felix-controlplane" });
+const grant = (subject, name, action) => grantOn(admin, subject, name, action);
 console.log(`namespace ${NAMESPACE}`);
 await request("POST", `${CONTROL_PLANE}/v1/tenants/${TENANT}/namespaces`, {
   token: admin,
   body: { namespace: NAMESPACE, display_name: NAMESPACE },
 });
 
-const grant = (subject, name, action) =>
-  request("POST", `${CONTROL_PLANE}/v1/tenants/${TENANT}/rbac/policies`, {
-    token: admin,
-    body: { subject, object: object("stream", name), action },
-  });
-
-const createStream = (stream, shards, retention, maxBytes) => {
-  console.log(`stream ${stream}, ${shards} shard${shards === 1 ? "" : "s"}`);
-  return request("POST", `${CONTROL_PLANE}/v1/tenants/${TENANT}/namespaces/${NAMESPACE}/streams`, {
-    token: admin,
-    body: {
-      stream,
-      kind: "Stream",
-      shards,
-      replication_factor: 1,
-      retention: { max_age_seconds: retention, max_size_bytes: maxBytes },
-      consistency: "Leader",
-      delivery: "AtLeastOnce",
-      durable: true,
-    },
-  });
-};
-
 // Every city that exists, kept for good.
-await createStream("metro.cities", 1, null, null);
-await grant("role:sim", "metro.cities", "stream.publish");
-await grant("role:sim", "metro.cities", "stream.subscribe");
+await createStream(admin, "metro.cities", 1, null, null);
+// The sim publishes and subscribes on every stream of the namespace. A token lists the streams it was minted
+// for, so a stream made after the sim started (a fork's) is covered only by a wildcard.
+await grant("role:sim", "*", "stream.publish");
+await grant("role:sim", "*", "stream.subscribe");
 
 // The city list is reached through a city, because the gateway opens streams only after a join. A page whose own
 // city is refused joins this one just to read the list (LIST_CITY in web/src/live.ts). It is never simulated or
@@ -126,30 +82,22 @@ await grant("role:sim", "metro.cities", "stream.subscribe");
 const LOBBY = "lobby";
 
 async function seedCity(name, districts, { lobby = false } = {}) {
-  const events = `metro.events.${name}`;
-  const commands = `metro.commands.${name}`;
-  await createStream(events, districts, RETENTION_SECONDS, MAX_BYTES);
-  await createStream(commands, 1, RETENTION_SECONDS, MAX_BYTES);
-  // A commit needs publish, and reading the log or a state key needs subscribe.
-  await grant("role:sim", events, "stream.publish");
-  await grant("role:sim", events, "stream.subscribe");
-  await grant("role:sim", commands, "stream.subscribe");
+  const { events, commands } = await createCityStreams(admin, name, districts);
   // Exactly these actions: token exchange narrows by every action on every
   // resource a role holds (felix#968).
-  const watch = `role:metro-${name}-watch`;
-  const build = `role:metro-${name}-build`;
+  const { watch, build } = roles(name);
   await grant(watch, events, "stream.subscribe");
   // Every role may follow the list of cities, which the gateway hands to every scope.
   await grant(watch, "metro.cities", "stream.subscribe");
-  const roles = [[watch, lobby ? [...new Set([...WATCHERS, ...BUILDERS])] : WATCHERS]];
+  const members = [[watch, lobby ? [...new Set([...WATCHERS, ...BUILDERS])] : WATCHERS]];
   // Nobody builds in the lobby, but everyone who signs in may join it.
   if (!lobby) {
     await grant(build, events, "stream.subscribe");
     await grant(build, "metro.cities", "stream.subscribe");
     await grant(build, commands, "stream.publish");
-    roles.push([build, BUILDERS]);
+    members.push([build, BUILDERS]);
   }
-  for (const [role, names] of roles) {
+  for (const [role, names] of members) {
     console.log(`${role} for ${names.join(", ") || "nobody"}`);
     for (const user of names) {
       await request("POST", `${CONTROL_PLANE}/v1/tenants/${TENANT}/rbac/groupings`, {

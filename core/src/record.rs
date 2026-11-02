@@ -70,6 +70,14 @@ pub const REFUSED_IN_USE: u8 = 8;
 pub const REFUSED_BUSY: u8 = 9;
 /// `build` or `demolish` that the city's account cannot pay for.
 pub const REFUSED_NO_FUNDS: u8 = 10;
+/// `fork` with a name that is not 1 to 32 of `a-z`, `0-9` and `-`.
+pub const REFUSED_FORK_NAME: u8 = 16;
+/// `fork` whose lineage name `<parent>~<name>` is longer than a name can be.
+pub const REFUSED_FORK_TOO_DEEP: u8 = 17;
+/// `fork` at a tick the city has not committed yet.
+pub const REFUSED_FORK_TICK: u8 = 18;
+/// `fork` of a name the parent already has a fork of.
+pub const REFUSED_FORK_EXISTS: u8 = 19;
 
 /// `ledger` event reasons.
 /// A city day's taxes in, and road and building upkeep out.
@@ -277,6 +285,15 @@ pub enum Event {
     Balance {
         amount: i64,
     },
+    /// The city was forked: a new city named `name` is made from this one's
+    /// history through `tick`. Written in district 0 of the tick that applied
+    /// the command, which is what a restarted sim finds a half-made fork by.
+    Forked {
+        tick: u32,
+        name: String,
+        /// [`principal_hash`] of who sent the command.
+        principal: u64,
+    },
 }
 
 /// A district's state at one tick, drawable with nothing before it.
@@ -399,6 +416,8 @@ pub enum RegistryRecord {
         parent: String,
         tick: u32,
         wall_us: u64,
+        /// [`principal_hash`] of who forked it.
+        principal: u64,
     },
 }
 

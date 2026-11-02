@@ -185,9 +185,9 @@ pub(crate) fn business_name(rng: &mut Rng, zone: Zone) -> Option<String> {
 }
 
 /// The name of resident `index` in the city grown from `seed`. The same pair
-/// always gives the same name.
+/// always gives the same name, and a fork's lineage names the people of its root.
 pub fn resident_name(seed: &str, index: u32) -> String {
-    let mut rng = Rng::for_index(seed, index);
+    let mut rng = Rng::for_index(seed.split('~').next().unwrap_or(seed), index);
     format!(
         "{} {}",
         FIRST[rng.below(FIRST.len())],

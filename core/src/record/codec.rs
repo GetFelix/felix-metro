@@ -31,6 +31,7 @@ const EV_ARRIVAL: u8 = 13;
 const EV_EXTENDED: u8 = 15;
 const EXT_LEDGER: u64 = 1;
 const EXT_BALANCE: u64 = 2;
+const EXT_FORKED: u64 = 7;
 
 const CMD_PLACE_ROAD: u8 = 1;
 const CMD_ZONE: u8 = 2;
@@ -357,6 +358,17 @@ fn put_event(w: &mut Writer, e: &Event, tick: u32) -> Result<(), EncodeError> {
             b.svarint(*amount);
             Ok(())
         }),
+        Event::Forked {
+            tick,
+            name,
+            principal,
+        } => w.framed(EV_EXTENDED, EVENT_TAG_BITS, |b| {
+            b.varint(EXT_FORKED);
+            b.varint(u64::from(*tick));
+            b.str(name)?;
+            b.u64(*principal);
+            Ok(())
+        }),
     }
 }
 
@@ -438,6 +450,11 @@ fn get_entry(r: &mut Reader, tick: u32, out: &mut Vec<Event>) -> Result<(), Deco
             },
             EXT_BALANCE => Event::Balance {
                 amount: r.svarint()?,
+            },
+            EXT_FORKED => Event::Forked {
+                tick: u32::try_from(r.varint()?).map_err(|_| DecodeError::Invalid("fork tick"))?,
+                name: r.str()?,
+                principal: r.u64()?,
             },
             _ => return Ok(()),
         },
@@ -643,12 +660,14 @@ pub(super) fn encode_registry(e: &RegistryRecord) -> Result<Vec<u8>, EncodeError
             parent,
             tick,
             wall_us,
+            principal,
         } => {
             w.u8(REG_FORKED);
             w.str(name)?;
             w.str(parent)?;
             w.u32(*tick);
             w.u64(*wall_us);
+            w.u64(*principal);
         }
     }
     Ok(w.0)
@@ -669,6 +688,7 @@ pub(super) fn decode_registry(bytes: &[u8]) -> Result<RegistryRecord, DecodeErro
             parent: r.str()?,
             tick: r.u32()?,
             wall_us: r.u64()?,
+            principal: r.u64()?,
         },
         tag => return Err(DecodeError::UnknownTag(tag)),
     };

@@ -823,6 +823,7 @@ async fn a_city_that_starts_paused_skips_the_warmup() {
     assert_whole(&log, 10);
 }
 
+mod forked;
 mod resumed;
 
 mod builders {

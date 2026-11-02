@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use anyhow::{Result, bail};
@@ -37,14 +37,14 @@ pub async fn serve(
     starts: HashMap<String, mpsc::Sender<StartRequest>>,
     warming: HashMap<String, watch::Receiver<bool>>,
 ) -> Result<()> {
+    serve_directory(listener, Directory::new(cities, starts, warming)).await
+}
+
+/// Like [`serve`], over a [`Directory`] that cities can join while it runs.
+pub async fn serve_directory(listener: TcpListener, cities: Arc<Directory>) -> Result<()> {
     if !listener.local_addr()?.ip().is_loopback() {
         bail!("the speed endpoint has no authentication and must bind to a loopback address");
     }
-    let cities = Arc::new(Cities {
-        speeds: cities,
-        starts,
-        warming,
-    });
     loop {
         let (stream, peer) = listener.accept().await?;
         let cities = Arc::clone(&cities);
@@ -61,10 +61,36 @@ pub async fn serve(
 pub type StartRequest = oneshot::Sender<Result<(), String>>;
 
 /// What the endpoint can reach.
-struct Cities {
-    speeds: HashMap<String, watch::Sender<u8>>,
+pub struct Directory {
+    speeds: RwLock<HashMap<String, watch::Sender<u8>>>,
     starts: HashMap<String, mpsc::Sender<StartRequest>>,
-    warming: HashMap<String, watch::Receiver<bool>>,
+    warming: RwLock<HashMap<String, watch::Receiver<bool>>>,
+}
+
+impl Directory {
+    pub fn new(
+        speeds: HashMap<String, watch::Sender<u8>>,
+        starts: HashMap<String, mpsc::Sender<StartRequest>>,
+        warming: HashMap<String, watch::Receiver<bool>>,
+    ) -> Arc<Directory> {
+        Arc::new(Directory {
+            speeds: RwLock::new(speeds),
+            starts,
+            warming: RwLock::new(warming),
+        })
+    }
+
+    /// Lets the endpoint reach a city that began running after it did, as a fork does.
+    pub fn add(&self, name: &str, speed: watch::Sender<u8>, warming: watch::Receiver<bool>) {
+        self.speeds
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(name.to_owned(), speed);
+        self.warming
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(name.to_owned(), warming);
+    }
 }
 
 /// How long a start request waits for the city's streams to open.
@@ -77,7 +103,7 @@ const MAX_REQUEST: usize = 2048;
 /// A request turned away before it reached a city.
 struct Reject(&'static str, &'static str);
 
-async fn handle(mut stream: TcpStream, peer: SocketAddr, cities: &Cities) -> Result<()> {
+async fn handle(mut stream: TcpStream, peer: SocketAddr, cities: &Directory) -> Result<()> {
     let port = stream.local_addr()?.port();
     let read = tokio::time::timeout(READ_TIMEOUT, read_request(&mut stream)).await;
     let (status, text) = match read {
@@ -174,7 +200,7 @@ async fn respond(
     method: &str,
     path: &str,
     body: &str,
-    cities: &Cities,
+    cities: &Directory,
     peer: SocketAddr,
 ) -> (&'static str, String) {
     if let Some(name) = path
@@ -204,7 +230,13 @@ async fn respond(
         .strip_prefix("/cities/")
         .and_then(|p| p.strip_suffix("/warmup"))
     {
-        let Some(warming) = cities.warming.get(name) else {
+        let warming = cities
+            .warming
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(name)
+            .cloned();
+        let Some(warming) = warming else {
             return ("404 Not Found", "no such city\n".into());
         };
         if method != "GET" {
@@ -216,7 +248,15 @@ async fn respond(
     let city = path
         .strip_prefix("/cities/")
         .and_then(|p| p.strip_suffix("/speed"));
-    let Some(sender) = city.and_then(|c| cities.speeds.get(c)) else {
+    let sender = city.and_then(|c| {
+        cities
+            .speeds
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(c)
+            .cloned()
+    });
+    let Some(sender) = sender else {
         return ("404 Not Found", "no such city\n".into());
     };
     match method {

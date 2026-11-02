@@ -38,6 +38,14 @@ export function displayName(name: string): string {
   return name.charAt(0).toUpperCase() + name.slice(1);
 }
 
+/**
+ * The name a city has at the gateway and in its stream names. The gateway keeps scope values to letters, digits, `-`
+ * and `_`, so a fork's `~` becomes `_`. A page joins a fork with this name and shows its lineage name.
+ */
+export function felixName(city: string): string {
+  return city.replaceAll('~', '_');
+}
+
 /** Districts on a side of `city`; a fork has the size of the city it came from. 0 when the registry does not say. */
 export function citySize(city: CityEntry, entries: ReadonlyMap<string, CityEntry>): number {
   let entry: CityEntry | undefined = city;

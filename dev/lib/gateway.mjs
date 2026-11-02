@@ -14,6 +14,10 @@ export const BAD_KIND = 5;
 export const UNSUPPORTED = 7;
 export const IN_USE = 8;
 export const BUSY = 9;
+export const BAD_FORK_NAME = 16;
+export const FORK_TOO_DEEP = 17;
+export const FORK_TICK = 18;
+export const FORK_EXISTS = 19;
 export const RESULT_NAMES = {
   0: "applied",
   1: "malformed",
@@ -25,7 +29,14 @@ export const RESULT_NAMES = {
   7: "unsupported",
   8: "in-use",
   9: "busy",
+  16: "bad-fork-name",
+  17: "fork-too-deep",
+  18: "fork-tick",
+  19: "fork-exists",
 };
+
+/** The name a city has at the gateway and in its stream names: a fork's `~` becomes `_`. */
+export const felixName = (city) => city.replaceAll("~", "_");
 
 export const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -72,6 +83,25 @@ function keyframe(bytes, at) {
   return buildings;
 }
 
+/** A registry record (`created` or `forked`), or null for another kind of record. */
+export function decodeRegistry(bytes) {
+  if (bytes[0] !== 3) return null;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let i = 2;
+  const str = () => {
+    const size = bytes[i++];
+    const text = Buffer.from(bytes.subarray(i, i + size)).toString();
+    i += size;
+    return text;
+  };
+  if (bytes[1] === 1) return { type: "created", name: str(), seed: str() };
+  if (bytes[1] !== 2) return null;
+  const name = str();
+  const parent = str();
+  const tick = view.getUint32(i, true);
+  return { type: "forked", name, parent, tick, principal: view.getBigUint64(i + 12, true) };
+}
+
 /** A tick record's header, its keyframe's building diff (or null) and its events. */
 export function decode(bytes) {
   if (bytes[0] !== 4) return null;
@@ -92,8 +122,20 @@ export function decode(bytes) {
     const tag = head % 16;
     const length = Math.floor(head / 16);
     const body = new DataView(bytes.buffer, bytes.byteOffset + at.i, length);
+    const start = at.i;
     at.i += length;
-    if (tag === 7 || tag === 8) {
+    if (tag === 15) {
+      // Extended events: a kind, then its fields. Kind 7 is a fork.
+      const inner = { i: start };
+      if (varint(bytes, inner) === 7) {
+        const tick = varint(bytes, inner);
+        const size = bytes[inner.i++];
+        const name = Buffer.from(bytes.subarray(inner.i, inner.i + size)).toString();
+        inner.i += size;
+        const principal = new DataView(bytes.buffer, bytes.byteOffset + inner.i, 8).getBigUint64(0, true);
+        out.events.push({ type: "forked", tick, name, principal });
+      }
+    } else if (tag === 7 || tag === 8) {
       out.events.push({ type: tag === 7 ? "built" : "demolished", lot: body.getUint32(0, true), kind: body.getUint16(4, true) });
     } else if (tag === 10) {
       const nameLength = body.getUint8(8);
@@ -126,6 +168,15 @@ export const demolish = (lot) => {
   b[0] = 4;
   b.writeUInt32LE(lot, 1);
   return b;
+};
+/** A `fork` command: the last tick to keep, and the fork's name. */
+export const fork = (tick, name) => {
+  const text = Buffer.from(name);
+  const b = Buffer.alloc(6);
+  b[0] = 6;
+  b.writeUInt32LE(tick, 1);
+  b[5] = text.length;
+  return Buffer.concat([b, text]);
 };
 export const placeRoad = (a, z) => {
   const b = Buffer.alloc(9);
@@ -177,6 +228,9 @@ export class Session {
   message(m) {
     if (m.type === "hello") {
       this.onHello?.(m);
+    } else if (m.type === "event" && m.slot === "cities") {
+      const record = decodeRegistry(Buffer.from(m.payload, "base64"));
+      if (record) this.onCity?.(record);
     } else if (m.type === "event") {
       const record = decode(Buffer.from(m.payload, "base64"));
       if (!record) return;
@@ -200,6 +254,12 @@ export class Session {
       const from = offsets?.[shard] ?? "live";
       this.ws.send(JSON.stringify({ type: "subscribe", stream: "events", from, shard, slot: `d${shard}` }));
     }
+  }
+
+  /** Follows the registry of cities from its first record; `onRecord` is told each decoded one. */
+  followCities(onRecord) {
+    this.onCity = onRecord;
+    this.ws.send(JSON.stringify({ type: "subscribe", stream: "cities", from: 0, shard: 0, slot: "cities" }));
   }
 
   publish(payload) {

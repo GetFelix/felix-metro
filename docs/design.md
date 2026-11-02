@@ -37,7 +37,7 @@ enough to keep days of it.
 2. **Rewind, then follow live with no gap.** Playing forward from the past joins live delivery without a missing or repeated event.
 3. **A small log.** At 4 ticks a second, a city of 20,000 residents writes about 5.1 KB/s averaged over a day and 9.96 KB/s in the busiest minute of the rush, so a week of history is about 3 GB on one broker. These are extrapolated from measured cities of 522 and 5,568 residents; see the "Log size" section.
 4. **One authority that survives a restart.** The simulation is fenced at the broker, and a replacement picks up from the log where the last one stopped.
-5. **Forks are cheap.** A branch starts from a keyframe of the parent and owes it nothing after that.
+5. **Forks are cheap.** A branch starts as a copy of the parent's history up to the fork tick and owes it nothing after that.
 
 ## Architecture
 
@@ -276,6 +276,7 @@ fields.
 | ---- | --------- | --------------------------------------------------------------------- |
 | 1    | `ledger`  | reason `u8` (0 day, 1 build, 2 demolish), earned varint, spent varint |
 | 2    | `balance` | amount, a zigzag varint (may be negative)                             |
+| 7    | `forked`  | tick varint, the fork's name (a string), principal hash `u64`         |
 
 A reader skips an extended kind it does not know.
 
@@ -473,9 +474,13 @@ for every other command.
 | 4      | `demolish` on a lot with nothing on it                                                 |
 | 5      | `build` of a kind that is not a building, or a rotation past 3                         |
 | 6      | `speed` other than 0, 4, 8 or 16                                                       |
-| 7      | not carried out yet: `place road`, `zone` and `fork`                                   |
+| 7      | not carried out yet: `place road`, `zone`, and `fork` on a sim that cannot create streams |
 | 8      | the lot is one residents go to                                                         |
 | 9      | sent while the city was paused with more commands waiting than it holds; send it again |
+| 16     | `fork` with a name outside 1 to 32 of `a-z`, `0-9` and `-`                             |
+| 17     | `fork` whose lineage name `<parent>~<name>` is over 64 bytes                           |
+| 18     | `fork` at a tick the city has not committed yet                                        |
+| 19     | `fork` of a name the parent already has a fork of                                      |
 
 Lots residents go to (homes, workplaces, parks) cannot be built over or demolished,
 because the schedules that send people there do not change.
@@ -483,9 +488,9 @@ because the schedules that send people there do not change.
 The display name comes from the ID token's name claim, chosen client-side, so it
 is whatever the builder chose and is shown as given. The record layer only
 limits it to 64 bytes. A fork's name is a seed part, 1 to 32 characters of
-`a-z`, `0-9` and `-`, and the sim refuses the command (result code) when it is
+`a-z`, `0-9` and `-`, and the sim refuses the command (result 16) when it is
 not. The lineage name `harbor~bridge-closed` that registry records carry must
-fit 64 bytes too, so a fork too deep to name is refused the same way.
+fit 64 bytes too, so a fork too deep to name is refused with result 17. See [Branching](#branching).
 
 | Tag | Command    | Fields                               |
 | --- | ---------- | ------------------------------------ |
@@ -498,7 +503,7 @@ fit 64 bytes too, so a fork too deep to name is refused the same way.
 
 A registry record is the kind byte, a tag and fields: `1` created (name, seed,
 districts `u16`, `wall_us` `u64`) or `2` forked (name, parent, tick `u32`,
-`wall_us` `u64`).
+`wall_us` `u64`, principal hash `u64`: who forked it).
 
 ### Ticks are commits
 
@@ -678,12 +683,95 @@ past read-only, and building there means forking.
 
 ## Branching
 
-A fork is a new city whose name records its parent and fork tick
-(`harbor~bridge-closed`). The sim seeds it by copying each district's keyframe
-at or before the fork tick into the fork's stream, replays the parent's events
-up to the tick, and steps on from there, so the fork owes the parent nothing
-after creation. The parent and fork can be shown side by side with their
-timelines locked to the same tick.
+A fork is a new city that starts as a copy of its parent's past and then lives on its own. Its name is the parent's,
+a `~` and a name the builder chose: `harbor~bridge-closed`. Forking a fork gives `harbor~bridge-closed~night-shift`.
+A fork has the parent's seed (the part before the first `~`, see [City layout](#city-layout)), so it is the same
+city to begin with. Nothing is shared afterwards: a command on the fork never reaches the parent and the other way
+round.
+
+**Sending one.** A `fork` command (tick, name) goes to the parent's command stream like a build, so whoever may
+build in the parent may fork it. The sim applies it between ticks. It is refused, with a result code from the table
+in [Commands and the registry](#commands-and-the-registry), when:
+
+- the name is not 1 to 32 characters of `a-z`, `0-9` and `-` (result 16);
+- `<parent>~<name>` is over 64 bytes, so a fork too deep to name (17);
+- the tick has not happened yet: it must be at or before the last tick the parent committed (18);
+- the parent already has a fork of that name, made or being made (19);
+- this sim has no way to create streams (7, as before).
+
+An applied command records a `forked` event (extended kind 7: tick varint, the fork's name, the principal hash) in
+district 0 of the same tick, after the `command` event. That event is what the fork is made from, and the timeline can
+mark it.
+
+**What is copied.** The fork's log holds the parent's whole history up to the fork tick: each district's records from
+tick 0 through the fork tick are copied into the fork's own stream, in order, with two changes. A `command_cursor`
+event names a position on the parent's command stream, so it is rewritten to 0, the start of the fork's own. The
+`epoch` and `wall_us` stay as they were. Because the copy starts at tick 0 and every district commits one record
+per tick, a record keeps its offset, so `keyframe_offset` and the `keyframe` state key stay true without being edited.
+
+The other design is to start the fork's log at the keyframe at or before the fork tick and have the page stitch the
+parent's earlier history on in front. It writes about an hour of records instead of the whole past. It was not chosen
+because a restart reads four city hours back from the newest keyframe to find the trips under way, a seek before the
+first keyframe would need the parent's stream, and the fork would depend on the parent's retention, which the done
+condition ("owes the parent nothing") rules out. The cost of the copy is one commit per district per tick, the same
+burst a new city's warm-up makes (a day and a half of ticks takes seconds to tens of seconds); it is paid once per
+fork, in the background, while the parent keeps ticking.
+
+**Starting the fork is a restart.** Once the copy is complete, the fork city is opened like a city with history: the
+world is rebuilt from the newest keyframe at or before the fork tick and the records after it (see [Restart](#restart)),
+and stepping carries on from the tick after. So the fork's world at its fork tick equals the parent's by the same
+guarantee a restart gives, and whatever else the restart learns to restore, a fork gets too. The fork runs at the speed
+the parent had at the fork tick; a fork of a tick at which the parent was paused starts paused and waits for a `speed`
+command. Its first command stream offset is 0.
+
+```mermaid
+flowchart TD
+    A["fork command applied<br/>in the parent's tick"] --> B["forked event in district 0<br/>(committed with the tick)"]
+    B --> C["create metro.events.&lt;fork&gt; and<br/>metro.commands.&lt;fork&gt;, with access"]
+    C --> D["copy each district's records<br/>tick 0 to the fork tick"]
+    D --> E["write the forked record<br/>to the registry"]
+    E --> F["open the fork like a restart;<br/>it ticks on its own"]
+```
+
+**Where the streams come from.** A client cannot create a Felix stream, only the control plane can, and the sim holds
+no control plane credential. The sim asks a provisioner it is configured with (`SIM_FORK_PROVISION_URL`), which creates
+the two streams (one shard per district for the events) and gives the fork the same access as its root city. The sim
+treats the answer as "ready" and does the rest. A sim started without the setting refuses `fork` with result 7. The dev
+stack runs a small provisioner (`dev/provision.mjs`) and gives the sim role a grant on every stream of the namespace,
+because a Felix token lists the streams it was minted for and a new stream is covered only by a wildcard.
+
+**Names at the gateway.** The gateway keeps scope values to letters, digits, `-` and `_`, so `~` cannot be in a
+stream name or a join. A fork's streams and its join name replace each `~` with `_`: `harbor~bridge-closed` is
+`metro.events.harbor_bridge-closed`. No city name has an `_` (a seed does not), so the mapping is one to one. The
+registry and the page's picker still show the lineage name; `felixName` in the web app and `felix_name` in the sim
+convert.
+
+**Access.** A fork is visible to everyone who can watch its root city and can be built in by everyone who can build
+in it: the provisioner grants the root's watch and build roles on the fork's streams. A fork of a fork uses the root's
+roles too, because a Felix grant names one stream or all of them and cannot name "every stream that starts with
+`harbor_`". The forking principal is recorded in the `forked` event and in the registry record, which gains a
+`principal` field (the same hash a `command` event has).
+
+**Exactly once, and a fork that was half made.** The `forked` event is committed with the tick that applied the
+command, so it is written once however often the sim restarts. Everything after it is derived from the log and can be
+done again safely, in this order, so the registry record is what makes a fork exist:
+
+- Creating streams and giving access is repeatable.
+- The copy resumes at each district's tail and writes with `commit_if` at the offset it expects, so a record is never
+  written twice and a second copier is refused.
+- The registry write is the last step, and a record sent twice lists the name once.
+
+A sim that restarts reads its parent city's history, finds the `forked` events in the part it reads, and does again
+whatever the registry does not list. It then starts every fork the registry lists. A fork still unfinished when more
+ticks than the restart reads back (five city hours) had passed is not found again; sending the same command again
+finishes it. A copy that already holds records past the new fork tick is refused with an error in the log, because the
+fork would hold a history the parent never had at that tick.
+
+**Cost.** Every fork is a city that ticks, at 4 ticks a second unless paused, and keeps its own copy of the history.
+A pause (a `speed` command, or the operator's endpoint) is how to leave one idle.
+
+**Side by side.** The parent and fork can be shown with their timelines locked to the same tick. That is the page's
+part ([Seeking](#seeking) works on the fork's stream like any city's).
 
 ## Rendering
 
@@ -731,4 +819,3 @@ anything is built inside it.
 **Open questions**
 
 - [ ] One keyframe per city hour, or adaptive (more often when a lot changed)?
-- [ ] Should forks be visible to everyone, or private to the person who made them?
