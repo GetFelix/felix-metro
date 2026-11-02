@@ -8,6 +8,7 @@
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { chromium } from 'playwright';
+import { joinRecorded } from './join-frames.mjs';
 import { withTrace } from './url.mjs';
 
 const [pageUrl, out] = process.argv.slice(2);
@@ -25,6 +26,8 @@ const MAX_TILES_PER_TICK = 0.375;
  */
 const MAX_TURN_TILES_PER_TICK = 1;
 const MIN_COMPARED = 5;
+/** Frames past the join the check compares, and so waits for. */
+const FRAMES_AFTER_JOIN = 4;
 
 const browser = await chromium.launch({
   args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'],
@@ -123,7 +126,11 @@ for (let attempt = 1; attempt <= ATTEMPTS && compared < MIN_COMPARED; attempt++)
       timeout: MINUTE,
     })
     .catch(() => fail('Back to live did not join the live city'));
-  await page.waitForTimeout(1500);
+  // The join is judged from the frames either side of it, so wait for those to be drawn instead of for a fixed time: a
+  // software renderer at a few frames a second can take longer than that to draw the first frame after the join.
+  await page
+    .waitForFunction(joinRecorded, FRAMES_AFTER_JOIN, { polling: 100, timeout: MINUTE })
+    .catch(() => fail('the frames around the join were not drawn after the page joined the live city'));
 
   const done = await page.evaluate(() => ({
     ...window.__metro.playback(),
@@ -182,13 +189,13 @@ for (let attempt = 1; attempt <= ATTEMPTS && compared < MIN_COMPARED; attempt++)
   const need = fps >= 4 ? 8 : 3;
   console.log(`the join was found ${j - landed} frames after the seek landed (${fps.toFixed(1)} fps, ${need} needed)`);
   if (j < landed + need) await fail(`the join was found at frame ${j} of the record, the seek landed at ${landed}`);
-  for (let i = lo; i < Math.min(frames.length, j + 4); i++) {
+  for (let i = lo; i < Math.min(frames.length, j + FRAMES_AFTER_JOIN); i++) {
     if (frames[i].tick < frames[i - 1].tick - 1e-6)
       await fail(`the tick went back from ${frames[i - 1].tick} to ${frames[i].tick} at the join`);
   }
   // No resident moves further between two frames than the fastest road allows for the ticks between them.
   let comparedHere = 0;
-  for (let i = lo; i < Math.min(frames.length, j + 4); i++) {
+  for (let i = lo; i < Math.min(frames.length, j + FRAMES_AFTER_JOIN); i++) {
     // Along the road, plus the turn-in a trip makes at each end, which is a function of the tick like the road.
     const allowed =
       (MAX_TILES_PER_TICK + MAX_TURN_TILES_PER_TICK) * Math.max(0, frames[i].tick - frames[i - 1].tick) + 0.2;

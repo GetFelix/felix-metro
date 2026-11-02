@@ -40,6 +40,10 @@ controls looking like the ones already there.
   or placed while the controls are hidden. The buttons are off, with a note that says why, when the page has no live city, is
   showing an earlier moment, or is signed in as someone who may only watch. [Building](../README.md#building) says
   what a builder may do and why only the cleared ground.
+- **See the city in numbers.** `C`, or **City stats** in the settings sheet, shows a panel on the left edge with the
+  residents, how many are on the road (in cars and on foot) and the buildings by kind. The numbers are for the moment
+  on screen, so they change as you scrub, rewind or seek. The choice is remembered. `H` hides the panel with the other
+  controls.
 - **Hide the controls.** `H` hides every control, message, the follow card and the frame times, for a clean picture.
   `H` or `Esc` brings them back, and that `Esc` does not stop a follow. It does nothing while a field has focus or the
   settings sheet is open.
@@ -76,6 +80,7 @@ framework. Each part has one file of each kind:
 | Timeline bar                     | `web/src/timeline.ts`                                              | `web/src/ui/timeline.css` |
 | Settings sheet and key list      | `web/src/ui/shell.ts`, `settings.ts`, `keys.ts`, `sheet.ts`        | `web/src/ui/sheet.css`    |
 | Share button, photo mode         | `web/src/ui/share.ts`, `web/src/ui/photo.ts`, `web/src/moments.ts` | `web/src/ui/photo.css`    |
+| City stats panel                 | `web/src/ui/stats.ts`, `web/src/stats.ts`                          | `web/src/ui/stats.css`    |
 | Follow card                      | `web/src/ui/follow-card.ts`, `web/src/follow.ts`, `web/src/tap.ts` | `web/src/ui/follow.css`   |
 | Sound button                     | `web/src/ui/sound.ts`                                              | `web/src/ui/kit.css`      |
 | Build and demolish tools         | `web/src/ui/build-bar.ts`, `web/src/placement.ts`                  | `web/src/ui/build.css`    |
@@ -209,6 +214,20 @@ waits for the next press. Using the button or `M` first switches it off instead.
 A hidden tab is suspended and wakes when you return, and a context the system interrupted (iOS does this) is resumed
 at the same moment.
 
+### The stats panel
+
+`ui/stats.ts` builds the panel and `stats.ts` works out its numbers. The panel knows nothing about the city: `main.ts`
+reads the numbers for the state and tick on screen a few times a second and hands them over with `show()`. The
+[design notes](design.md#city-stats) say how each number is counted.
+
+It sits halfway down the left edge, clear of the Felix Metro chip, the clock and the timeline. At 600px and below it
+moves to the bottom left, above the timeline, and on a screen less than 520px tall it goes under the brand chip in two
+columns. It does not take clicks, so it never covers a thing you can press.
+`C` toggles it (see `isStatsKey`, which ignores the key while you type, with Ctrl, Cmd or Alt held, or under an open
+sheet), the switch in the settings sheet does the same, and the choice is kept in local storage under
+`felix-metro.stats`. A number that is not known shows `-`: with no gateway there is no city to count residents in, so
+only the buildings have numbers.
+
 ### The clock
 
 `#clock` always holds plain `HH:MM` text, so a screen reader and the check scripts read it as one time. `clock.ts`
@@ -327,11 +346,11 @@ in the overlay's files or in this page.
 
 ## Checking a change
 
-Run the unit tests for the data-driven parts: the key list, the hint's memory, the quality choice and the sound.
+Run the unit tests for the data-driven parts: the key list, the hint's memory, the quality choice, the sound and the stats.
 
 ```sh
 cd web
-npx vitest run src/ui src/quality.test.ts src/soundscape
+npx vitest run src/ui src/quality.test.ts src/soundscape src/stats.test.ts
 ```
 
 Then check the page itself. Install the test browser once with `npx playwright install chromium`. Serve the page in
@@ -355,6 +374,8 @@ node scripts/check-ui.mjs http://localhost:5173/ /tmp/ui
 - the build and demolish buttons are there and off, with the reason, on a page with no live city, and are absent under
   `?ui=0` and `?capture`;
 - the clock rolls, and holds still with reduced motion;
+- the stats panel is off at first, toggled by `C` and by the settings switch, remembered, hidden by `H`, and clear of the
+  other controls at both widths;
 - `H` hides every control, `?cam` starts the camera where a link says, and attract mode turns the camera and stops on a
   mouse move;
 - `?follow=` shows the resident's card with their day and puts the camera on them, turning keeps the follow, and `Esc`,

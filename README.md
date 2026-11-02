@@ -75,6 +75,15 @@ To show an earlier moment, the browser reads each district's nearest keyframe
 and the events after it, up to that moment. To play forward, it subscribes from
 there. [docs/design.md](docs/design.md) has the details.
 
+## City stats
+
+Press `C`, or switch on **City stats** in the settings sheet, for a panel on the left edge. It shows the residents, how
+many of them are on the road (in cars and on foot) and the buildings by kind: homes, shops and offices, towers and
+factories. The numbers are for the moment on screen, so they change as you drag the timeline, rewind or open a link
+made with **Share this moment**. Hide the panel with `C` again; the page remembers the choice. A page opened with
+`?live=0` has no residents to count, so it shows only the buildings of the generated city. [docs/design.md](docs/design.md#city-stats)
+says how the numbers are worked out.
+
 ## Playing the past
 
 Once the timeline has taken the city back to an earlier moment, three keys play it. They work like the shuttle keys of
@@ -155,12 +164,12 @@ leave one building and tell the loser why, and a page held at an earlier moment 
 | 0   | The look, locked    | In progress: style frame, assets, daylight, post-processing, quality tiers, the UI shell (settings sheet, key list, first-visit hint, rolling clock), camera controls, instanced traffic and ambient life done                                                                                                                                         |
 | 1   | A live city         | Done                                                                                                                                                                                                                                                                                                                                                   |
 | 2   | Time travel         | In progress: keyframes, seeking, the timeline scrubber, rewind then follow, and backward playback with speeds built, smoothness not yet measured                                                                                                                                                                                                       |
-| 3   | Follow a life       | In progress: click a car or walker to follow them, with a card for their day and a `?follow=` link; ambient sound built; markers for notable events are not built yet                                                                                                                                                                                  |
+| 3   | Follow a life       | In progress: click a car or walker to follow them, with a card for their day and a `?follow=` link; ambient sound built; city stats at any tick built; markers for notable events are not built yet                                                                                                                                                                                  |
 | 4   | Build               | In progress: the sim applies build, demolish and speed commands and records who sent them, and the page animates a building going up (scaffold) or coming down (dust) over 8 ticks, backwards when you rewind; build and demolish tools in the page; roads and zones are not built yet                                                                 |
 | 5   | Branching timelines | Planned                                                                                                                                                                                                                                                                                                                                                |
 | 6   | Scale and failover  | In progress: a restarted sim resumes from its log; 20,000 residents, 16 districts and broker loss are open                                                                                                                                                                                                                                             |
 | 7   | Self-hosting        | Planned                                                                                                                                                                                                                                                                                                                                                |
-| 8   | A first chapter     | In progress: the sim resumes from its log after a restart (nothing built is lost, no tick repeated or missing, commands run once); the city has funds (taxes and upkeep each day, a price on building, shown on the page, also for the moment you scrub to); factions, policy, goals and investigations are planned (see [docs/game.md](docs/game.md)) |
+| 8   | A first chapter     | In progress: the sim resumes from its log after a restart (nothing built is lost, no tick repeated or missing, commands run once); the city has funds (taxes and upkeep each day, a price on building, shown on the page, also for the moment you scrub to); the council's three factions are scored each city day and shown with their demands and a recall countdown; policy, goals and investigations are planned (see [docs/game.md](docs/game.md)) |
 
 What runs today: the sim, which picks up where it left off after a restart, the dev stack and a browser page that shows a city live, with
 cars and walkers moving in time with the sim and the sun following the tick. They are drawn as instances

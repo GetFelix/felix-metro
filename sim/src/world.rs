@@ -13,6 +13,7 @@ use felix_metro_core::{
     TICKS_PER_HOUR, Trip,
 };
 
+pub(crate) use council::Council;
 pub(crate) use economy::opening_share;
 pub(crate) use restore::Departure;
 
@@ -74,6 +75,8 @@ pub(crate) struct World {
     accounts: Vec<i64>,
     /// Road and park upkeep a day, by district.
     upkeep: Vec<u64>,
+    /// How the factions feel about the city.
+    council: Council,
 }
 
 /// What a command did: the district it touched and the events to record there.
@@ -124,6 +127,7 @@ impl World {
                 .map(|d| economy::opening_share(districts, d))
                 .collect(),
             upkeep: economy::upkeep_base(&city),
+            council: Council::new(),
             city,
             people,
             tick: 0,
@@ -276,6 +280,7 @@ impl World {
         let city = &self.city;
         let planned_around = self.cars.clone();
         let cong = Congestion::new(&planned_around);
+        let council = &mut self.council;
         for person in &mut self.people {
             let id = person.resident.id;
             match &mut person.state {
@@ -315,6 +320,7 @@ impl World {
                             person.day += 1;
                         }
                         let block = &blocks[person.block];
+                        council.arrived(block.activity, trip.arrive().saturating_sub(trip.depart));
                         let lot = block.lot;
                         let home = city.lots[lot as usize].district;
                         let until = person
@@ -371,6 +377,7 @@ impl World {
         }
         self.cars = cars;
         if World::day_ends(tick) {
+            self.score_day();
             for (district, (earned, spent)) in self.close_day().into_iter().enumerate() {
                 out[district].events.push(Event::Ledger {
                     reason: LEDGER_DAY,
@@ -385,6 +392,12 @@ impl World {
                     .events
                     .push(Event::Balance { amount: *amount });
             }
+            out[0].events.push(Event::Council {
+                days: self.council.days,
+                patience: council::PATIENCE,
+                standings: self.council.standings,
+                tally: self.council.tally,
+            });
             for (district, keyframe) in self.keyframes(tick).into_iter().enumerate() {
                 out[district].keyframe = Some(keyframe);
             }
@@ -503,6 +516,7 @@ fn count_car(city: &City, cars: &mut [u16], trip: &Trip, tick: u32) {
     }
 }
 
+mod council;
 mod economy;
 mod restore;
 #[cfg(test)]
