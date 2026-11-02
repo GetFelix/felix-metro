@@ -50,6 +50,26 @@ fn keyframes_come_every_city_hour_and_hold_every_resident() {
     }
 }
 
+/// The page previews a whole-city keyframe while scrubbing, which needs every district's keyframe on
+/// one tick.
+#[test]
+fn every_district_keyframes_on_the_same_tick() {
+    let mut world = World::new(City::generate("harbor", 2).unwrap());
+    let districts = world.districts();
+    let mut keyframe_ticks = Vec::new();
+    for tick in 0..2 * KEYFRAME_EVERY + 1 {
+        let with = world.step().iter().filter(|d| d.keyframe.is_some()).count();
+        assert!(
+            with == 0 || with == districts,
+            "tick {tick}: {with} of {districts}"
+        );
+        if with > 0 {
+            keyframe_ticks.push(tick);
+        }
+    }
+    assert_eq!(keyframe_ticks, [0, KEYFRAME_EVERY, 2 * KEYFRAME_EVERY]);
+}
+
 #[test]
 fn a_day_has_trips_and_each_one_arrives() {
     let (world, ticks) = day("harbor", 2);
@@ -137,16 +157,15 @@ fn a_resident_crossing_a_boundary_leaves_one_district_and_enters_another_in_the_
                     Event::Left {
                         resident,
                         district: to,
-                        vehicle,
                     } => {
-                        left.push((*resident, district as u16, *to, vehicle.clone()));
+                        left.push((*resident, district as u16, *to));
                     }
                     Event::Entered {
                         resident,
                         district: from,
-                        vehicle,
+                        ..
                     } => {
-                        entered.push((*resident, *from, district as u16, vehicle.clone()));
+                        entered.push((*resident, *from, district as u16));
                     }
                     _ => {}
                 }
@@ -313,22 +332,59 @@ fn state_at_is_the_keyframe_the_step_commits() {
     assert_eq!(state_at(city(), 480), committed);
 }
 
-/// Prints what a city day writes, per district, and the worst moments of the two rush hours:
-/// `cargo test -p felix-metro-sim --release report_load -- --ignored --nocapture`.
-///
-/// A record's header is fixed, so the rest scales with residents. The 20,000 line extrapolates
-/// from this city's population that way and spreads it over 16 districts.
-#[test]
-#[ignore = "prints a measurement"]
-fn report_load() {
-    let (world, ticks) = day("harbor", 2);
+/// What a city day writes, from the encoded records. A record's header is fixed, so the rest scales
+/// with residents: the 20,000 figures extrapolate from this city's population that way and spread
+/// it over 16 districts.
+struct Load {
+    /// Bytes of a record with nothing in it, at the largest tick and offset a live run reaches.
+    header: usize,
+    residents: usize,
+    districts: usize,
+    day_mean: f64,
+    day_mean_at_20k: f64,
+    rushes: Vec<Rush>,
+}
+
+/// The worst moments of one rush hour window.
+struct Rush {
+    name: &'static str,
+    /// The district, tick and size in bytes of the largest record.
+    worst_tick: (usize, usize, usize),
+    /// The largest record that carries no keyframe.
+    worst_plain: usize,
+    /// Bytes per second of the busiest minute, city-wide and in the busiest district.
+    city: f64,
+    district: f64,
+    at_20k: f64,
+}
+
+fn measure_load(world: &World, ticks: &[Vec<DistrictTick>]) -> Load {
     let districts = world.districts();
     let residents = world.residents();
     let seconds = f64::from(TICKS_PER_DAY) / 4.0;
     // Bytes of each district's record at each tick, and the keyframe's share of it.
     let mut bytes = vec![vec![0usize; districts]; ticks.len()];
     let mut key = bytes.clone();
-    let mut header = 0;
+    // A live run's tick and keyframe offset grow, and each is a varint. Measure the header at the
+    // size it has after 2^21 ticks (about six days), its largest, and charge every record that.
+    let header_len = |tick: u32, keyframe_offset: u64| {
+        TickRecord {
+            header: Header {
+                epoch: 1,
+                district: 0,
+                tick,
+                speed: 4,
+                keyframe_offset,
+                wall_us: 0,
+            },
+            keyframe: None,
+            events: Vec::new(),
+        }
+        .encode()
+        .unwrap()
+        .len()
+    };
+    let header = header_len(1 << 21, 1 << 21);
     for (tick, step) in ticks.iter().enumerate() {
         for (d, t) in step.iter().enumerate() {
             let record = TickRecord {
@@ -343,25 +399,22 @@ fn report_load() {
                 keyframe: None,
                 events: t.events.clone(),
             };
-            let plain = record.encode().unwrap().len();
+            let measured = record.encode().unwrap().len();
+            let plain = measured - header_len(tick as u32, 0) + header;
             bytes[tick][d] = plain;
-            if t.events.is_empty() {
-                header = plain;
-            }
             if let Some(k) = &t.keyframe {
                 let with = TickRecord {
                     keyframe: Some(k.clone()),
                     ..record
                 };
-                key[tick][d] = with.encode().unwrap().len() - plain;
+                key[tick][d] = with.encode().unwrap().len() - measured;
             }
         }
     }
     let day_total: usize = bytes.iter().flatten().chain(key.iter().flatten()).sum();
-    println!(
-        "{residents} residents, {districts} districts: day mean {:.1} B/s",
-        day_total as f64 / seconds
-    );
+    let day_fixed = districts * ticks.len() * header;
+    let day_at_20k = (16 * ticks.len() * header) as f64
+        + (day_total - day_fixed) as f64 / residents as f64 * 20_000.0;
     let hour = TICKS_PER_HOUR as usize;
     let windows = [
         ("07:45-08:15", hour * 31 / 4, hour * 33 / 4),
@@ -369,49 +422,105 @@ fn report_load() {
     ];
     // A city hour is a minute at 4 ticks a second, so a 1-minute window is `hour` ticks.
     let minute = hour;
-    for (name, from, to) in windows {
-        let mut worst_tick = (0, 0, 0usize);
-        let mut worst_plain = 0;
-        for t in from..to {
-            for d in 0..districts {
-                if bytes[t][d] + key[t][d] > worst_tick.2 {
-                    worst_tick = (t, d, bytes[t][d] + key[t][d]);
+    let rushes = windows
+        .into_iter()
+        .map(|(name, from, to)| {
+            let mut worst_tick = (0, 0, 0usize);
+            let mut worst_plain = 0;
+            for t in from..to {
+                for d in 0..districts {
+                    if bytes[t][d] + key[t][d] > worst_tick.2 {
+                        worst_tick = (t, d, bytes[t][d] + key[t][d]);
+                    }
+                    worst_plain = worst_plain.max(bytes[t][d]);
                 }
-                worst_plain = worst_plain.max(bytes[t][d]);
             }
-        }
-        // City-wide and busiest-district bytes over every 1-minute window that starts in the rush window.
-        let sum = |a: usize, b: usize, d: Option<usize>| -> usize {
-            (a..b)
-                .flat_map(|t| (0..districts).map(move |x| (t, x)))
-                .filter(|&(_, x)| d.is_none_or(|d| d == x))
-                .map(|(t, x)| bytes[t][x] + key[t][x])
-                .sum()
-        };
-        let city = (from..to).map(|a| sum(a, a + minute, None)).max().unwrap();
-        let district = (0..districts)
-            .map(|d| {
-                (from..to)
-                    .map(|a| sum(a, a + minute, Some(d)))
-                    .max()
-                    .unwrap()
-            })
-            .max()
-            .unwrap();
-        // The headers take `districts * hour * header` of any minute; the rest is per resident.
-        let fixed = districts * minute * header;
-        let per_resident = (city - fixed) as f64 / residents as f64;
-        let at_20k = (16 * minute * header) as f64 + per_resident * 20_000.0;
+            // City-wide and busiest-district bytes over every 1-minute window that starts in the rush window.
+            let sum = |a: usize, b: usize, d: Option<usize>| -> usize {
+                (a..b)
+                    .flat_map(|t| (0..districts).map(move |x| (t, x)))
+                    .filter(|&(_, x)| d.is_none_or(|d| d == x))
+                    .map(|(t, x)| bytes[t][x] + key[t][x])
+                    .sum()
+            };
+            let city = (from..to).map(|a| sum(a, a + minute, None)).max().unwrap();
+            let district = (0..districts)
+                .map(|d| {
+                    (from..to)
+                        .map(|a| sum(a, a + minute, Some(d)))
+                        .max()
+                        .unwrap()
+                })
+                .max()
+                .unwrap();
+            // The headers take `districts * minute * header` of any minute; the rest is per resident.
+            let fixed = districts * minute * header;
+            let per_resident = (city - fixed) as f64 / residents as f64;
+            let at_20k = (16 * minute * header) as f64 + per_resident * 20_000.0;
+            Rush {
+                name,
+                worst_tick,
+                worst_plain,
+                city: city as f64 / 60.0,
+                district: district as f64 / 60.0,
+                at_20k: at_20k / 60.0,
+            }
+        })
+        .collect();
+    Load {
+        header,
+        residents,
+        districts,
+        day_mean: day_total as f64 / seconds,
+        day_mean_at_20k: day_at_20k / seconds,
+        rushes,
+    }
+}
+
+fn print_load(label: &str, load: &Load) {
+    println!(
+        "{label}: {} residents, {} districts, {} B header: day mean {:.1} B/s; at 20,000 residents in 16 districts {:.0} B/s",
+        load.residents, load.districts, load.header, load.day_mean, load.day_mean_at_20k
+    );
+    for r in &load.rushes {
         println!(
-            "{name}: worst tick {} B (district {} tick {}, {} B without a keyframe); worst minute {:.0} B/s city, {:.0} B/s one district; at 20,000 residents in 16 districts {:.0} B/s",
-            worst_tick.2,
-            worst_tick.1,
-            worst_tick.0,
-            worst_plain,
-            city as f64 / 60.0,
-            district as f64 / 60.0,
-            at_20k / 60.0
+            "{}: worst tick {} B (district {} tick {}, {} B without a keyframe); worst minute {:.0} B/s city, {:.0} B/s one district; at 20,000 residents in 16 districts {:.0} B/s",
+            r.name,
+            r.worst_tick.2,
+            r.worst_tick.1,
+            r.worst_tick.0,
+            r.worst_plain,
+            r.city,
+            r.district,
+            r.at_20k
         );
+    }
+}
+
+/// Prints what a city day writes, per district, and the worst moments of the two rush hours, for
+/// the harbor city and for the same city with 64 residents a home, which has about the load per
+/// district of 20,000 residents in 16:
+/// `cargo test -p felix-metro-sim --release report_load -- --ignored --nocapture`.
+#[test]
+#[ignore = "prints a measurement"]
+fn report_load() {
+    let (world, ticks) = day("harbor", 2);
+    print_load("harbor", &measure_load(&world, &ticks));
+    let city = City::generate("harbor", 2).unwrap();
+    let places = Places::with_per_home(&city, 64);
+    let mut world = World::with_places(city, &places);
+    let ticks: Vec<_> = (0..TICKS_PER_DAY).map(|_| world.step()).collect();
+    print_load("dense harbor", &measure_load(&world, &ticks));
+}
+
+/// The log's goal is about 10 KB/s in the busiest minute of a rush at 20,000 residents.
+#[test]
+fn the_busiest_minute_of_a_rush_stays_under_ten_kilobytes_a_second() {
+    let (world, ticks) = day("harbor", 2);
+    let load = measure_load(&world, &ticks);
+    assert_eq!(load.header, 22, "the header is charged at its largest");
+    for r in &load.rushes {
+        assert!(r.at_20k < 10_000.0, "{}: {:.0} B/s", r.name, r.at_20k);
     }
 }
 

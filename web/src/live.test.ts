@@ -17,7 +17,7 @@ vi.mock('./core/felix_metro_core.js', () => ({
   districtKey: (district: number, _shards: number, routing: string) => `${routing}.${district}`,
 }));
 vi.mock('./auth', () => ({ signIn: async () => 'token' }));
-const { follow, createFeeds, connectLive } = await import('./live');
+const { follow, createFeeds, connectLive, parse, onOldLog } = await import('./live');
 
 const city = { lots: [] } as unknown as City;
 const trips: Trips = { trip: () => undefined };
@@ -302,5 +302,18 @@ describe('a city the gateway refuses', () => {
     } finally {
       connect.mockRestore();
     }
+  });
+});
+
+describe('a log in the old tick layout', () => {
+  it('tells the page once, and not for other bad records', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const told = vi.fn();
+    onOldLog(told);
+    expect(parse(new Uint8Array([9, 0, 0]))).toBeNull();
+    expect(told).not.toHaveBeenCalled();
+    expect(parse(new Uint8Array([1, 0, 0]))).toBeNull();
+    expect(parse(new Uint8Array([1, 0, 0]))).toBeNull();
+    expect(told).toHaveBeenCalledTimes(1);
   });
 });

@@ -6,9 +6,9 @@
 //! ticks that are usually small are LEB128 varints, and lists of ids are
 //! zigzag deltas. Layouts are in `docs/design.md`.
 //!
-//! Events and keyframe resident entries are a tag, a length and a body, so a
-//! reader skips a tag it does not know and ignores bytes appended to a body it
-//! does. Header flag bits select the layout and stay strict. Decoding never
+//! Events and keyframe resident entries are one varint holding the body length
+//! and a tag, then the body, so a reader skips a tag it does not know and
+//! ignores bytes appended to a body it does. Header flag bits select the layout and stay strict. Decoding never
 //! panics: truncated bytes, unknown kinds, short bodies, bad UTF-8, trailing
 //! bytes and non-canonical varints are all errors.
 
@@ -19,10 +19,10 @@ mod wire;
 #[cfg(test)]
 mod tests;
 
-pub use codec::{TICK_HEADER_LEN, building_diffs};
+pub use codec::building_diffs;
 
-/// Kind byte of a tick record.
-pub const KIND_TICK: u8 = 1;
+/// Kind byte of a tick record. Kind 1 was the layout before the compact one and is refused.
+pub const KIND_TICK: u8 = 4;
 /// Kind byte of a command record.
 pub const KIND_COMMAND: u8 = 2;
 /// Kind byte of a registry record.
@@ -216,7 +216,6 @@ pub enum Event {
     Left {
         resident: u32,
         district: u16,
-        vehicle: Vehicle,
     },
     /// Crossed into this district from `district`.
     Entered {

@@ -64,9 +64,8 @@ function keyframe(bytes, at) {
   }
   for (let n = varint(bytes, at); n > 0; n--) {
     delta(bytes, at, 0);
-    at.i += 1; // the resident's frame tag
-    // Read the length first: `at.i += varint(...)` takes at.i before the varint moves it.
-    const length = varint(bytes, at);
+    // The frame head is the body length above two bits of tag.
+    const length = Math.floor(varint(bytes, at) / 4);
     at.i += length;
   }
   for (let n = 0; n < 4; n++) varint(bytes, at);
@@ -75,15 +74,23 @@ function keyframe(bytes, at) {
 
 /** A tick record's header, its keyframe's building diff (or null) and its events. */
 export function decode(bytes) {
-  if (bytes[0] !== 1) return null;
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  const out = { district: view.getUint16(5, true), tick: view.getUint32(7, true), keyframe: null, events: [] };
-  const count = view.getUint16(29, true);
-  const at = { i: 31 };
-  if ((bytes[12] & 1) !== 0) out.keyframe = keyframe(bytes, at);
+  if (bytes[0] !== 4) return null;
+  const at = { i: 1 };
+  varint(bytes, at); // epoch
+  const district = varint(bytes, at);
+  const tick = varint(bytes, at);
+  const flags = bytes[at.i + 1];
+  at.i += 2; // speed, flags
+  varint(bytes, at); // keyframe offset
+  at.i += 8; // wall clock
+  const count = varint(bytes, at);
+  const out = { district, tick, keyframe: null, events: [] };
+  if ((flags & 1) !== 0) out.keyframe = keyframe(bytes, at);
   for (let n = 0; n < count; n++) {
-    const tag = bytes[at.i++];
-    const length = varint(bytes, at);
+    // The frame head is the body length above four bits of tag.
+    const head = varint(bytes, at);
+    const tag = head % 16;
+    const length = Math.floor(head / 16);
     const body = new DataView(bytes.buffer, bytes.byteOffset + at.i, length);
     at.i += length;
     if (tag === 7 || tag === 8) {

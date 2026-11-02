@@ -56,7 +56,6 @@ fn event(rng: &mut Rng) -> Event {
         4 => Event::Left {
             resident,
             district: rng.below(16) as u16,
-            vehicle: vehicle(rng),
         },
         5 => Event::Entered {
             resident,
@@ -141,7 +140,23 @@ fn tick_record(rng: &mut Rng) -> TickRecord {
             wall_us: rng.next_u64(),
         },
         keyframe: (rng.below(3) == 0).then(|| keyframe(rng)),
-        events: (0..rng.below(10)).map(|_| event(rng)).collect(),
+        events: (0..rng.below(10))
+            .flat_map(|_| {
+                let e = event(rng);
+                // An arrival is an `arrived` and the same resident's `activity`, which share an entry on the wire.
+                match e {
+                    Event::Arrived { resident, .. } if rng.below(2) == 0 => vec![
+                        e,
+                        Event::Activity {
+                            resident,
+                            kind: rng.below(8) as u8,
+                            until: rng.next_u64() as u32,
+                        },
+                    ],
+                    e => vec![e],
+                }
+            })
+            .collect(),
     }
 }
 
@@ -266,10 +281,10 @@ fn unknown_header_flags_are_errors() {
         }],
     };
     let mut bytes = r.encode().unwrap();
-    bytes[TICK_HEADER_LEN] = 99;
+    bytes[PLAIN_HEADER] = 1 << 4 | UNKNOWN_EVENT_TAG;
     assert_eq!(TickRecord::decode(&bytes).unwrap().events, []);
     let mut bytes = r.encode().unwrap();
-    bytes[12] |= 0x80;
+    bytes[FLAGS_AT] |= 0x80;
     assert!(matches!(
         TickRecord::decode(&bytes),
         Err(DecodeError::Invalid(_))
@@ -281,14 +296,14 @@ fn hostile_counts_do_not_allocate() {
     // A keyframe claiming 2^60 buildings in a few bytes.
     let mut w = wire::Writer(Vec::new());
     w.u8(KIND_TICK);
-    w.u32(1);
-    w.u16(0);
-    w.u32(0);
+    w.varint(1);
+    w.varint(0);
+    w.varint(0);
     w.u8(1);
     w.u8(FLAG_KEYFRAME);
+    w.varint(0);
     w.u64(0);
-    w.u64(0);
-    w.u16(0);
+    w.varint(0);
     w.varint(1 << 60);
     assert_eq!(Record::decode(&w.0), Err(DecodeError::Truncated));
 }
@@ -361,22 +376,22 @@ fn names_over_the_limit_are_refused() {
         id: 1,
         result: 0,
     };
-    let mut t = plain_tick(vec![event]);
-    assert_eq!(t.encode(), Err(EncodeError::StringTooLong));
+    assert_eq!(
+        plain_tick(vec![event]).encode(),
+        Err(EncodeError::StringTooLong)
+    );
     // A reader refuses a long string a foreign writer produced.
-    t.events = vec![Event::Command {
-        principal: 1,
-        name: "x".repeat(MAX_STR),
-        id: 1,
-        result: 0,
-    }];
-    let mut bytes = t.encode().unwrap();
-    // tag, length, principal (8), name length byte
-    let at = TICK_HEADER_LEN + 2 + 8;
-    assert_eq!(bytes[at] as usize, MAX_STR);
-    bytes[at] += 1;
-    bytes.push(b'x');
-    bytes[TICK_HEADER_LEN + 1] += 1;
+    let mut w = wire::Writer(Vec::new());
+    w.framed(10, 4, |b| {
+        b.u64(1);
+        b.u8(MAX_STR as u8 + 1);
+        b.0.extend_from_slice(&[b'x'; MAX_STR + 1]);
+        b.u32(1);
+        b.u8(0);
+        Ok(())
+    })
+    .unwrap();
+    let bytes = raw_tick(false, 1, &w.0);
     assert_eq!(
         TickRecord::decode(&bytes),
         Err(DecodeError::Invalid("string is too long"))
@@ -398,20 +413,33 @@ fn plain_tick(events: Vec<Event>) -> TickRecord {
     }
 }
 
+/// The bytes of a `plain_tick` before its first event, and where its flags and event count are in them.
+const PLAIN_HEADER: usize = 16;
+const FLAGS_AT: usize = 5;
+const COUNT_AT: usize = 15;
+
+/// A tag no build has used.
+const UNKNOWN_EVENT_TAG: u8 = 14;
+
 /// A tick record's header for `events` events, with a keyframe if asked, then `body`.
-fn raw_tick(keyframe: bool, events: u16, body: &[u8]) -> Vec<u8> {
+fn raw_tick(keyframe: bool, events: u8, body: &[u8]) -> Vec<u8> {
     let mut bytes = plain_tick(Vec::new()).encode().unwrap();
-    bytes.truncate(TICK_HEADER_LEN);
-    bytes[12] = u8::from(keyframe);
-    bytes[29..31].copy_from_slice(&events.to_le_bytes());
+    assert_eq!(bytes.len(), PLAIN_HEADER);
+    bytes[FLAGS_AT] = u8::from(keyframe);
+    bytes[COUNT_AT] = events;
     bytes.extend_from_slice(body);
     bytes
 }
 
+/// The frame head of an event with a `len`-byte body.
+const fn head(tag: u8, len: u8) -> u8 {
+    len << 4 | tag
+}
+
 #[test]
 fn unknown_event_tags_are_skipped_and_the_rest_is_kept() {
-    let speed = [EV_SPEED_TAG, 1, 4];
-    let mut body = vec![99, 3, 1, 2, 3];
+    let speed = [head(EV_SPEED_TAG, 1), 4];
+    let mut body = vec![head(UNKNOWN_EVENT_TAG, 3), 1, 2, 3];
     body.extend_from_slice(&speed);
     let r = TickRecord::decode(&raw_tick(false, 2, &body)).unwrap();
     assert_eq!(
@@ -426,7 +454,7 @@ const EV_SPEED_TAG: u8 = 11;
 
 #[test]
 fn an_event_body_may_grow_but_not_shrink() {
-    let longer = [EV_SPEED_TAG, 3, 4, 0xaa, 0xbb];
+    let longer = [head(EV_SPEED_TAG, 3), 4, 0xaa, 0xbb];
     let r = TickRecord::decode(&raw_tick(false, 1, &longer)).unwrap();
     assert_eq!(
         r.events,
@@ -434,13 +462,13 @@ fn an_event_body_may_grow_but_not_shrink() {
             ticks_per_second: 4
         }]
     );
-    let empty = [EV_SPEED_TAG, 0];
+    let empty = [head(EV_SPEED_TAG, 0)];
     assert_eq!(
         TickRecord::decode(&raw_tick(false, 1, &empty)),
         Err(DecodeError::Truncated)
     );
-    // An arrived event needs 8 bytes.
-    let short = [3, 7, 0, 0, 0, 0, 0, 0, 0];
+    // An arrived event needs a resident and a lot.
+    let short = [head(3, 1), 5];
     assert_eq!(
         TickRecord::decode(&raw_tick(false, 1, &short)),
         Err(DecodeError::Truncated)
@@ -450,20 +478,33 @@ fn an_event_body_may_grow_but_not_shrink() {
 #[test]
 fn an_event_that_claims_more_bytes_than_remain_is_truncated() {
     assert_eq!(
-        TickRecord::decode(&raw_tick(false, 1, &[EV_SPEED_TAG, 9, 4])),
+        TickRecord::decode(&raw_tick(false, 1, &[head(EV_SPEED_TAG, 9), 4])),
         Err(DecodeError::Truncated)
     );
 }
 
 #[test]
 fn unknown_resident_states_are_skipped_in_a_keyframe() {
-    // No buildings, no roads, two residents, then counts. Resident 5 has
-    // state tag 77; resident 6 is in an activity (kind 3, lot 9, until 5).
+    // No buildings, no roads, two residents, then counts. Resident 5 (id delta
+    // 5, zigzag 10) has state tag 3 and a two-byte body; resident 6 (delta 1,
+    // zigzag 2) is in an activity (kind 3, lot 9, until the record's own tick, 5).
     let fixed = [
-        0, 0, 2, //
-        10, 77, 2, 0, 0, //
-        2, 0, 6, 3, 9, 0, 0, 0, 5, //
-        7, 1, 2, 3,
+        0,
+        0,
+        2, //
+        10,
+        2 << 2 | 3,
+        0,
+        0, //
+        2,
+        3 << 2,
+        3,
+        9,
+        0, //
+        7,
+        1,
+        2,
+        3,
     ];
     let r = TickRecord::decode(&raw_tick(true, 0, &fixed)).unwrap();
     let k = r.keyframe.unwrap();
@@ -488,7 +529,7 @@ fn progress_past_the_end_of_a_leg_is_refused() {
         progress: MAX_PROGRESS,
         route: Vec::new(),
     };
-    let left = |vehicle| Event::Left {
+    let left = |vehicle| Event::Entered {
         resident: 1,
         district: 2,
         vehicle,
@@ -569,7 +610,7 @@ fn walk(city: &City, len: usize) -> Vec<Leg> {
 }
 
 #[test]
-fn a_typical_trip_is_about_sixty_bytes_or_less() {
+fn a_typical_trip_is_about_forty_bytes_or_less() {
     let city = City::generate("harbor", 2).unwrap();
     let record = TickRecord {
         header: Header {
@@ -588,8 +629,8 @@ fn a_typical_trip_is_about_sixty_bytes_or_less() {
             route: walk(&city, 12),
         }],
     };
-    let trip = record.encode().unwrap().len() - TICK_HEADER_LEN;
-    assert!(trip <= 60, "a 12-segment trip took {trip} bytes");
+    let trip = record.encode().unwrap().len() - PLAIN_HEADER;
+    assert!(trip <= 40, "a 12-segment trip took {trip} bytes");
 }
 
 #[test]
@@ -627,7 +668,7 @@ fn a_city_nobody_built_in_has_an_empty_building_diff() {
         keyframe: Some(keyframe),
         events: Vec::new(),
     };
-    assert!(r.encode().unwrap().len() < TICK_HEADER_LEN + 8);
+    assert!(r.encode().unwrap().len() < PLAIN_HEADER + 8);
 }
 
 #[test]
@@ -690,4 +731,153 @@ fn the_principal_hash_is_fnv_1a_and_pinned() {
     assert_eq!(principal_hash(""), 0xcbf2_9ce4_8422_2325);
     assert_eq!(principal_hash("a"), 0xaf63_dc4c_8601_ec8c);
     assert_ne!(principal_hash("mayor"), principal_hash("viewer"));
+}
+
+fn arrival(resident: u32, lot: u32) -> [Event; 2] {
+    [
+        Event::Arrived { resident, lot },
+        Event::Activity {
+            resident,
+            kind: 1,
+            until: 5 + 96,
+        },
+    ]
+}
+
+#[test]
+fn an_arrival_is_one_entry_and_reads_back_as_two_events() {
+    let one = plain_tick(arrival(1234, 900).to_vec());
+    let bytes = one.encode().unwrap();
+    assert_eq!(TickRecord::decode(&bytes).unwrap(), one);
+    // The count in the header is the entries written, not the events they read back as.
+    assert_eq!(bytes[COUNT_AT], 1);
+    // Frame head, resident (2), lot (2), kind, until as a delta from the tick (2).
+    assert_eq!(bytes.len(), PLAIN_HEADER + 1 + 2 + 2 + 1 + 2);
+}
+
+#[test]
+fn an_activity_that_is_not_the_arrivals_stays_its_own_event() {
+    let [arrived, activity] = arrival(1, 2);
+    let other = Event::Activity {
+        resident: 9,
+        kind: 1,
+        until: 6,
+    };
+    for events in [
+        vec![arrived.clone(), other.clone()],
+        vec![activity.clone(), arrived.clone()],
+        vec![
+            arrived.clone(),
+            Event::Speed {
+                ticks_per_second: 4,
+            },
+            activity.clone(),
+        ],
+    ] {
+        let bytes = plain_tick(events.clone()).encode().unwrap();
+        assert_eq!(bytes[COUNT_AT] as usize, events.len());
+        assert_eq!(TickRecord::decode(&bytes).unwrap().events, events);
+    }
+}
+
+#[test]
+fn separate_arrived_and_activity_entries_still_read() {
+    let [arrived, activity] = arrival(7, 8);
+    let mut w = wire::Writer(Vec::new());
+    w.framed(3, 4, |b| {
+        b.varint(7);
+        b.varint(8);
+        Ok(())
+    })
+    .unwrap();
+    w.framed(4, 4, |b| {
+        b.varint(7);
+        b.u8(1);
+        b.delta(5, 101);
+        Ok(())
+    })
+    .unwrap();
+    let r = TickRecord::decode(&raw_tick(false, 2, &w.0)).unwrap();
+    assert_eq!(r.events, [arrived, activity]);
+}
+
+#[test]
+fn times_are_coded_from_the_tick_of_the_record() {
+    let near = plain_tick(vec![Event::Trip {
+        resident: 300,
+        vehicle: 1,
+        depart: 5,
+        route: Vec::new(),
+    }]);
+    let far = TickRecord {
+        events: vec![Event::Trip {
+            resident: 300,
+            vehicle: 1,
+            depart: 5_000_000,
+            route: Vec::new(),
+        }],
+        ..near.clone()
+    };
+    let (n, f) = (near.encode().unwrap(), far.encode().unwrap());
+    // Frame head (the longer body needs two bytes), resident (2), vehicle, depart (1 or 4), route count.
+    assert_eq!(n.len(), PLAIN_HEADER + 1 + 2 + 1 + 1 + 1);
+    assert_eq!(f.len(), PLAIN_HEADER + 2 + 2 + 1 + 4 + 1);
+    assert_eq!(TickRecord::decode(&f).unwrap(), far);
+    // A time before the tick is a negative delta.
+    let early = TickRecord {
+        events: vec![Event::Activity {
+            resident: 1,
+            kind: 0,
+            until: 0,
+        }],
+        ..near
+    };
+    assert_eq!(TickRecord::decode(&early.encode().unwrap()).unwrap(), early);
+}
+
+#[test]
+fn a_departure_carries_no_vehicle() {
+    let left = plain_tick(vec![Event::Left {
+        resident: 5,
+        district: 3,
+    }]);
+    let bytes = left.encode().unwrap();
+    // Frame head, resident, district.
+    assert_eq!(bytes.len(), PLAIN_HEADER + 3);
+    assert_eq!(TickRecord::decode(&bytes).unwrap(), left);
+    assert_eq!(
+        left.to_json(),
+        r#"{"kind":"tick","epoch":1,"district":0,"tick":5,"speed":4,"keyframeOffset":0,"wallUs":0,"keyframe":null,"events":[{"type":"left","resident":5,"district":3}]}"#
+    );
+}
+
+#[test]
+fn the_earlier_tick_layout_is_refused_by_its_kind() {
+    let mut bytes = plain_tick(Vec::new()).encode().unwrap();
+    bytes[0] = 1;
+    assert_eq!(Record::decode(&bytes), Err(DecodeError::UnknownKind(1)));
+}
+
+#[test]
+fn a_tick_with_nothing_in_it_is_sixteen_bytes() {
+    assert_eq!(plain_tick(Vec::new()).encode().unwrap().len(), PLAIN_HEADER);
+}
+
+#[test]
+fn a_district_past_u16_is_an_error() {
+    let mut w = wire::Writer(Vec::new());
+    w.u8(KIND_TICK);
+    w.varint(1);
+    w.varint(70_000);
+    assert!(matches!(
+        Record::decode(&w.0),
+        Err(DecodeError::Invalid(_)) | Err(DecodeError::Truncated)
+    ));
+    w.varint(0);
+    w.u8(4);
+    w.u8(0);
+    w.varint(0);
+    w.u64(0);
+    w.varint(0);
+    assert_eq!(Record::decode(&w.0), Err(DecodeError::Invalid("district")));
 }

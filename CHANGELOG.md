@@ -16,6 +16,19 @@
 - Built on Felix 0.6.2: the sim's `felix-client` and `felix-wire` pins, the dev stack and CI images.
 - The overlay's styles moved from `web/index.html` into `web/src/ui/*.css`, and the picker, loading screen and frame-time
   display into `web/src/ui/`. `docs/ui.md` describes the kit, the motion rules and the wording rules.
+- The log's busiest minute is under the 10 KB/s goal. A 20,000-resident city is estimated to write 9.96 KB/s in the evening rush
+  (was 17.1) and 8.1 KB/s in the morning (was 13.8), and to average 5.1 KB/s a day (was 8.1). The figures are
+  extrapolated, scaled from measured cities of 522 and 5,568 residents, and hold at 4 ticks a second (the sim also
+  accepts 8 and 16, which multiplies them). They charge every record the largest header, 22 bytes. Tick records have
+  a new layout, kind 4: ids, counts and ticks are varints, times in an event are deltas from the record's tick, an
+  `arrived` and the `activity` after it are one entry, and `left` no longer carries the vehicle (the JSON `left`
+  event has no `vehicle`, `progress` or `route` fields). A tick with nothing in it is 16 to 22 bytes (the tick and the keyframe offset are varints that grow), not 31. Kind 1 is
+  refused, so a log written before this cannot be read: the page shows "Start a fresh city" and the history stays
+  unreadable. The dev stack keeps no state between runs. Spreading the
+  keyframes over the hour was measured and does not lower the busiest minute, so they stay on the hour (design.md,
+  "Log size").
+- `report_load` also prints the day mean at 20,000 residents and a denser harbor city, and a test holds the busiest
+  minute under 10 KB/s.
 
 ### The page
 
