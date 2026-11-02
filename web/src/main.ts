@@ -6,7 +6,7 @@ import { hintDue } from './ui/hint';
 import { ATTRACT_RATE, createAttract } from './attract';
 import { momentLink } from './moments';
 import { createPhoto, PHOTO_CLASS } from './ui/photo';
-import { createFollowCard, isStopKey } from './ui/follow-card';
+import { createFollowCard, isFollowKey, isStopKey } from './ui/follow-card';
 import { Following } from './follow';
 import { bindTap } from './tap';
 import { createShare } from './ui/share';
@@ -288,6 +288,9 @@ function signature(built: ReadonlyMap<number, Building>): string {
 /** Connections history is read over: two sessions keep eight reads in flight, and the gateway allows eight a person. */
 const HISTORY_SESSIONS = 2;
 
+/** How far from the middle of the view, in pixels, `F` looks for someone to follow. */
+const KEY_PICK_PX = 160;
+
 /** Districts on a side when `?districts` does not say. */
 const DEFAULT_DISTRICTS = 2;
 
@@ -423,8 +426,9 @@ async function main() {
   // A shared view replaces the opening drift.
   const sharedView = cam !== null && controls.setState(cam, { ease: false });
   const drawn: ReadonlyMap<number, Building> = new Map(state?.built);
-  /** The city's residents as core describes them, for the trips the log tells of and for the card of one followed. */
-  const residents = city ? new Metro(seed, districts) : null;
+  /** The city's residents as core describes them, made when first asked: a page with no log and no follow never builds it. */
+  let residentsMetro: Metro | null = null;
+  const residents = () => (residentsMetro ??= new Metro(seed, districts));
   const { scene, construction, ambient, cars, people, glows, setTime, setShadows, fleet, pick, setLot } =
     await createCity(renderer, quality.tier, city, state !== null, drawn);
   const hud = showHud ? createHud(renderer, quality) : null;
@@ -507,7 +511,7 @@ async function main() {
     if (hooks) window.__live = liveInfo;
   }
   if (state && traffic && city) {
-    const metro = residents!;
+    const metro = residents();
     const summary = (s: CityState) => ({ ticks: [...s.ticks], buildings: s.built.size, sig: signature(s.built) });
     /** Draw `next` in place of the state on screen, which is let go; the live one keeps filling in the background. */
     const swap = (next: CityState, tick: number | null) => {
@@ -1089,20 +1093,22 @@ async function main() {
   }
   const dom = renderer.domElement;
   const card = shell ? createFollowCard(() => following?.stop()) : null;
-  const following =
-    city && residents
-      ? new Following({
-          profile: (resident) => residents.profile(resident),
-          lots: city.lots,
-          half: (city.tiles - 1) / 2,
-          rig: controls,
-          positionOf: (voyage, tick) => traffic?.positionOf(voyage, tick) ?? null,
-          pin: (resident) => {
-            if (traffic) traffic.pinned = resident;
-          },
-          show: (view) => card?.show(view),
-        })
-      : null;
+  const following = city
+    ? new Following({
+        profile: (resident) => residents().profile(resident),
+        lots: city.lots,
+        half: (city.tiles - 1) / 2,
+        rig: controls,
+        positionOf: (voyage, tick, into) => traffic?.positionOf(voyage, tick, into) ?? null,
+        pin: (resident) => {
+          if (traffic) traffic.pinned = resident;
+        },
+        show: (view) => card?.show(view),
+      })
+    : null;
+  /** What a follow asks each frame, made once: the trip a resident is on in the state on screen, which a seek replaces. */
+  const voyageAt = (resident: number, at: number) => state?.voyageAt(resident, at);
+  const noVoyage = () => undefined;
   /** Follow `resident`, or say there is no such one. */
   const startFollow = (resident: number, keepView = false): boolean => {
     const ok = following?.start(resident, keepView) ?? false;
@@ -1112,18 +1118,28 @@ async function main() {
   if (following && !capture) {
     // Moving the view lets go; turning and zooming do not, so a follow can be looked at from any side.
     controls.addEventListener('steer', () => following.stop());
-    // Capture phase, to see photo mode and the sheet before they close themselves on the same key.
+    // Capture phase, to see photo mode, the sheet and the city menu before they close themselves on the same key.
     addEventListener(
       'keydown',
       (e) => {
         if (following.resident === null) return;
-        if (isStopKey(e, document.body.classList.contains(PHOTO_CLASS), shell?.isOpen ?? false)) following.stop();
+        const menuOpen = !document.getElementById('cities')?.classList.contains('hidden');
+        if (isStopKey(e, document.body.classList.contains(PHOTO_CLASS), shell?.isOpen ?? false, menuOpen))
+          following.stop();
       },
       true,
     );
     if (pick) {
       const find = (at: { x: number; y: number }, slack: number) =>
         pick(camera, at.x, at.y, { width: dom.clientWidth, height: dom.clientHeight }, slack);
+      // A click needs a pointer, so F is the way from the keyboard: whoever is nearest the middle of the view.
+      addEventListener('keydown', (e) => {
+        if (!isFollowKey(e, e.target as HTMLElement | null, shell?.isOpen ?? false)) return;
+        e.preventDefault();
+        const hit = find({ x: 0, y: 0 }, KEY_PICK_PX);
+        if (hit) startFollow(hit.resident);
+        else note('There is nobody near the middle of the view to follow.');
+      });
       bindTap(dom, {
         tap: ({ at, touch }) => {
           const hit = find(at, touch ? 28 : 16);
@@ -1198,7 +1214,7 @@ async function main() {
         // which lots are going up or coming down at this tick.
         ambient?.drive(ambientTick);
         traffic.update(tick, still ? 0 : dt, state.active());
-        following?.frame(tick, (resident, at) => state!.voyageAt(resident, at));
+        following?.frame(tick, voyageAt);
         state.settle(tick);
         construction.update(tick, state.rising, state.falling);
         ambient?.decorate(ambientTick);
@@ -1221,7 +1237,7 @@ async function main() {
       }
     }
     // With no log there is no tick, only the hour on the slider, and the resident is placed by their schedule.
-    if (!state) following?.frame(hour * TICKS_PER_HOUR, () => undefined);
+    if (!state) following?.frame(hour * TICKS_PER_HOUR, noVoyage);
     // A frame with no tick has no update to draw a voyage that just ended away.
     traffic?.sync();
     if (paint) post!.render(controls.target);

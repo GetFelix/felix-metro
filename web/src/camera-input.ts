@@ -8,7 +8,7 @@ const TURN_PER_HEIGHT = Math.PI * 2;
 const WHEEL_ZOOM = 0.0015;
 const PINCH_ZOOM = 0.01;
 const WHEEL_LIMIT = 240;
-/** Two fingers must slide their middle this far before it counts as moving the view and not as part of a pinch. */
+/** Two fingers must carry their middle this far from where it began before it counts as moving the view and not as part of a pinch. */
 const PINCH_PAN_PX = 24;
 
 type Mode = 'orbit' | 'pan' | 'pinch';
@@ -19,8 +19,8 @@ export function bindInput(rig: CameraRig, dom: HTMLElement): () => void {
   let mode: Mode | null = null;
   /** What the last move was measured from: one point, or the middle and spread of two fingers. */
   let from = { x: 0, y: 0, spread: 0 };
-  /** Pixels the middle of two fingers has travelled, so a pinch's wobble is not taken for moving the view. */
-  let slid = 0;
+  /** Where the middle of the fingers was when the gesture began, so a pinch's wobble is not taken for moving the view. */
+  let anchor = { x: 0, y: 0 };
 
   const ndc = (x: number, y: number) => {
     const r = dom.getBoundingClientRect();
@@ -44,7 +44,7 @@ export function bindInput(rig: CameraRig, dom: HTMLElement): () => void {
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     mode = touch ? touchMode() : e.button === 2 || e.shiftKey ? 'pan' : 'orbit';
     from = measure();
-    slid = 0;
+    anchor = { x: from.x, y: from.y };
     dom.setPointerCapture?.(e.pointerId);
     rig.dispatchEvent({ type: 'start' });
   };
@@ -61,8 +61,11 @@ export function bindInput(rig: CameraRig, dom: HTMLElement): () => void {
         const k = TURN_PER_HEIGHT / dom.clientHeight;
         rig.orbit(-(now.x - from.x) * k, -(now.y - from.y) * k);
       } else {
-        slid += Math.hypot(now.x - from.x, now.y - from.y);
-        rig.grab(ndc(from.x, from.y), ndc(now.x, now.y), mode === 'pan' || slid > PINCH_PAN_PX);
+        rig.grab(
+          ndc(from.x, from.y),
+          ndc(now.x, now.y),
+          mode === 'pan' || Math.hypot(now.x - anchor.x, now.y - anchor.y) > PINCH_PAN_PX,
+        );
         if (mode === 'pinch' && from.spread > 0 && now.spread > 0)
           rig.zoomAt(ndc(now.x, now.y), from.spread / now.spread);
       }
@@ -75,6 +78,7 @@ export function bindInput(rig: CameraRig, dom: HTMLElement): () => void {
     if (dom.hasPointerCapture?.(e.pointerId)) dom.releasePointerCapture(e.pointerId);
     mode = e.pointerType === 'mouse' ? null : touchMode();
     from = measure();
+    anchor = { x: from.x, y: from.y };
   };
 
   const wheel = (e: WheelEvent) => {

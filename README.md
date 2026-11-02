@@ -168,7 +168,7 @@ reduced motion.
 
 ## Following a resident
 
-Click a car or walker (tap on a touch screen) to follow them. The camera eases in and tracks them as they drive or
+Click a car or walker (tap on a touch screen) to follow them, or press `F` to follow the one nearest the middle of the view. The camera eases in and tracks them as they drive or
 walk, and a card under the city name shows who they are:
 
 - their name and kind: office worker, shift worker, shopkeeper, student, retiree or night worker;
@@ -176,7 +176,7 @@ walk, and a card under the city name shows who they are:
 - their day, a list of where they spend it and when they leave each place. The block they are in is highlighted.
 
 When they go indoors the camera stays on their building, and the card says what they are doing there. Turning and
-zooming keep the follow. `Esc`, the card's close button, or moving the view (right-drag, Shift-drag, two fingers,
+zooming keep the follow. `Esc` (when no menu is open), the card's close button, or moving the view (right-drag, Shift-drag, two fingers,
 `W` `A` `S` `D` or `0`) lets go. Following carries through seeks, scrubs and rewinds: drag the timeline back and the card
 and camera show where they were at that moment. The **Share this moment** link includes `follow=<resident number>`;
 open `/?follow=412#harbor` to start on resident 412 (residents are numbered from 0, and the harbor city has 522; a number

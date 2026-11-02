@@ -23,9 +23,10 @@ the ones already there.
 - **Get a hint on a first visit.** When the timeline first appears, a line above it says "Drag the timeline to go
   back in time". It goes away on your first click, key press or scroll, or after a few seconds, and it is not
   shown again in that browser.
-- **Follow a resident.** Click a car or walker (tap on a touch screen). The camera tracks them, and a card under
+- **Follow a resident.** Click a car or walker (tap on a touch screen), or press `F` for the one nearest the middle of
+  the view. The camera tracks them, and a card under
   the city name shows their name, what kind of resident they are, what they are doing now and their day. `Esc`, the
-  card's close button or moving the view lets go; turning and zooming do not.
+  card's close button or moving the view lets go (`Esc` first closes an open menu, the sheet or photo mode); turning and zooming do not.
   [Following a resident](../README.md#following-a-resident) says more.
 - **Share a moment.** The link button under the settings button copies a link that opens the city at the moment on
   screen, from the same camera view, and with the same resident followed if there is one.
@@ -148,9 +149,10 @@ flowchart LR
 ```
 
 The card's markup is built once, and its rows are redrawn only when what they are doing changes. It is placed before the city chip in the page
-so the city menu is never hidden behind it, and it is a `.chip`, so photo mode and `?ui=0` hide it. `Esc` is read in
-the capture phase, before photo mode and the sheet close themselves on the same key, so the press that leaves photo
-mode or closes the sheet does not also stop the follow (`isStopKey` is the rule, and it is unit tested).
+so the city menu is never hidden behind it, and it is a `.chip`, so photo mode and `?ui=0` hide it. A region that is always in the page says who is followed, since text in a card that
+starts hidden is not read out, and when the card goes while it holds focus, focus moves to a control. `Esc` is read in
+the capture phase, before photo mode, the sheet and the city menu close themselves on the same key, so the press that leaves photo
+mode or closes either does not also stop the follow (`isStopKey` is the rule, and it is unit tested).
 
 The camera tells `steer` when the person moves the point it looks at (a drag of the ground, a pan key, reset); that
 is what lets go. Turning and zooming do not, so a resident can be looked at from any side. A pinch is not a move: two

@@ -405,6 +405,21 @@ for (const [size, tag] of [
   check(await visible(page, card), 'the card shows');
   await page.locator(`${card} [data-stop]`).click();
   check(!(await visible(page, card)), 'the card’s button stops following');
+  // From the keyboard, the card's button stops it and focus goes to a control, not the page; a region always in the page says who.
+  await page.evaluate(() => window.__following.start(5));
+  await settle(page, 300);
+  check(
+    /^Following .+\.$/.test(await page.locator('body > [role=status].sr-only').first().textContent()),
+    'a live region says who is followed',
+  );
+  await page.focus(`${card} [data-stop]`);
+  await page.keyboard.press('Enter');
+  check(!(await visible(page, card)), 'Enter on the card’s button stops following');
+  check((await active(page)) === 'settings-button', 'focus goes to a control when the card goes');
+  check(
+    (await page.locator('body > [role=status].sr-only').first().textContent()) === '',
+    'the live region is cleared',
+  );
   for (const [what, act] of [
     [
       'a right drag',

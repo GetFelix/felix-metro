@@ -45,6 +45,7 @@ describe('the key list', () => {
       'Esc',
       'Click',
       'Tap',
+      'F',
       '?',
       'Tab',
     ])

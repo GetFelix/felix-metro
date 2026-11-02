@@ -1,5 +1,6 @@
 // The card for the resident being followed: who they are, what they are doing now and their day. Plain DOM, built once.
 import type { CardView } from '../follow';
+import { isTypingTarget } from './keys';
 
 const CLOSE = `<svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8"
   stroke-linecap="round" aria-hidden="true"><path d="M5 5l10 10M15 5L5 15"/></svg>`;
@@ -12,15 +13,26 @@ export interface FollowCard {
 }
 
 /**
- * Whether a key press stops a follow: a plain Esc. Photo mode and an open sheet use Esc to close themselves first,
- * so it is left to them.
+ * Whether a key press stops a follow: a plain Esc. Photo mode, an open sheet and the city menu use Esc to close
+ * themselves first, so it is left to them.
  */
 export function isStopKey(
   e: { key: string; ctrlKey: boolean; metaKey: boolean; altKey: boolean },
   photoOn: boolean,
   sheetOpen: boolean,
+  menuOpen: boolean,
 ): boolean {
-  return e.key === 'Escape' && !e.ctrlKey && !e.metaKey && !e.altKey && !photoOn && !sheetOpen;
+  return e.key === 'Escape' && !e.ctrlKey && !e.metaKey && !e.altKey && !photoOn && !sheetOpen && !menuOpen;
+}
+
+/** Whether a key press asks to follow whoever is nearest the middle of the view: a plain F, not into a field. */
+export function isFollowKey(
+  e: { key: string; repeat: boolean; ctrlKey: boolean; metaKey: boolean; altKey: boolean },
+  target: Parameters<typeof isTypingTarget>[0],
+  sheetOpen: boolean,
+): boolean {
+  if (e.key.toLowerCase() !== 'f' || e.repeat || e.ctrlKey || e.metaKey || e.altKey || sheetOpen) return false;
+  return !isTypingTarget(target);
 }
 
 /** Put the card in the page, above the city chip's menu so that menu is never covered. `onStop` runs on its button. */
@@ -35,15 +47,25 @@ export function createFollowCard(onStop: () => void): FollowCard {
       <div><b data-name></b><small data-kind></small></div>
       <button type="button" class="icon-button" data-stop title="${STOP_LABEL}" aria-label="${STOP_LABEL}">${CLOSE}</button>
     </header>
-    <p class="doing" data-doing role="status"></p>
+    <p class="doing" data-doing></p>
     <h3>Their day</h3>
     <ol data-day></ol>`;
+  // A region that is always in the page, filled when the card shows: one inside a card that starts hidden is not read out.
+  const announce = document.createElement('div');
+  announce.className = 'sr-only';
+  announce.setAttribute('role', 'status');
+  document.body.append(announce);
   const at = (name: string) => root.querySelector<HTMLElement>(`[data-${name}]`)!;
   (document.getElementById('brand') ?? document.body.firstChild)!.before(root);
   at('stop').addEventListener('click', onStop);
   return {
     show(view) {
+      // Taking away a card that holds focus would drop it to the page; the city button is the nearest place to put it.
+      if (!view && root.contains(document.activeElement)) {
+        document.querySelector<HTMLElement>('#brand-button:not(:disabled), #settings-button')?.focus();
+      }
       root.hidden = view === null;
+      announce.textContent = view ? `Following ${view.name}. ${view.doing}.` : '';
       if (!view) return;
       root.dataset.resident = String(view.resident);
       at('name').textContent = view.name;

@@ -175,12 +175,14 @@ export class Traffic {
 
   /**
    * Where `voyage` stands at `tick`, whether or not it holds a place: the cap and the camera do not decide it. `null`
-   * when the trip has not left or has arrived.
+   * when the trip has not left or has arrived. With `into` it fills and returns that, so a caller asking every frame
+   * allocates nothing.
    */
-  positionOf(voyage: Voyage, tick: number): Placed | null {
+  positionOf(voyage: Voyage, tick: number, into?: Placed): Placed | null {
     if (tick < voyage.depart || tick >= voyage.journey.arrive()) return null;
     const slot = this.slots.get(voyage.resident);
-    const placed: Placed = { x: 0, y: 0, z: 0, heading: 0, size: 1, road: slot?.voyage === voyage ? slot.road : 0 };
+    const placed = into ?? { x: 0, y: 0, z: 0, heading: 0, size: 1, road: 0 };
+    if (slot?.voyage === voyage) placed.road = slot.road;
     this.place(voyage, tick, placed);
     return placed;
   }

@@ -3,6 +3,7 @@
 // so a follow holds across district crossings, seeks and rewinds: every frame it asks the state on screen again.
 import type { Voyage } from './city';
 import type { CameraRig } from './camera';
+import type { Placed } from './traffic';
 import { TICKS_PER_DAY, TICKS_PER_HOUR } from './clock';
 
 export type Activity = 'home' | 'work' | 'school' | 'shop' | 'leisure';
@@ -79,7 +80,15 @@ export function dayTime(tickOfDay: number): string {
  */
 export function blockAt(profile: Profile, tick: number): number {
   const time = tick % TICKS_PER_DAY;
-  return profile.blocks.filter((b) => b.leave <= time).length % profile.blocks.length;
+  let ended = 0;
+  for (const b of profile.blocks) if (b.leave <= time) ended++;
+  return ended % profile.blocks.length;
+}
+
+/** Whether a resident in `block` at `tick` is asleep: at home between 22:00 and 06:00. */
+export function isAsleep(profile: Profile, block: number, tick: number): boolean {
+  const time = tick % TICKS_PER_DAY;
+  return profile.blocks[block]!.activity === 'home' && (time >= BEDTIME || time < WAKING);
 }
 
 /** The trip a resident is on at the tick: whether it is by car, and the lot it ends at. */
@@ -109,9 +118,7 @@ export function doing(profile: Profile, tick: number, trip: Trip | null): Doing 
   }
   const block = blockAt(profile, tick);
   const b = profile.blocks[block]!;
-  const time = tick % TICKS_PER_DAY;
-  const asleep = b.activity === 'home' && (time >= BEDTIME || time < WAKING);
-  return { text: asleep ? 'Asleep at home' : ACTIVITIES[b.activity].here, block, lot: b.lot };
+  return { text: isAsleep(profile, block, tick) ? 'Asleep at home' : ACTIVITIES[b.activity].here, block, lot: b.lot };
 }
 
 export interface Row {
@@ -155,7 +162,7 @@ export interface Deps {
   half: number;
   rig: Pick<CameraRig, 'moveTo' | 'track' | 'view'>;
   /** Where a trip stands at a tick, whether or not it is drawn. */
-  positionOf(voyage: Voyage, tick: number): { x: number; z: number } | null;
+  positionOf(voyage: Voyage, tick: number, into: Placed): Placed | null;
   /** Keep a resident drawn however many movers the tier allows, or null for none. */
   pin(resident: number | null): void;
   /** Draw the card, or take it away on null. */
@@ -167,8 +174,11 @@ export class Following {
   /** The camera has not been brought to them yet. */
   private arriving = false;
   private keepView = false;
-  private shown = '';
+  /** What the card shows now: the trip (its end lot and whether by car) or the block and whether asleep. */
+  private shown = 0;
+  private now: Doing | null = null;
   private readonly ends = new Uint32Array(2);
+  private readonly spot: Placed = { x: 0, y: 0, z: 0, heading: 0, size: 1, road: 0 };
 
   constructor(private readonly deps: Deps) {}
 
@@ -187,7 +197,8 @@ export class Following {
     this.profile = profile;
     this.arriving = true;
     this.keepView = keepView;
-    this.shown = '';
+    this.shown = 0;
+    this.now = null;
     this.deps.pin(resident);
     return true;
   }
@@ -207,28 +218,34 @@ export class Following {
     const profile = this.profile;
     if (!profile) return;
     const voyage = voyageAt(profile.id, tick);
-    let trip: Trip | null = null;
+    let key: number;
+    let block = 0;
     if (voyage) {
       voyage.journey.lots(this.ends);
-      trip = { car: voyage.vehicle !== 0, to: this.ends[1]! };
+      key = ((this.ends[1]! << 1) | (voyage.vehicle !== 0 ? 1 : 0)) + 1;
+    } else {
+      block = blockAt(profile, tick);
+      key = -(block * 2 + (isAsleep(profile, block, tick) ? 1 : 0)) - 1;
     }
-    const now = doing(profile, tick, trip);
+    // What they are doing changes a few times a day, so the phrase and the card are made only then.
+    if (key !== this.shown || !this.now) {
+      this.shown = key;
+      const trip = voyage ? { car: voyage.vehicle !== 0, to: this.ends[1]! } : null;
+      this.now = doing(profile, tick, trip);
+      this.deps.show({
+        resident: profile.id,
+        name: profile.name,
+        kind: archetypeLabel(profile.archetype),
+        doing: this.now.text,
+        rows: schedule(profile, (l) => this.deps.lots[l]?.name ?? null),
+        current: this.now.block,
+      });
+    }
     // Their place on the road is asked of the traffic at this tick, which does not depend on what is drawn.
-    const spot = voyage ? this.deps.positionOf(voyage, tick) : null;
-    const lot = this.deps.lots[now.lot];
-    const at = spot ?? (lot ? { x: lot.x - this.deps.half, z: lot.z - this.deps.half } : null);
-    if (at) this.look(at.x, at.z);
-    const key = `${now.text}|${now.block}`;
-    if (key === this.shown) return;
-    this.shown = key;
-    this.deps.show({
-      resident: profile.id,
-      name: profile.name,
-      kind: archetypeLabel(profile.archetype),
-      doing: now.text,
-      rows: schedule(profile, (l) => this.deps.lots[l]?.name ?? null),
-      current: now.block,
-    });
+    const spot = voyage ? this.deps.positionOf(voyage, tick, this.spot) : null;
+    if (spot) return this.look(spot.x, spot.z);
+    const lot = this.deps.lots[this.now.lot];
+    if (lot) this.look(lot.x - this.deps.half, lot.z - this.deps.half);
   }
 
   private look(x: number, z: number): void {

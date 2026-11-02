@@ -158,6 +158,16 @@ describe('Traffic', () => {
     expect(traffic.positionOf(a, 6.25)).toMatchObject({ x: drawn!.x, z: drawn!.z, heading: drawn!.heading });
   });
 
+  it('fills the object it is given and hands it back, so asking every frame allocates nothing', () => {
+    const { f } = fleet();
+    const traffic = new Traffic(f, 0);
+    const a = voyage(1, 2, 0, 10);
+    const into = { x: -1, y: -1, z: -1, heading: -1, size: -1, road: 0 };
+    expect(traffic.positionOf(a, 4.5, into)).toBe(into);
+    expect(into).toMatchObject({ x: expect.closeTo(4.5), z: expect.closeTo(-LANE), size: 1 });
+    expect(traffic.positionOf(a, 12, into)).toBeNull();
+  });
+
   it('always draws the pinned resident, whatever the cap', () => {
     const { f, placed } = fleet();
     const traffic = new Traffic(f, 0);

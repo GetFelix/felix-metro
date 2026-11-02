@@ -124,16 +124,20 @@ function setup() {
   };
   const pins: (number | null)[] = [];
   const road = { x: 3.5, z: -2.5 };
+  const intos = new Set<object>();
   const deps: Deps = {
     profile: (resident) => (resident === day.id ? JSON.stringify(day) : undefined),
     lots: Array.from({ length: 40 }, (_, i) => ({ x: i + 10, z: i + 2, name: i === 20 ? 'Quay Works' : null })),
     half: 10,
     rig,
-    positionOf: (v) => (v.resident === day.id ? road : null),
+    positionOf: (v, _tick, into) => {
+      intos.add(into);
+      return v.resident === day.id ? Object.assign(into, road) : null;
+    },
     pin: (resident) => void pins.push(resident),
     show: (view) => void shown.push(view),
   };
-  return { following: new Following(deps), rig, shown, pins, road };
+  return { following: new Following(deps), rig, shown, pins, road, intos };
 }
 
 describe('Following', () => {
@@ -154,6 +158,22 @@ describe('Following', () => {
     following.frame(at(8, 11), () => voyage(12, at(8), 20));
     expect(rig.moveTo).toHaveBeenCalledTimes(1);
     expect(rig.track).toHaveBeenCalledWith(road.x, road.z);
+  });
+
+  it('asks the traffic into one object, frame after frame, and works the phrase out only when it changes', () => {
+    const { following, intos, shown } = setup();
+    following.start(12);
+    const trip = voyage(12, at(8), 20);
+    for (let i = 0; i < 8; i++) following.frame(at(8) + i, () => trip);
+    expect(intos.size).toBe(1);
+    expect(shown).toHaveLength(1);
+    // Indoors the key is the block, so a tick later in the same block shows nothing new.
+    following.frame(at(10), () => undefined);
+    following.frame(at(10, 30), () => undefined);
+    expect(shown).toHaveLength(2);
+    // A different trip to the same lot, by foot, is a new phrase.
+    following.frame(at(12, 1), () => ({ ...voyage(12, at(12), 20), vehicle: 0 }));
+    expect(shown.at(-1)?.doing).toBe('Walking to work');
   });
 
   it('keeps a view a link carried', () => {

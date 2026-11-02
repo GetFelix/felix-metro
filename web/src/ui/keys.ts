@@ -49,6 +49,7 @@ export const SHORTCUTS: readonly ShortcutGroup[] = [
         keys: [['Click'], ['Tap']],
         action: 'Follow a car or walker: the camera tracks them and a card shows their day',
       },
+      { keys: [['F']], action: 'Follow the car or walker nearest the middle of the view' },
       { keys: [['Esc']], action: 'Stop following' },
     ],
   },

@@ -357,6 +357,17 @@ describe('picking', () => {
     expect(crowd.pick(camera, 0.9, 0.9, SIZE, 16)).toBeNull();
   });
 
+  it('finds whoever is nearest the middle of the view when given room to look', () => {
+    const { crowd } = make();
+    const camera = lookDown();
+    crowd.fleet.begin(0);
+    crowd.fleet.person(1, 6, 0, 0, 0, 1);
+    crowd.fleet.person(2, -2, 0, 1, 0, 1);
+    crowd.fleet.end();
+    expect(crowd.pick(camera, 0, 0, SIZE, 16)).toBeNull();
+    expect(crowd.pick(camera, 0, 0, SIZE, 160)?.resident).toBe(2);
+  });
+
   it('leaves out what is not drawn: a car that is nobody’s, a vanished one and one the camera cannot see', () => {
     const { crowd } = make();
     const camera = lookDown();
