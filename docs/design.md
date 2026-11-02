@@ -416,11 +416,11 @@ it states up front, so a player knows what to fix before looking for it.
 | Faction          | Asks for                                                                           | Measured from                                                                                          |
 | ---------------- | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
 | Commuters        | A trip to work or school that takes 12 city minutes (48 ticks) or less, on average | Ticks from `trip` to arrival, for every trip to work or school that day                                |
-| Harbor residents | 80% of homes with no factory within 3 tiles                                        | The buildings, for residents of the districts along the shore (all districts if the city has no shore) |
-| Shops            | 5 visits a day for each shop                                                       | Arrivals to shop, divided by the shops standing                                                        |
+| Harbor residents | 80% of residents with no factory within 3 tiles of home                            | The buildings, for residents of the districts along the shore (all districts if the city has no shore) |
+| Shops            | 5 visits a day for each shop                                                       | Arrivals to shop, divided by the shops residents go to that are still shops                            |
 
 These numbers are placeholders until the city has been played. On the harbor city with no changes, commuters average
-about 15 minutes, 71% of the shore's homes are quiet and a shop gets 4 visits.
+about 15 minutes, 71% of the shore's residents live away from factories and a shop gets 5 visits.
 
 - **Satisfaction.** 0 to 100. A faction scores 100 when the day gave it what it asked for, and less in proportion to
   how far short it fell: a 24 minute commute against a 12 minute demand scores 50. Below 60 the faction is unhappy for
@@ -433,10 +433,13 @@ about 15 minutes, 71% of the shore's homes are quiet and a shop gets 4 visits.
   scored; until it is 1 the standings are only the demands. A city day ends on a keyframe tick, so the event written
   then carries the new score. The page reads the newest one, so scrubbing shows the council as it stood.
 - **Restart.** The restart takes the council from its newest keyframe tick, including the running totals of the day in
-  progress, then steps on. A log written before the council existed starts it fresh.
+  progress, then steps on. A log written before the council existed starts it fresh, so its first score covers only the part of the day after
+  the restart.
 
-The page lists the factions below the funds: a bar for each satisfaction, what the faction wants and how the last day
-went. When a faction has been unhappy it adds a warning naming the faction closest to a recall and the days left.
+The page folds the council to one line below the funds: the lowest score, or the recall warning when a faction has been
+unhappy, naming the faction closest to a recall and the days left. Opening it lists a bar for each satisfaction, what the
+faction wants and how the last day went. It starts open on a tall screen and folded on a short one, and stays as the
+player leaves it. Before the first day is scored it says so instead of drawing empty bars.
 
 Cost to the log: one `council` event of about 30 bytes per keyframe tick, which is a city hour. `report_load` on the
 harbor city moves the day mean from 656.7 to 657.1 B/s.

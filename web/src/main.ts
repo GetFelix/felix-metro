@@ -1191,7 +1191,8 @@ async function main() {
         if (state.council !== councilShown) {
           councilShown = state.council;
           councilChip.classList.toggle('hidden', councilShown === null);
-          if (councilShown) renderCouncil(councilChip, councilView(councilShown, city?.shore ?? null));
+          if (councilShown)
+            renderCouncil(councilChip, councilView(councilShown, city?.shore ?? null), window.innerHeight >= 720);
         }
         timelineFrame?.(tick);
         Object.assign(liveInfo, {

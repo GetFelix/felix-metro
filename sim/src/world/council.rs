@@ -1,12 +1,12 @@
 //! The council: three factions, scored once a city day from what the city did.
 //!
 //! Commuters judge the average trip to work or school, the shore's residents
-//! judge how many homes sit away from factories, and the shops judge how many
-//! visits each gets. A faction below [`UNHAPPY_BELOW`] for [`PATIENCE`] days in
+//! judge how many of them live away from factories, and the shops judge how
+//! many visits each gets. A faction below [`UNHAPPY_BELOW`] for [`PATIENCE`] days in
 //! a row recalls the mayor, and the city carries on. The demands are
 //! placeholders until the city has been played.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use felix_metro_core::record::{
     Event, FACTION_BUSINESS, FACTION_COMMUTERS, FACTION_RESIDENTS, FACTIONS, Standing, Tally,
@@ -21,11 +21,12 @@ mod tests;
 /// Commuters ask for an average trip to work or school of at most this many
 /// ticks (12 city minutes).
 const COMMUTE_DEMAND: u32 = 48;
-/// Residents ask for this percent of homes to be away from factories.
+/// Residents ask for this percent of themselves to live away from factories.
 const QUIET_DEMAND: u32 = 80;
 /// Shops ask for this many visits a day each.
 const VISITS_DEMAND: u32 = 5;
-/// A factory this many tiles from a home, in a square around it, makes it noisy.
+/// A factory this many tiles from a home along either axis, so inside a square
+/// around the home's tile, makes it noisy.
 const NOISE_RADIUS: u16 = 3;
 /// Below this satisfaction a faction is unhappy for the day.
 const UNHAPPY_BELOW: u8 = 60;
@@ -94,7 +95,8 @@ impl Council {
     }
 
     /// Scores the day that just ended from the tally and `quiet`, the percent
-    /// of the shore's homes away from factories, and starts the next day's.
+    /// of the shore's residents with no factory near home, and starts the next
+    /// day's.
     fn score(&mut self, quiet: u32, shops: u32) {
         let tally = std::mem::take(&mut self.tally);
         // `None` when there is nothing to judge: nobody commuted, or there are no shops.
@@ -160,16 +162,27 @@ impl World {
     /// Scores the city day that just ended and starts the next one's tally.
     pub(super) fn score_day(&mut self) {
         let quiet = self.quiet_percent();
-        let shops = self
-            .city
-            .lots
+        let shops = self.shops_standing();
+        self.council.score(quiet, shops);
+    }
+
+    /// How many shops residents go to that are still shops: a lot nobody
+    /// has a shop block at gets no visits, so it can't make business unhappy.
+    fn shops_standing(&self) -> u32 {
+        let visited: HashSet<u32> = self
+            .people
             .iter()
-            .filter(|lot| {
-                self.building(lot.id)
+            .flat_map(|p| &p.resident.schedule.blocks)
+            .filter(|b| b.activity == Activity::Shop)
+            .map(|b| b.lot)
+            .collect();
+        visited
+            .into_iter()
+            .filter(|&lot| {
+                self.building(lot)
                     .is_some_and(|(kind, _)| kind < u16::from(BuildingKind::SKYSCRAPER_FIRST))
             })
-            .count() as u32;
-        self.council.score(quiet, shops);
+            .count() as u32
     }
 
     /// The percent of scored residents whose home has no factory within

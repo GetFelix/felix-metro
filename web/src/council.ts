@@ -63,7 +63,7 @@ export function councilView(event: CouncilEvent, shore: number | null): CouncilV
     row(
       residents,
       shore === null ? 'Residents' : 'Harbor residents',
-      `${residents.demand}% of homes away from factories`,
+      `${residents.demand}% of residents with no factory near home`,
       `${residents.measure}%`,
     ),
     row(shops, 'Shops', `${shops.demand} visits a day each`, `${shops.measure}`),
@@ -93,8 +93,25 @@ export function recallText(recall: NonNullable<CouncilView['recall']>): string {
   return `${recall.faction} will recall the mayor in ${days}`;
 }
 
-/** Draws the council into `root`, replacing what it held. */
-export function renderCouncil(root: HTMLElement, view: CouncilView): void {
+/** The one line the council shows while folded away. */
+export function councilSummary(view: CouncilView): string {
+  if (view.recall) return recallText(view.recall);
+  const scores = view.factions.flatMap((f) =>
+    f.satisfaction === null ? [] : [{ name: f.name, score: f.satisfaction }],
+  );
+  if (scores.length === 0) return 'Not scored yet';
+  const worst = scores.reduce((a, b) => (b.score < a.score ? b : a));
+  return `Lowest: ${worst.name} ${worst.score}`;
+}
+
+/**
+ * Draws the council into `root`, replacing what it held. It is a folded line the player can open, so it does not
+ * push the controls below it off a short screen. A redraw keeps it as the player left it; the first draw opens it
+ * only if `openFirst`.
+ */
+export function renderCouncil(root: HTMLElement, view: CouncilView, openFirst: boolean): void {
+  const previous = root.firstElementChild as HTMLDetailsElement | null;
+  const open = previous ? previous.open : openFirst;
   const rows = view.factions.map((f) => {
     const li = document.createElement('li');
     li.classList.toggle('unhappy', f.unhappy);
@@ -103,7 +120,7 @@ export function renderCouncil(root: HTMLElement, view: CouncilView): void {
     const name = document.createElement('b');
     name.textContent = f.name;
     const score = document.createElement('span');
-    score.textContent = f.satisfaction === null ? '' : `${f.satisfaction}`;
+    score.textContent = f.satisfaction === null ? 'not scored yet' : `${f.satisfaction}`;
     head.append(name, score);
     const bar = document.createElement('div');
     bar.className = 'bar';
@@ -117,14 +134,15 @@ export function renderCouncil(root: HTMLElement, view: CouncilView): void {
   });
   const list = document.createElement('ul');
   list.append(...rows);
-  const title = document.createElement('h3');
+  const summary = document.createElement('summary');
+  const title = document.createElement('b');
   title.textContent = 'Council';
-  const parts: HTMLElement[] = [title, list];
-  if (view.recall) {
-    const warn = document.createElement('p');
-    warn.className = 'recall';
-    warn.textContent = recallText(view.recall);
-    parts.push(warn);
-  }
-  root.replaceChildren(...parts);
+  const line = document.createElement('span');
+  line.textContent = councilSummary(view);
+  line.classList.toggle('recall', view.recall !== null);
+  summary.append(title, line);
+  const details = document.createElement('details');
+  details.open = open;
+  details.append(summary, list);
+  root.replaceChildren(details);
 }

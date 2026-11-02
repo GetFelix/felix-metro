@@ -428,7 +428,8 @@ impl History {
     }
 
     /// The council as the keyframe tick `base` left it. A log from before the
-    /// council has none, and the factions start fresh.
+    /// council has none, and the factions start fresh; their first score then
+    /// covers only the rest of that day.
     fn council(&self, base: u32) -> Council {
         self.ticks[&base]
             .first()

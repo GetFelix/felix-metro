@@ -1,6 +1,8 @@
 use felix_metro_core::record::{BuildingDiff, Event};
 use felix_metro_core::{BuildingKind, TICKS_PER_DAY, TICKS_PER_HOUR};
 
+use std::collections::HashSet;
+
 use super::*;
 
 fn harbor() -> World {
@@ -145,4 +147,42 @@ fn only_district_zero_writes_the_council_and_only_on_keyframe_ticks() {
             );
         }
     }
+}
+
+#[test]
+fn only_shops_residents_go_to_count_as_shops() {
+    let mut world = harbor();
+    let visited: HashSet<u32> = world
+        .people
+        .iter()
+        .flat_map(|p| &p.resident.schedule.blocks)
+        .filter(|b| b.activity == Activity::Shop)
+        .map(|b| b.lot)
+        .collect();
+    let standing = world.shops_standing();
+    assert_eq!(standing as usize, visited.len());
+
+    // A shop nobody has a shop block at gets no visits, so it must not count.
+    let elsewhere = world
+        .city
+        .lots
+        .iter()
+        .find(|l| l.door().is_some() && !visited.contains(&l.id))
+        .unwrap()
+        .id;
+    world.set_building(BuildingDiff {
+        lot: elsewhere,
+        kind: u16::from(BuildingKind::COMMERCIAL_FIRST),
+        rotation: 0,
+    });
+    assert_eq!(world.shops_standing(), standing);
+
+    // One residents do go to stops counting when it is cleared.
+    let gone = *visited.iter().min().unwrap();
+    world.set_building(BuildingDiff {
+        lot: gone,
+        kind: u16::from(BuildingKind::TREE_FIRST),
+        rotation: 0,
+    });
+    assert_eq!(world.shops_standing(), standing - 1);
 }

@@ -302,7 +302,7 @@ pub enum Event {
 
 /// One faction's standing after the last scored day. The units of `demand`
 /// and `measure` are the faction's own: commuters in ticks of average commute,
-/// residents in percent of homes away from factories, business in shop visits
+/// residents in percent of them living away from factories, business in shop visits
 /// a day per shop.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Standing {
@@ -312,7 +312,7 @@ pub struct Standing {
     pub measure: u32,
     /// 0 to 100, from `measure` against `demand`.
     pub satisfaction: u8,
-    /// Scored days in a row below the council's patience.
+    /// Scored days in a row with `satisfaction` below the unhappy threshold.
     pub unhappy_days: u8,
 }
 

@@ -6,11 +6,21 @@
     500 12px/1.4 Inter,
     sans-serif;
 }
-.council h3 {
-  margin: 0 0 6px;
+.council summary {
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  cursor: pointer;
+}
+.council summary b {
   color: var(--muted);
-  font-size: 12px;
   font-weight: 500;
+}
+.council summary span.recall {
+  color: var(--coral);
+}
+.council details[open] summary {
+  margin-bottom: 8px;
 }
 .council ul {
   margin: 0;
@@ -45,8 +55,4 @@
 .council small {
   color: var(--muted);
   font-size: 11px;
-}
-.council .recall {
-  margin: 10px 0 0;
-  color: var(--coral);
 }
