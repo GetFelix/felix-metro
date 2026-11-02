@@ -39,7 +39,7 @@ function setup(over: { hidden?: boolean } = {}) {
     goUp: (tick) => went.push(tick),
     hidden: () => state.hidden,
   });
-  const fire = (type: string, p: Record<string, unknown>) => {
+  const fire = (type: string, { timeStamp = performance.now(), ...p }: Record<string, unknown>) => {
     const e = Object.assign(new Event(type, { cancelable: true }), {
       pointerType: 'mouse',
       pointerId: 1,
@@ -48,6 +48,7 @@ function setup(over: { hidden?: boolean } = {}) {
       buttons: 0,
       ...p,
     });
+    Object.defineProperty(e, 'timeStamp', { value: timeStamp });
     canvas.dispatchEvent(e);
     return e;
   };
@@ -156,6 +157,15 @@ describe('tapping', () => {
     fire('pointerdown', { ...touch, clientX: 1, clientY: 1 });
     fire('pointerup', { ...touch, clientX: 1, clientY: 1 });
     expect(card.visible).toBe(false);
+  });
+
+  it('counts the time between the touches, not between handling them', () => {
+    const { fire, card } = setup();
+    const at = performance.now();
+    fire('pointerdown', { ...touch, clientX: 10, clientY: 10, timeStamp: at });
+    vi.advanceTimersByTime(900);
+    fire('pointerup', { ...touch, clientX: 10, clientY: 10, timeStamp: at + 40 });
+    expect(card.visible).toBe(true);
   });
 
   it('does not open on a drag', () => {

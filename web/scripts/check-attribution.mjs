@@ -220,11 +220,20 @@ await touch.waitForFunction((l) => window.__lots.built().some((b) => b.lot === l
   timeout: 60_000,
 });
 await touch.waitForTimeout(3000);
+await touch.evaluate(() => {
+  window.__touches = [];
+  for (const type of ['pointerdown', 'pointerup', 'pointercancel']) {
+    document.addEventListener(
+      type,
+      (e) => window.__touches.push(`${type} made ${Math.round(e.timeStamp)} handled ${Math.round(performance.now())}`),
+      true,
+    );
+  }
+});
 async function tap(lot) {
   const at = await touch.evaluate((l) => window.__lots.aim(l), lot);
   if ((await touch.evaluate(([x, y]) => window.__lots.pick(x, y), [at.x, at.y])) !== lot)
     await fail(`lot ${lot} is not under the tap`);
-  // A tap that took over 500 ms between touch start and end is a drag to the page, and a busy runner stretches that.
   // A tap that did land shows its card before the next attempt, so a second tap never closes the first one's card.
   for (let attempt = 1; attempt <= 4; attempt++) {
     await touch.touchscreen.tap(at.x, at.y);
@@ -233,7 +242,9 @@ async function tap(lot) {
       .then(() => touch.evaluate(() => window.__lots.card()))
       .catch(() => null);
     if (shown !== null) return shown;
-    console.log(`tap ${attempt} on lot ${lot} showed no card`);
+    console.log(
+      `tap ${attempt} on lot ${lot} showed no card: ${(await touch.evaluate(() => window.__touches.splice(0))).join('; ')}`,
+    );
   }
   return null;
 }

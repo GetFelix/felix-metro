@@ -3,3 +3,4 @@
   up" takes the city to 30 city seconds before the building was built through the timeline's own seek, and plays it
   forward. The page asks the gateway for the `principal` feature to know which buildings are yours; a gateway without
   it (before 0.8.0) shows names only. The card is left out with `?ui=0`.
+- A tap is timed from when the browser made the touch events, so a busy page that handles them late still opens the card.

@@ -48,6 +48,8 @@ interface PointerLike {
   clientX: number;
   clientY: number;
   buttons: number;
+  /** When the browser made the event, which a busy page handles late. */
+  timeStamp: number;
 }
 
 export function createLotHover(o: LotHoverOptions): LotHover {
@@ -139,7 +141,7 @@ export function createLotHover(o: LotHoverOptions): LotHover {
     const p = e as unknown as PointerLike;
     if (p.pointerType === 'touch') {
       for (const t of touches.values()) t.moved = true;
-      touches.set(p.pointerId, { x: p.clientX, y: p.clientY, at: performance.now(), moved: touches.size > 0 });
+      touches.set(p.pointerId, { x: p.clientX, y: p.clientY, at: p.timeStamp, moved: touches.size > 0 });
       return;
     }
     hideNow();
@@ -149,7 +151,7 @@ export function createLotHover(o: LotHoverOptions): LotHover {
     if (p.pointerType !== 'touch') return;
     const t = touches.get(p.pointerId);
     touches.delete(p.pointerId);
-    if (!t || t.moved || performance.now() - t.at > TAP_MS || touches.size > 0) return;
+    if (!t || t.moved || p.timeStamp - t.at > TAP_MS || touches.size > 0) return;
     // A tap on a building opens the card, and a tap anywhere else closes it.
     if (o.hidden()) return hideNow();
     const found = o.pick(p.clientX, p.clientY);
