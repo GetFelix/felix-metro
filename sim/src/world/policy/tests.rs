@@ -259,3 +259,33 @@ fn a_keyframe_tick_writes_the_policies_only_once_one_has_changed() {
     let ticks: Vec<_> = (0..TICKS_PER_HOUR).map(|_| world.step()).collect();
     assert!(has_policy(ticks.last().unwrap()));
 }
+
+#[test]
+fn a_chapter_city_opens_with_its_limits_and_other_cities_with_none() {
+    let pier = World::new(City::generate("pier", 2).unwrap());
+    assert_eq!(pier.policy.limits(), (40, 60));
+    assert_eq!(harbor().policy.limits(), (100, 100));
+}
+
+#[test]
+fn a_chapter_city_can_change_its_opening_limits_at_once_and_not_set_them_again() {
+    let mut pier = World::new(City::generate("pier", 2).unwrap());
+    assert_eq!(set(&mut pier, POLICY_AVENUE_LIMIT, 40), REFUSED_UNCHANGED);
+    assert_eq!(set(&mut pier, POLICY_AVENUE_LIMIT, 100), RESULT_APPLIED);
+    assert_eq!(pier.policy.limits(), (100, 60));
+}
+
+#[test]
+fn a_chapter_city_writes_its_policies_once_they_differ_from_how_it_opened() {
+    let has_policy = |tick: &[DistrictTick]| {
+        tick[0]
+            .events
+            .iter()
+            .any(|e| Policy::from_event(e).is_some())
+    };
+    let mut pier = World::new(City::generate("pier", 2).unwrap());
+    assert!(!has_policy(&pier.step()));
+    assert_eq!(set(&mut pier, POLICY_AVENUE_LIMIT, 100), RESULT_APPLIED);
+    let ticks: Vec<_> = (0..TICKS_PER_HOUR).map(|_| pier.step()).collect();
+    assert!(has_policy(ticks.last().unwrap()));
+}

@@ -5,6 +5,7 @@
 import type { CityState, TickRecord } from './city';
 import { GatewayError, pastEnd, type Gateway, type Page } from './gateway';
 import { keyframePointer, parse } from './live';
+import { markersKey } from './markers';
 import { TICKS_PER_HOUR } from './clock';
 import { WINDOW } from './construction';
 
@@ -25,6 +26,8 @@ const RECORDS_PER_DISTRICT = 3 * TICKS_PER_HOUR;
 const KEYFRAMES_PER_DISTRICT = 4 * 24;
 /** A search that has not found its record in this many reads is not converging; the log is not what was assumed. */
 const MAX_PROBES = 48;
+/** Gateway error codes that no retry changes: a gateway without the `shards` feature, or one that refuses the read. */
+const PERMANENT = /^(state_shard|unsupported|forbidden|unauthorized|not_allowed|unknown_stream)/;
 /** Reads of one range sent at once, once the size of a page is known. */
 const PARALLEL_PAGES = 16;
 /** Sessions are closed after this long without a seek, so an idle page holds none of the gateway's per-person slots. */
@@ -184,6 +187,24 @@ export class Seeker {
     this.shut = true;
     this.current?.abort(new DOMException('the seeker was closed', 'AbortError'));
     this.release();
+  }
+
+  /**
+   * The stored timeline markers of city day `day` (counted from 0), or null when the sim wrote none. They sit in the
+   * state of district 0's shard, beside the keyframe pointer. A failed read throws, so it is not taken for a day with
+   * no markers, except an error no retry can change, which is.
+   */
+  async markerBytes(day: number, options: SeekOptions = {}): Promise<Uint8Array | null> {
+    const signal = options.signal ?? new AbortController().signal;
+    return this.using(async () => {
+      try {
+        return (await this.cancellable(signal).stateGet(STREAM, markersKey(day), 0)).payload;
+      } catch (err) {
+        // A gateway that cannot answer this read at all will not start to: no markers, not a retry every few seconds.
+        if (err instanceof GatewayError && PERMANENT.test(err.code)) return null;
+        throw err;
+      }
+    });
   }
 
   /** The oldest tick every district can start from and the newest tick every district has. */

@@ -49,9 +49,9 @@ services:
     image: docker.io/library/node:24-alpine
     command: ["node", "/app/seed.mjs"]
     environment:
-      # Four districts each: a 2 by 2 city, one shard per district. Lakeside has
-      # its streams but the sim leaves it idle until dev/city.sh starts it.
-      METRO_CITIES: ${METRO_CITIES:-harbor:4,pinecrest:4,lakeside:4}
+      # Four districts each: a 2 by 2 city, one shard per district. Lakeside and pier have
+      # their streams but the sim leaves them idle until dev/city.sh starts one.
+      METRO_CITIES: ${METRO_CITIES:-harbor:4,pinecrest:4,lakeside:4,pier:4}
       # Who may publish commands in every city: the dev IdP's `mayor` unless told otherwise.
       METRO_BUILDERS: ${METRO_BUILDERS:-mayor}
     volumes:
@@ -134,7 +134,7 @@ services:
       SIM_TENANT: metro
       SIM_CITIES: ${SIM_CITIES:-harbor pinecrest}
       # Seeded but idle, and not in the registry, until dev/city.sh starts it.
-      SIM_ON_DEMAND: ${SIM_ON_DEMAND-lakeside}
+      SIM_ON_DEMAND: ${SIM_ON_DEMAND-lakeside pier}
       SIM_TICKS_PER_SECOND: ${SIM_TICKS_PER_SECOND:-4}
       RUST_LOG: info
     volumes:

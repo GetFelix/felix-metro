@@ -671,7 +671,7 @@ pub(super) fn restored(city: &City, ticks: &[Vec<DistrictTick>], at: u32) -> Wor
         .events
         .iter()
         .find_map(Policy::from_event)
-        .unwrap_or_else(Policy::new);
+        .unwrap_or_else(|| Policy::opening(&city.seed));
     World::restore(
         city.clone(),
         at,

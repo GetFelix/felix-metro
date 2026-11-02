@@ -1082,3 +1082,120 @@ fn a_district_past_u16_is_an_error() {
     w.varint(0);
     assert_eq!(Record::decode(&w.0), Err(DecodeError::Invalid("district")));
 }
+
+fn markers_record(rng: &mut Rng) -> MarkersRecord {
+    let day = rng.below(40) as u32;
+    let mut tick = day * crate::TICKS_PER_DAY;
+    let markers = (0..rng.below(12))
+        .map(|_| {
+            tick += rng.below(900) as u32;
+            Marker {
+                tick,
+                kind: [MARK_BUILT, MARK_DEMOLISHED, MARK_ROAD][rng.below(3)],
+                subject: rng.next_u64() as u32,
+                what: rng.next_u64() as u16,
+                by: name(rng),
+            }
+        })
+        .collect();
+    MarkersRecord { day, markers }
+}
+
+#[test]
+fn markers_roundtrip_and_every_prefix_fails() {
+    let mut rng = Rng::new("markers-roundtrip");
+    for _ in 0..200 {
+        let m = markers_record(&mut rng);
+        let bytes = m.encode().unwrap();
+        assert_eq!(MarkersRecord::decode(&bytes).unwrap(), m);
+        assert_eq!(Record::decode(&bytes).unwrap(), Record::Markers(m));
+        assert_prefixes_fail(&bytes);
+    }
+}
+
+#[test]
+fn a_marker_is_a_few_bytes() {
+    let m = MarkersRecord {
+        day: 3,
+        markers: vec![Marker {
+            tick: 3 * crate::TICKS_PER_DAY + 2000,
+            kind: MARK_BUILT,
+            subject: 412,
+            what: 17,
+            by: "Mara".into(),
+        }],
+    };
+    // Kind, day, count, frame length, tick delta (2), kind, lot (2), building, name (1 + 4).
+    assert_eq!(m.encode().unwrap().len(), 1 + 1 + 1 + 1 + 2 + 1 + 2 + 1 + 5);
+}
+
+#[test]
+fn markers_refuse_what_they_cannot_hold_or_read() {
+    let long = MarkersRecord {
+        day: 0,
+        markers: vec![Marker {
+            tick: 1,
+            kind: MARK_ROAD,
+            subject: 0,
+            what: 0,
+            by: "x".repeat(MAX_STR + 1),
+        }],
+    };
+    assert_eq!(long.encode(), Err(EncodeError::StringTooLong));
+    let mut bytes = markers_record(&mut Rng::new("markers-kind"))
+        .encode()
+        .unwrap();
+    bytes.push(0);
+    assert_eq!(MarkersRecord::decode(&bytes), Err(DecodeError::Trailing));
+}
+
+#[test]
+fn a_marker_of_a_type_this_build_does_not_know_is_skipped() {
+    let known = |tick: u32| Marker {
+        tick,
+        kind: MARK_BUILT,
+        subject: 3,
+        what: 1,
+        by: "Mara".into(),
+    };
+    let mut ours = MarkersRecord {
+        day: 0,
+        markers: vec![known(10), known(30)],
+    }
+    .encode()
+    .unwrap();
+    // Day 0, three markers: the known ones with a marker of type 9 (and a longer body) between them. The
+    // frame of each is its length, so the reader steps over what it does not understand.
+    let first = ours[3..3 + 1 + ours[3] as usize].to_vec();
+    let second = ours[3 + first.len()..].to_vec();
+    assert_eq!(first.len() + second.len() + 3, ours.len());
+    ours.truncate(2);
+    ours.push(3);
+    ours.extend(&first);
+    // At the first's tick (delta 0), type 9, five bytes of a future layout.
+    ours.extend([7, 0, 9, 1, 2, 3, 4, 5]);
+    ours.extend(&second);
+    let got = MarkersRecord::decode(&ours).unwrap();
+    assert_eq!(
+        got.markers.iter().map(|m| m.tick).collect::<Vec<_>>(),
+        [10, 30]
+    );
+}
+
+#[test]
+fn markers_json_names_every_field() {
+    let m = MarkersRecord {
+        day: 1,
+        markers: vec![Marker {
+            tick: 5800,
+            kind: MARK_DEMOLISHED,
+            subject: 7,
+            what: 2,
+            by: "Bo\"b".into(),
+        }],
+    };
+    assert_eq!(
+        decode_json(&m.encode().unwrap()).unwrap(),
+        r#"{"kind":"markers","day":1,"markers":[{"tick":5800,"type":2,"subject":7,"what":2,"by":"Bo\"b"}]}"#
+    );
+}

@@ -118,7 +118,7 @@ not needed at the target scale and is left out.
 - **Speed changes the tick rate, not the tick.** Pause, 1×, 2× and 4× step at 0, 4, 8 and 16 Hz. A tick always covers the same city time, so the tick number stays a linear clock and seeking and interpolation never need to know the speed. The log costs the same per city day at any speed; only its rate per real second changes.
 - **Speed belongs to the city, not the viewer.** It is set on the sim, written in every tick header, and changed with a `speed` event, so a seek can turn wall time into ticks across speed changes. A viewer's playback speed while scrubbing is separate and local.
 - **A speed change takes effect between ticks.** The sim reads the requested speed after every district has answered a tick, so the next tick's header carries the new speed and each district's record for it holds a `speed` event; no other tick has one. Changing to 0 commits that tick as the last one (header speed 0), then the clock stops: no records are written while paused and the city clock does not move. A resume continues at the next tick, due at once and at the new rate from then on, with no catch-up burst. Only 0, 4, 8 and 16 are accepted. Seeking goes by tick number and offset, and nothing in `core` reads the speed.
-- **A new city starts with a day behind it.** On its first start, when no district has a record, the sim commits `SIM_WARMUP_HOURS` of ticks (40 by default, so live begins at 16:00 on day 2) as fast as the broker takes them, then runs at its normal speed. Each district has its own committer that sends one record at a time at the offset the stepping already knows, so the expected-offset fence and the per-district order hold, and a district may run up to 256 ticks ahead of another. The warm-up ticks did not happen in real time, so their `wall_us` is spread back from the moment the warm-up began at the speed the city runs at (a tick every 250 ms at 4 Hz), which keeps wall time and tick consistent with the live ticks after them. A restart over a log with records never warms up again, and neither does a city that starts paused. The log-rate goals are about the live rate; the warm-up is one burst of the same records at startup (a city day and a half, well inside the stream's retention) and `report_load` steps the world without the runner, so it is unaffected.
+- **A new city starts with a day behind it.** On its first start, when no district has a record, the sim commits `SIM_WARMUP_HOURS` of ticks (40 by default, so live begins at 16:00 on day 2) as fast as the broker takes them, then runs at its normal speed. Each district has its own committer that sends one record at a time at the offset the stepping already knows, so the expected-offset fence and the per-district order hold, and a district may run up to 256 ticks ahead of another. The warm-up ticks did not happen in real time, so their `wall_us` is spread back from the moment the warm-up began at the speed the city runs at (a tick every 250 ms at 4 Hz), which keeps wall time and tick consistent with the live ticks after them. A restart over a log with records never warms up again, and neither does a city that starts paused or a chapter city (see Chapters). The log-rate goals are about the live rate; the warm-up is one burst of the same records at startup (a city day and a half, well inside the stream's retention) and `report_load` steps the world without the runner, so it is unaffected.
 - **A restart carries on from the log.** A sim started over a city that has records resumes at the next tick, with everything built and everyone where they were. See [Restart](#restart).
 - **The operator sets it** with `SIM_TICKS_PER_SECOND` when a new city starts (a restarted city keeps its own speed) and a loopback-only HTTP endpoint on the sim (`PUT /cities/<name>/speed`). A builder's `speed` command from the command stream does the same, and a nonzero one resumes a paused city.
 - **The tick number is the city's clock.** Every record carries it. "The city at 08:15 on day 3" is a tick number, and the city at a tick is every district rewound to that tick.
@@ -223,12 +223,13 @@ older reader skips a tag it does not know and keeps the rest of the tick, and
 ignores bytes appended to a body it does know. A field can therefore be added
 to the end of an event without a new kind.
 
-| Kind | Record                                        |
-| ---- | --------------------------------------------- |
-| 1    | Retired: the first tick layout, refused       |
-| 2    | Command, on `metro.commands.<city>`           |
-| 3    | Registry entry, on `metro.cities`             |
-| 4    | Tick record, a district's commit for one tick |
+| Kind | Record                                         |
+| ---- | ---------------------------------------------- |
+| 1    | Retired: the first tick layout, refused        |
+| 2    | Command, on `metro.commands.<city>`            |
+| 3    | Registry entry, on `metro.cities`              |
+| 4    | Tick record, a district's commit for one tick  |
+| 5    | A city day's timeline markers, in stream state |
 
 Kind 4 replaced kind 1 to shrink the log (see "Log size"). A log written under
 kind 1 is not readable: the decoder refuses it by its kind byte, and the dev
@@ -488,7 +489,7 @@ about 15 minutes, 71% of the shore's residents live away from factories and a sh
   how far short it fell: a 24 minute commute against a 12 minute demand scores 50. Below 60 the faction is unhappy for
   the day.
 - **Recall.** A faction unhappy for 3 days in a row recalls the mayor. A day it is not unhappy sets its count back to
-  zero. The sim only records this: the city keeps running, and a chapter decides what a recall costs. A day with
+  zero. The sim only records this: the city keeps running, and the page decides what a recall costs (a chapter counts it as a loss). A day with
   nothing to judge (nobody commuted, or no shops) upsets no one.
 - **The event.** District 0 writes one `council` event on every keyframe tick, holding the last scored day's demands,
   measures, satisfaction and unhappy-day counts, and the open day's running totals. `days` says how many days have been
@@ -525,10 +526,10 @@ notice that on the next scored day, which is what makes the limits a trade.
   12 and starts no cooldown. A policy that changed less than a city day ago (5,760 ticks) is refused with result 11.
   The cooldown is per policy, so changing one does not hold the others. A refusal changes nothing.
 - **The event.** A `policy` command that applies records the new settings in a `policy` event in district 0, and every
-  keyframe tick carries the same event once any policy has changed (a city that never changed one writes none). It holds each value and the tick of its last change, so the cooldown survives a
+  keyframe tick carries the same event once a policy differs from how the city opened (a city that never changed one writes none). It holds each value and the tick of its last change, so the cooldown survives a
   restart. The page reads the newest one.
 - **Restart.** The restart takes the policies from the newest keyframe tick, then applies any `policy` event after
-  it before stepping. A log from before policies starts with the usual hours and no limits.
+  it before stepping. A log with no `policy` event has the policies the city opened with: the usual hours and no limits, or a chapter's opening (see Chapters).
 - **In the schedule.** Shop hours move only the leave tick of a shopkeeper's workday (`Resident::leave_tick`), so the
   schedules themselves, which come from the seed, are not rewritten. A shopkeeper kept late waits at work; a restart
   that finds one there recomputes the wait from the policy, not from when the keyframe was taken, so lowering the hours
@@ -542,6 +543,33 @@ again from.
 
 Cost to the log: nothing until a policy is first changed, then one `policy` event of a few bytes per keyframe tick (one per hour of city time).
 
+### Chapters
+
+A chapter is a city with a story: a seed whose city opens with something wrong and a goal to reach by a deadline. The
+table is `CHAPTERS` in `core/src/chapter.rs`, so the sim that plays the opening and the page that judges the goals read
+the same numbers. The page asks core for the chapter of the city it opened (`chapter(seed)` in the wasm build); a city
+that is not a chapter has none and shows no goals.
+
+| Chapter | City           | Opens with                         | Days | Commute goal |
+| ------- | -------------- | ---------------------------------- | ---- | ------------ |
+| Pier    | `pier`, 2 by 2 | Avenue limit 40%, street limit 60% | 3    | 64 ticks     |
+
+- **The opening.** `Policy::opening(seed)` is the policy a city starts with: the usual one, or the chapter's. A
+  `policy` event is written once the policies differ from the opening, so a city that has not changed anything writes
+  none, and a restart that finds none reads the opening, not the usual policy. A restart that read the usual one would
+  quietly give a chapter its limits back.
+- **No warm-up.** A chapter's first tick is the sim's first tick, so the three days are the player's. The sim skips the
+  warm-up for a seed with a chapter.
+- **The goals.** Judged by the page from the `council` event and the funds at the tick on screen: the commuters'
+  measure of the last scored day is at most the commute goal, no standing has been unhappy for the council's patience,
+  and funds are above zero. Nothing is judged before a day is scored. A recall or an empty account loses at once;
+  the other goals are judged once `days` have been scored. The page judges the latest scored day, not a frozen result: a chapter lost on day 3 reads as won if a later day meets the goals, and the reverse, and scrubbing back shows the chapter as it stood then. The
+  page lists them under the factions, with the day or the outcome beside the heading.
+- **Tested against the sim.** `web/src/chapter-fixture.json` holds the chapter table and the council and funds that the
+  sim reaches after three days with the limits left alone and with both raised. The sim's test rewrites it
+  (`METRO_WRITE_FIXTURE=1 cargo test -p felix-metro-sim the_chapter_fixture`) and fails when it is stale; the page's tests
+  judge both runs from it.
+
 ### Commands and the registry
 
 A command record is the kind byte, a command id `u32`, the builder's display
@@ -554,7 +582,8 @@ hash and the log never holds the principal.
 The sim reads the stream in order and applies commands before it
 steps the next tick, at most 256 a tick. That tick's records carry the `command`
 event, then what it changed (`built` or `demolished` or `roadwork`, and the `ledger` event that
-paid for it), in the district of the lot (of a road's first node), and its keyframe already shows the change. A refused command records only
+paid for it), in the district of the lot (of a road's first node), and its keyframe already shows the change. An applied `build` or `demolish` is
+also marked on the timeline (see [Timeline markers](#timeline-markers)). A refused command records only
 the `command` event, with a result code, and the city steps as if it had not
 been sent. A command with no district, such as a malformed record or a lot past
 the last, is recorded in district 0.
@@ -645,6 +674,70 @@ fit 64 bytes too, so a fork too deep to name is refused the same way.
 A registry record is the kind byte, a tag and fields: `1` created (name, seed,
 districts `u16`, `wall_us` `u64`) or `2` forked (name, parent, tick `u32`,
 `wall_us` `u64`).
+
+### Timeline markers
+
+The timeline marks notable moments, and clicking one seeks there. Two things are marked:
+
+- **Rush hours** come from the clock alone. Office workers arrive about 08:00 and leave about 17:15, so the page puts
+  a peak on those two times of every day the bar spans. Nothing is stored for them, so they cover the whole retained
+  range without reading a record.
+- **What builders did** (a building built or demolished, and a road closed, opened, added or removed once roads can
+  change) comes from the sim, because the page folds only the hour it is looking at and cannot see a build from three
+  days ago. Each marker carries the builder's name, from the `command` event that made the change.
+
+The sim keeps each city day's markers as one value of the events stream's state, under the key `markers.<day>` with the
+day counted from 0 (`tick / 5760`), in district 0's shard beside the `keyframe` pointer. The value is a record of kind 5:
+
+The value is the kind byte, the `day` (varint) and a count of markers (varint), then each marker as a frame (a varint
+of its length, then the body), so a reader steps over a marker of a type it does not know and keeps the rest, as with
+events. A body is:
+
+| Field     | Size   | Contents                                                                             |
+| --------- | ------ | ------------------------------------------------------------------------------------ |
+| `tick`    | zigzag | the tick, as a delta from the marker before (the first from the day's start)         |
+| `type`    | 1      | 1 built, 2 demolished, 3 road                                                        |
+| `subject` | varint | the lot, or for a road the segment                                                   |
+| `what`    | varint | the building kind, or for a road the change (0 closed, 1 opened, 2 added, 3 removed) |
+| name      | string | the builder's display name, empty when there was none                                |
+
+A marker is about 11 bytes. A day holds at most 256, so a day's value is under 20 KB (a name takes at most 65 bytes). A
+day past the cap marks the first 256 changes and no more, though all of them are in the tick records, and the ticks
+past the cap commit nothing extra. A tick marks only when it applies a `build` or `demolish`, and a day's value is
+rewritten only on such a tick.
+
+Nothing deletes a day's key: one a day for as long as the city runs, each under 20 KB and in practice a few hundred
+bytes, in the stream's state, which retention of the log does not trim.
+
+This is not in the tick records, whose size is bounded in [Log size](#log-size): the headers and events are
+unchanged, and a tick that changes nothing commits exactly the bytes it did. The day's value is written in the commit of
+the district 0 record for the tick that made the change, as one more `put` beside that record. A tick that marks nothing
+(nearly every tick) adds nothing to its commit.
+
+Putting the marker in the tick's own commit is what makes it safe to restart. The record and the list land together or
+not at all, so a sim killed between them cannot leave one without the other. A tick run again after a restart (see
+[Restart](#restart)) derives the same markers, because the world steps the same way, and replaces any in the list at or
+after its tick, so the list comes out as it would have. A restart reads the days it can write to from the
+stream's state before its first tick (the days from the first tick it steps to the one after the last it repeats), and
+stops there if it cannot, so a failed read never holds up a tick; every later day is new. A stored value that does not
+decode (or is for another day) is dropped with a warning and the day starts empty, so a bad value cannot keep the sim
+from starting. A warm-up commits no commands, so it writes no markers. Past days are never
+rewritten, and their values stay after retention has taken their records; the page asks only for the days the retained
+range touches.
+
+The page reads the days the span touches, through the seeker's history sessions, when the span is read: the first time
+the bar is reached for, and every 5 seconds after while the handle is dragged or the past is shown. A day before the
+tip's is read once; the tip's day is read each time, since it still grows. A marker later than the newest tick every
+district has is left out, because district 0 can be a tick ahead of the others and the bar shows only what has happened.
+A day with no value or a value that does not decode shows no builder markers and leaves the rush hours. A read that
+fails is not taken for a day with none: the day is read again after a wait that doubles from a second to half a minute,
+until it answers. Because markers belong to the city's history and not to the view, they are the same
+whatever tick the page is drawing: after a seek, a rewind, a reload or a page opened with `?at`.
+
+The buttons sit in a row above the bar, in a toolbar of their own and not inside the slider (a slider's children are
+hidden from a screen reader). Markers closer than 14 pixels share one button with a count. A click goes to the marker,
+or to the first one in a cluster after the handle, then the next on each click, wrapping. See [the timeline in
+docs/ui.md](ui.md#the-timeline).
 
 ### Ticks are commits
 
@@ -851,7 +944,8 @@ live city, and the result of that seek is dropped. A seek's result that would
 bring the page to an hour whose keyframe is already on screen is dropped too.
 The history sessions are opened when the bar is first hovered, focused or
 touched, not at page load; the span is read again every 5 s only while the
-handle is dragged or the past is shown, and the sessions close after 30 s idle. The pill in the clock reads how long
+handle is dragged or the past is shown, and the sessions close after 30 s idle. Notable moments are marked on a row above the bar
+([Timeline markers](#timeline-markers)). The pill in the clock reads how long
 before the live tip the city on screen is, in city time.
 
 ### City stats
@@ -895,7 +989,7 @@ Builders publish commands (`place road`, `remove road`, `zone`, `build`, `demoli
 city's command stream, a gateway `stamp_sender` stream. The sim applies
 commands at the next tick and records the result as a `command` event in the
 district it touched, with a hash of the principal. Every change to the city
-carries who made it, and that is visible on the timeline.
+carries who made it, and the timeline marks each one with the builder's name.
 
 A `built` or `demolished` event is instantaneous in the log. The page spreads it over the next 8 ticks of city time
 (`web/src/construction.ts`): a building rises from nothing inside a scaffold from the event's tick, and a demolished one
