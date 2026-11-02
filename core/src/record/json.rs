@@ -152,6 +152,9 @@ fn event(out: &mut String, e: &Event) {
                 "{{\"type\":\"speed\",\"ticksPerSecond\":{ticks_per_second}"
             );
         }
+        Event::CommandCursor { next } => {
+            let _ = write!(out, "{{\"type\":\"commandCursor\",\"next\":{next}");
+        }
     }
     out.push('}');
 }

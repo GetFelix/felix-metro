@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### The sim
+
+- A restarted sim carries on from its log instead of starting the city over. It rebuilds the world from the newest
+  keyframe and the records after it, and runs from the next tick at the speed the city was left at: nothing built is lost,
+  no tick is repeated or missing, and a tick that only some districts had committed is finished. The command stream is
+  followed from where the sim stopped reading (a new `command_cursor` event, recorded on keyframe ticks and on ticks that
+  applied commands), so a command sent while the sim was down runs when it comes back and none runs twice. A new city now
+  reads its command stream from the start. The epoch in the tick header stays the same across a restart.
+
 ### Changed
 
 - Built on Felix 0.6.2: the sim's `felix-client` and `felix-wire` pins, the dev stack and CI images.

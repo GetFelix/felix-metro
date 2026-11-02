@@ -400,7 +400,7 @@ describe('seek', () => {
     expect(await seeker(h).retained()).toEqual({ oldest: 0, newest: 699 });
   });
 
-  it('follows an epoch change: a restarted sim takes the next epoch and resumes from an older keyframe', async () => {
+  it('follows an epoch change: a newer epoch resumes from an older keyframe', async () => {
     // Epoch 1 ran to 599; epoch 2 resumed from the keyframe at 480 and ran to 799.
     const entries: Entry[] = [
       ...ticks(600).map((t): Entry => [1, t]),

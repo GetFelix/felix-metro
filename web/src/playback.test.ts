@@ -309,7 +309,7 @@ describe('Playback', () => {
     expect(p.restarted).toBe(false);
   });
 
-  it('stops, as restarted, when a new epoch numbers its ticks from the start again', async () => {
+  it('stops when a new epoch numbers its ticks from the start again', async () => {
     const log = new FakeLog(300);
     const { p, failures } = start(log, 250);
     p.advance(0.1);

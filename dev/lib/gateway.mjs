@@ -149,6 +149,8 @@ export class Session {
     this.onFatal = onFatal ?? ((err) => { throw err; });
     this.records = [];
     this.newest = -1;
+    /** The newest record of each district: its offset and tick. */
+    this.last = new Map();
     this.acks = new Map();
     this.results = new Map();
     this.waiting = new Map();
@@ -179,6 +181,7 @@ export class Session {
       const record = decode(Buffer.from(m.payload, "base64"));
       if (!record) return;
       this.newest = Math.max(this.newest, record.tick);
+      this.last.set(record.district, { offset: m.offset, tick: record.tick });
       if (this.keep) this.records.push(record);
       for (const e of record.events) {
         if (e.type !== "command") continue;
@@ -191,9 +194,11 @@ export class Session {
     }
   }
 
-  follow() {
+  /** Follows every district from the tip, or from `offsets[district]`, a log offset of that district's shard. */
+  follow(offsets) {
     for (let shard = 0; shard < DISTRICTS; shard++) {
-      this.ws.send(JSON.stringify({ type: "subscribe", stream: "events", from: "live", shard, slot: `d${shard}` }));
+      const from = offsets?.[shard] ?? "live";
+      this.ws.send(JSON.stringify({ type: "subscribe", stream: "events", from, shard, slot: `d${shard}` }));
     }
   }
 

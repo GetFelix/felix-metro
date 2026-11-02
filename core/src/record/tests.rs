@@ -26,7 +26,7 @@ fn name(rng: &mut Rng) -> String {
 
 fn event(rng: &mut Rng) -> Event {
     let resident = rng.next_u64() as u32;
-    match rng.below(11) {
+    match rng.below(12) {
         0 => Event::Trip {
             resident,
             vehicle: rng.below(6) as u8,
@@ -82,8 +82,11 @@ fn event(rng: &mut Rng) -> Event {
             id: rng.next_u64() as u32,
             result: rng.below(3) as u8,
         },
-        _ => Event::Speed {
+        10 => Event::Speed {
             ticks_per_second: rng.below(33) as u8,
+        },
+        _ => Event::CommandCursor {
+            next: rng.next_u64() >> rng.below(64),
         },
     }
 }
@@ -416,7 +419,7 @@ const FLAGS_AT: usize = 5;
 const COUNT_AT: usize = 15;
 
 /// A tag no build has used.
-const UNKNOWN_EVENT_TAG: u8 = 13;
+const UNKNOWN_EVENT_TAG: u8 = 14;
 
 /// A tick record's header for `events` events, with a keyframe if asked, then `body`.
 fn raw_tick(keyframe: bool, events: u8, body: &[u8]) -> Vec<u8> {

@@ -23,8 +23,9 @@ const EV_DEMOLISHED: u8 = 8;
 const EV_ROAD: u8 = 9;
 const EV_COMMAND: u8 = 10;
 const EV_SPEED: u8 = 11;
+const EV_COMMAND_CURSOR: u8 = 12;
 /// An `arrived` and the same resident's `activity` that follows it, which is every arrival the sim makes.
-const EV_ARRIVAL: u8 = 12;
+const EV_ARRIVAL: u8 = 13;
 
 const CMD_PLACE_ROAD: u8 = 1;
 const CMD_ZONE: u8 = 2;
@@ -331,6 +332,10 @@ fn put_event(w: &mut Writer, e: &Event, tick: u32) -> Result<(), EncodeError> {
             b.u8(*ticks_per_second);
             Ok(())
         }),
+        Event::CommandCursor { next } => w.framed(EV_COMMAND_CURSOR, EVENT_TAG_BITS, |b| {
+            b.varint(*next);
+            Ok(())
+        }),
     }
 }
 
@@ -403,6 +408,7 @@ fn get_entry(r: &mut Reader, tick: u32, out: &mut Vec<Event>) -> Result<(), Deco
         EV_SPEED => Event::Speed {
             ticks_per_second: r.u8()?,
         },
+        EV_COMMAND_CURSOR => Event::CommandCursor { next: r.varint()? },
         _ => return Ok(()),
     };
     out.push(event);

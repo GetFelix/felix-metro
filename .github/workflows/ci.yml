@@ -216,6 +216,17 @@ jobs:
         run: |
           node dev/builder-bot.mjs pinecrest --interval 1 --count 12 --demolish-after 1 --json bot-log.ndjson
           node dev/check-builder-bot.mjs bot-log.ndjson --min 10
+      # The sim is stopped, a demolish is sent while it is down, and it starts again over the broker's log. Every
+      # district's ticks run on from where they stood with none repeated or missing, the demolish runs once, and the
+      # keyframes after the restart still list the builds. The page checks below then run against the restarted sim.
+      - name: A restarted sim carries on from its log
+        timeout-minutes: 10
+        run: |
+          node dev/check-restart.mjs before pinecrest
+          docker compose -f dev/compose.yml stop sim
+          node dev/check-restart.mjs offline pinecrest
+          docker compose -f dev/compose.yml start sim
+          node dev/check-restart.mjs after pinecrest
       # The page at /#harbor signs in as `viewer`, follows the city through the gateway and draws it: the tick on
       # screen advances, cars are drawn and move, and the sun follows the tick. The sim runs at 4x so the commute and
       # the evening arrive in minutes. Screenshots of a day moment, dusk and a street are in the artifact.
