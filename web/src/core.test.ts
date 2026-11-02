@@ -135,10 +135,10 @@ describe('built roads in WebAssembly', () => {
     const metro = new Metro('harbor', 2);
     expect(metro.roadCheck(6, 7)).toBe(0);
     expect([...metro.roadTiles(6, 7)]).toEqual([17, 0, 18, 0]);
-    expect(metro.roadCheck(6, 6)).toBe(20);
+    expect(metro.roadCheck(6, 6)).toBe(22);
     expect(metro.roadCheck(4_000_000, 7)).toBe(2);
     metro.setRoads(Uint32Array.from([104, 6, 7, 0]));
-    expect(metro.roadCheck(6, 7)).toBe(22);
+    expect(metro.roadCheck(6, 7)).toBe(24);
     expect(metro.roadTiles(6, 7)).toHaveLength(0);
   });
 

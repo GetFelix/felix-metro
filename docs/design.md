@@ -289,7 +289,7 @@ fields.
 | 5    | `policy`   | for each of shop hours, avenue limit and street limit: value `u8`, then the tick of its last change plus one as a varint (0 if it never changed)                                                          |
 | 6    | `roadwork` | segment, change `u8` (2 added, 3 removed), node a, node b: varints                                                                                                                                        |
 
-A reader skips an extended kind it does not know. Kinds 3 and 5 are the author and policies, which other changes write.
+A reader skips an extended kind it does not know. Kind 3 is the author, which another change writes.
 
 Every arrival the sim makes is an `arrived` followed by the same resident's
 `activity`, so the encoder writes the pair as one `arrival` entry and the decoder

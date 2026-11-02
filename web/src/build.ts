@@ -153,7 +153,7 @@ export function canPlaceRoad(ground: Ground, a: number, b: number, code: number)
   if (!from || !to) return no(roadRefusal(2));
   for (const [x, z] of tilesBetween(from, to)) {
     const lot = lotAtTile(ground.city, x, z);
-    if (lot === null) return no(roadRefusal(23));
+    if (lot === null) return no(roadRefusal(25));
     const kind = kindOn(ground, lot);
     if (kind === null || !isEmpty(kind)) return no('A building is in the way.');
     const generated = ground.city.lots[lot]!;

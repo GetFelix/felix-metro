@@ -32,7 +32,7 @@ const EV_ARRIVAL: u8 = 13;
 const EV_EXTENDED: u8 = 15;
 const EXT_LEDGER: u64 = 1;
 const EXT_BALANCE: u64 = 2;
-// Kind 3 is taken by the author event on another branch, kind 5 by policies.
+// Kind 3 is taken by the author event on another branch.
 const EXT_COUNCIL: u64 = 4;
 const EXT_POLICY: u64 = 5;
 const EXT_ROADWORK: u64 = 6;
