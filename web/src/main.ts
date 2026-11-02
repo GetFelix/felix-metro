@@ -402,7 +402,7 @@ async function main() {
     : createCamera(renderer.domElement);
   if (hooks) window.__camera = controls;
   const drawn: ReadonlyMap<number, Building> = new Map(state?.built);
-  const { scene, construction, cars, people, glows, setTime, setShadows, fleet, setLot } = await createCity(
+  const { scene, construction, ambient, cars, people, glows, setTime, setShadows, fleet, setLot } = await createCity(
     renderer,
     quality.tier,
     city,
@@ -419,6 +419,7 @@ async function main() {
     renderer.setPixelRatio(Math.min(devicePixelRatio, s.pixelRatioCap));
     setShadows(s.shadows, s.shadowMapSize);
     construction.setEffects(tier !== 'low');
+    ambient?.setTier(s.ambient);
     if (traffic) traffic.cap = s.movers;
     post = createPost(renderer, scene, camera, passesFor(tier), glows);
     setTime(hour, post.bloom);
@@ -437,6 +438,7 @@ async function main() {
   const liveState = state;
   const traffic = state && fleet ? new Traffic(fleet, city ? (city.tiles - 1) / 2 : 0, city?.lots ?? []) : null;
   if (traffic) traffic.cap = settingsFor(quality.tier).movers;
+  if (traffic && ambient) traffic.extras = (f) => ambient.place(f);
   if (state && traffic) {
     // The sun follows the tick the page draws, so the slider is only a readout.
     slider.disabled = true;
@@ -1101,6 +1103,8 @@ async function main() {
         clockTicks.advance(Math.min(1, frameMs / 1000), state.latest, state.speed, link.down);
       if (!Number.isNaN(tick)) {
         state.retire(Math.floor(tick));
+        // Ambient life follows the clock the person reads: a held hour, a scrub target, or the tick on screen.
+        ambient?.update(frozenHour !== null ? frozenHour * TICKS_PER_HOUR : (scrubTarget ?? tick));
         traffic.update(tick, still ? 0 : dt, state.active());
         state.settle(tick);
         construction.update(tick, state.rising, state.falling);

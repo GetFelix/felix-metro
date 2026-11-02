@@ -1,3 +1,4 @@
+import type { AmbientSettings } from './ambient-fx';
 import type { Tier } from './params';
 
 export const TIERS: readonly Tier[] = ['high', 'medium', 'low'];
@@ -12,6 +13,8 @@ export interface TierSettings {
   rigs: boolean;
   /** Most cars and walkers drawn at once; the rest of the voyages are left out until one arrives. */
   movers: number;
+  /** The ambient life: lit shops, chimney smoke, roosting birds, traffic lights, delivery vans and the garbage truck. */
+  ambient: AmbientSettings;
 }
 
 // The look degrades before the frame rate does: ambient occlusion goes first, then tilt-shift, shadows and resolution.
@@ -24,6 +27,13 @@ export function settingsFor(tier: Tier): TierSettings {
     pixelRatioCap: tier === 'low' ? 1 : 2,
     rigs: tier === 'high',
     movers: tier === 'high' ? Infinity : tier === 'medium' ? 160 : 80,
+    // Low keeps the shop windows, which cost one draw, and leaves out what moves or adds draws.
+    ambient:
+      tier === 'high'
+        ? { shops: true, smoke: 5, birds: 3, vans: 6, truck: true, signals: true }
+        : tier === 'medium'
+          ? { shops: true, smoke: 3, birds: 2, vans: 3, truck: true, signals: true }
+          : { shops: true, smoke: 0, birds: 0, vans: 0, truck: false, signals: false },
   };
 }
 

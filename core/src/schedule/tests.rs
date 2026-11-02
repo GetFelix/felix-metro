@@ -47,6 +47,24 @@ fn times_are_jittered_and_follow_the_archetype() {
     assert!(night.blocks[1].leave > 19 * TICKS_PER_HOUR);
 }
 
+/// The page leaves out nothing to thin the night: the quiet streets come from here. With a fifteen-minute trip, nobody
+/// sets off between 22:00 and 05:00.
+#[test]
+fn nobody_sets_off_in_the_small_hours() {
+    for archetype in Archetype::ALL {
+        for i in 0..400 {
+            let s = make(archetype, &format!("r{i}"));
+            for b in &s.blocks {
+                assert!(
+                    (5 * TICKS_PER_HOUR..22 * TICKS_PER_HOUR).contains(&b.leave),
+                    "{archetype:?} leaves at {}",
+                    b.leave
+                );
+            }
+        }
+    }
+}
+
 #[test]
 fn the_same_seed_gives_the_same_day() {
     for a in Archetype::ALL {

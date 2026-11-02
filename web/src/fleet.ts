@@ -50,7 +50,7 @@ export interface InstancedFleet {
 }
 
 /** The meshes of a model, each with where it sits in the model. */
-function parts(model: GLTF): { mesh: THREE.Mesh; local: THREE.Matrix4 }[] {
+export function parts(model: GLTF): { mesh: THREE.Mesh; local: THREE.Matrix4 }[] {
   const root = model.scene;
   root.updateMatrixWorld(true);
   const inverse = root.matrixWorld.clone().invert();
