@@ -1,0 +1,146 @@
+.clock {
+  top: 16px;
+  right: 16px;
+  padding: 8px 14px;
+  font:
+    500 20px/1 'JetBrains Mono',
+    monospace;
+}
+.clock span {
+  color: var(--muted);
+  font:
+    500 12px Inter,
+    sans-serif;
+  margin-right: 6px;
+}
+.pill {
+  margin-left: 12px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--coral-wash);
+  color: var(--coral);
+  font:
+    600 11px/1 Inter,
+    sans-serif;
+  letter-spacing: 0.06em;
+  animation: breathe 2s ease-in-out infinite;
+}
+.pill.late {
+  background: var(--amber-wash);
+  color: var(--amber);
+  letter-spacing: 0;
+}
+@keyframes breathe {
+  50% {
+    opacity: 0.55;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pill {
+    animation: none;
+  }
+}
+.past {
+  margin-left: 12px;
+  font:
+    500 12px Inter,
+    sans-serif;
+  color: var(--amber);
+  white-space: nowrap;
+}
+.past button {
+  padding: 3px 8px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--coral-wash);
+  color: var(--coral);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.past #play {
+  margin-right: 8px;
+}
+.past button:hover {
+  background: var(--coral-wash-strong);
+}
+.past button:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
+}
+@media (max-width: 600px) {
+  .clock {
+    font-size: 16px;
+    flex-wrap: wrap;
+    row-gap: var(--space-2);
+  }
+  .clock {
+    padding-inline: var(--space-3);
+  }
+  .clock span {
+    margin-right: var(--space-1);
+  }
+  .pill {
+    margin-left: 6px;
+    padding-inline: 6px;
+  }
+  /* The past row and the Reconnecting pill make the clock wider than the space beside the brand chip, so it moves under it. */
+  .past {
+    flex-basis: 100%;
+    margin-left: 0;
+  }
+  .corner {
+    max-width: calc(100vw - 32px);
+  }
+  body:has(.past:not(.hidden)) .corner,
+  body:has(.pill.late:not(.hidden)) .corner {
+    top: 76px;
+  }
+}
+#clock {
+  white-space: nowrap;
+}
+/* Digits that change roll: the new one comes up from below as the old one leaves, or the other way when going back. */
+.clock {
+  font-variant-numeric: tabular-nums;
+}
+.digit {
+  position: relative;
+  display: inline-block;
+  font-style: normal;
+  font-weight: inherit;
+}
+.digit .cur {
+  position: relative;
+  display: inline-block;
+  font-style: normal;
+}
+.digit.roll {
+  clip-path: inset(0);
+}
+.digit.roll .cur {
+  animation: roll var(--quick) var(--ease);
+}
+.digit .cur::before {
+  content: attr(data-old);
+  position: absolute;
+  top: calc(var(--dir, 1) * -100%);
+  left: 0;
+  display: none;
+}
+.digit.roll .cur::before {
+  display: block;
+}
+@keyframes roll {
+  from {
+    transform: translateY(calc(var(--dir, 1) * 100%));
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .digit.roll .cur {
+    animation: none;
+  }
+  .digit.roll .cur::before {
+    display: none;
+  }
+}

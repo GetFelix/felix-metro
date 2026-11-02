@@ -615,6 +615,7 @@ timelines locked to the same tick.
 - **A camera you can move.** Turn, tilt, slide and zoom with a mouse, trackpad, touch or the keyboard, kept inside the city. See [the camera](art.md#camera).
 - **Day and night from the tick.** Sun angle, sky, street lights and window lights all follow the city clock, live and while scrubbing.
 - **Quality tiers** so the look degrades before the frame rate does. The target is 60 fps at 20,000 residents on a laptop iGPU.
+- **A small overlay** of glass panels over the city: the Felix Metro chip and city picker, the clock, the timeline, and a settings sheet with a key list. It is plain markup and TypeScript in `web/src/ui/`, and `docs/ui.md` has its kit and rules.
 
 How it looks gets its own note, `docs/art.md`, and a style frame, in M0.
 

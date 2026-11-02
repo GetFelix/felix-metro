@@ -1,7 +1,9 @@
 import * as THREE from 'three';
 import { createCamera, startIntro, type CameraRig } from './camera';
 import { cityBounds } from './camera-math';
-import { createHud } from './hud';
+import { createHud } from './ui/hud';
+import { hintDue } from './ui/hint';
+import { isPlayKey } from './ui/keys';
 import { parseParams, type Tier } from './params';
 import { createPost, passesFor } from './post';
 import { createQuality, settingsFor } from './quality';
@@ -18,8 +20,11 @@ import { Playback, handOver } from './playback';
 import { IDLE_MS, SeekError, Seeker, fold, tryFoldMore, type SeekResult } from './seek';
 import { Latest } from './scrub';
 import { agoText, createGuess, createTimeline, moveRange, stepTick, clampTick, type Range } from './timeline';
-import { createLoader, type Loader } from './loader';
-import { createPicker } from './picker';
+import { createLoader, type Loader } from './ui/loader';
+import { createPicker } from './ui/picker';
+import { createShell, type Shell } from './ui/shell';
+import { createStatus, type Status } from './ui/status';
+import { note, toast } from './ui/toast';
 import { displayName } from './registry';
 import { Traffic } from './traffic';
 import { sample, type Path } from './capture';
@@ -130,6 +135,8 @@ declare global {
       /** Draw the frame at video time `tMs` and say what is in it. */
       frame(tMs: number): Promise<CaptureFrame>;
     };
+    /** The settings sheet, key list and first-visit tip, for the CI check and the console; null when the overlay is off. */
+    __ui?: Shell;
     __quality?: {
       history: readonly Tier[];
       memory: { tier: Tier; textures: number; geometries: number }[];
@@ -167,7 +174,7 @@ async function follow(
   name: string,
   districts: number,
   gateway: string | null,
-  pill: HTMLElement,
+  status: Status,
   loader: Loader,
   trace: boolean,
 ): Promise<{ state: CityState; link: Link } | null> {
@@ -194,15 +201,10 @@ async function follow(
     state,
     onDistrict: (d) => loader.ready(d),
     onCities: (cities) => picker.update(cities),
-    onRefused: () => {
-      pill.classList.add('hidden');
-      document.getElementById('notice')!.classList.remove('hidden');
-    },
-    onStatus: (status) => {
-      link.down = status !== 'live';
-      pill.textContent = link.down ? 'Reconnecting…' : 'LIVE';
-      pill.classList.toggle('late', link.down);
-      pill.classList.remove('hidden');
+    onRefused: () => status.refused(),
+    onStatus: (connection) => {
+      link.down = connection !== 'live';
+      status.link(link.down);
     },
   });
   // Closing the sockets by hand, not leaving it to the browser, so the gateway sees the city's subscriptions end.
@@ -244,16 +246,6 @@ async function openHistory(name: string, districts: number, gateway: string | nu
   // The gateway counts sessions until it sees them close, and a page opened next may be waiting on that.
   addEventListener('pagehide', () => seeker.close());
   return seeker;
-}
-
-/** A short word on screen for something that did not work out, gone after a few seconds. */
-function note(text: string): void {
-  const el = document.createElement('p');
-  el.style.cssText =
-    'position:fixed;left:16px;bottom:16px;margin:0;padding:8px 12px;border-radius:8px;background:#000c;color:#fff;font:14px sans-serif;pointer-events:none';
-  el.textContent = text;
-  document.body.append(el);
-  setTimeout(() => el.remove(), 6000);
 }
 
 /** What to tell a person when a moment could not be opened. */
@@ -311,6 +303,8 @@ async function main() {
   let hour = 18.5;
   let apply: (tier: Tier) => void = () => {};
   const quality = createQuality({ url: urlTier, still, onChange: (t) => apply(t) });
+  // The capture job needs the page as it draws, with nothing to dismiss, so it gets no controls and no tip.
+  const shell = ui && !capture && layout === 'city' ? createShell(quality) : null;
 
   const renderer = createRenderer(quality.tier);
   let city: City | null = null;
@@ -322,6 +316,7 @@ async function main() {
   let seekInfo: NonNullable<Window['__seek']> | null = null;
   /** The test hooks on `window` are for the CI checks and the console: they are installed under ?trace and in dev builds. */
   const hooks = trace || import.meta.env.DEV;
+  if (hooks && shell) window.__ui = shell;
   /** The history reader, made by the first seek and kept for the ones after it. */
   let history: Promise<Seeker | null> | null = null;
   const dropHistory = () => {
@@ -348,7 +343,7 @@ async function main() {
   let playbackTimer: (() => void) | null = null;
   /** Told the frame after the city changed has been drawn. */
   const frameWaiters: (() => void)[] = [];
-  const pill = document.getElementById('pill')!;
+  const status = createStatus();
   if (layout === 'city') {
     await init();
     city = parseCity(generate(seed, districts));
@@ -389,7 +384,7 @@ async function main() {
       if (!past.result.exact) note('That exact moment is missing; showing the closest one before it.');
     } else if (wantLive) {
       hasLive = true;
-      const joined = await follow(city, new Metro(seed, districts), seed, districts, gateway, pill, loader, trace);
+      const joined = await follow(city, new Metro(seed, districts), seed, districts, gateway, status, loader, trace);
       state = joined?.state ?? null;
       link = joined?.link ?? link;
       if (!joined) for (let d = 0; d < districts * districts; d++) loader.ready(d);
@@ -412,6 +407,7 @@ async function main() {
 
   // A tier change rebuilds the post chain; shadows and resolution follow the same settings.
   apply = (tier) => {
+    shell?.refresh();
     const s = settingsFor(tier);
     post?.dispose();
     renderer.setPixelRatio(Math.min(devicePixelRatio, s.pixelRatioCap));
@@ -832,22 +828,16 @@ async function main() {
       refresher = setInterval(() => void refreshRange(), 5000);
     };
     const timelineEl = document.getElementById('timeline')!;
-    const past = document.getElementById('past')!;
-    const pastAgo = document.getElementById('past-ago')!;
-    document.getElementById('back-live')!.addEventListener('click', goLive);
-    const playButton = document.getElementById('play') as HTMLButtonElement;
-    playButton.addEventListener('click', () => void togglePlay());
+    status.onBackToLive(goLive);
+    status.onPlay(() => void togglePlay());
     addEventListener('keydown', (e) => {
       const target = e.target as HTMLElement | null;
-      if (e.key !== ' ' || e.repeat || target?.closest('button, input, [role="slider"]')) return;
-      if (!canToggle()) return;
+      if (!isPlayKey(e, target, shell?.isOpen ?? false) || !canToggle()) return;
       e.preventDefault();
       void togglePlay();
     });
     let barShown = false;
     const guess = createGuess();
-    let wasPast: boolean | null = null;
-    let agoShown = '';
     timelineFrame = (tick) => {
       const tip = tipTick();
       // Until the span is read the bar has just the live tip.
@@ -856,6 +846,8 @@ async function main() {
         barShown = usable;
         bar.show(usable);
         timelineEl.toggleAttribute('data-scrub', usable);
+        // A first visit gets one tip, once there is a timeline to drag.
+        if (hintDue(usable, pastTick !== null || scrubTarget !== null)) shell?.offerHint();
       }
       const inPast = pastTick !== null || scrubTarget !== null;
       syncRefresh(bar.dragging || inPast);
@@ -868,20 +860,11 @@ async function main() {
           at,
           live: !inPast,
         });
-      if (inPast !== wasPast) {
-        const first = wasPast === null;
-        wasPast = inPast;
-        past.classList.toggle('hidden', !inPast);
-        // The live pill is shown by the connection's own status; going past hides it, coming back restores it.
-        if (inPast) pill.classList.add('hidden');
-        else if (!first) pill.classList.remove('hidden');
-      }
+      status.past(inPast);
       if (inPast) {
-        const label = playback && !playback.paused ? 'Pause' : 'Play';
-        if (playButton.textContent !== label) playButton.textContent = label;
-        playButton.hidden = !hasLive || (playback?.catchingUp ?? false);
-        const text = usable ? agoText(tip - at) : 'Earlier';
-        if (text !== agoShown) pastAgo.textContent = agoShown = text;
+        status.playLabel(playback && !playback.paused ? 'Pause' : 'Play');
+        status.playHidden(!hasLive || (playback?.catchingUp ?? false));
+        status.ago(usable ? agoText(tip - at) : 'Earlier');
       }
     };
     /** Notice a failure or the tip after the playback moved on; the tick to draw, or null when nothing is playing. */
@@ -1194,8 +1177,5 @@ async function main() {
 main().catch((err) => {
   console.error('the city could not start', err);
   document.getElementById('loader')?.classList.add('hidden');
-  const note = document.createElement('p');
-  note.style.cssText = 'position:fixed;inset:auto 16px 16px;margin:0;color:#fff;font:14px sans-serif';
-  note.textContent = 'The city could not start. Reload to try again.';
-  document.body.append(note);
+  toast('The city could not start. Reload to try again.', null);
 });
