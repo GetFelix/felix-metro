@@ -605,6 +605,99 @@ const followFrom = async (page, resident) => {
   check(still.x === left.x && still.z === left.z, 'the camera stays where it was when the follow ends');
   await context.close();
 }
+// 11b. The list of a day on the card, drawn from a view the way the log's day would be: the page here has no log, so the
+// card starts on the schedule, and a view replaces it. Rows are buttons that report the one chosen.
+{
+  const { context, page } = await open('tier=low&still&t=12&follow=3&attract=0', DESKTOP);
+  await settle(page, 1200);
+  const card = '#follow';
+  const row = (kind, tick, text, place, when, carried = false) => ({ kind, tick, carried, text, place, when });
+  const view = {
+    status: 'ready',
+    label: 'Day 2, today',
+    canPrev: true,
+    canNext: false,
+    rows: [
+      row('stay', 5760, 'At home', null, 'until 07:30', true),
+      row('trip', 6900, 'Drove to work', 'Harbor Mill', '07:30 to 07:52'),
+      row('replan', 6950, 'Changed route', null, '07:42'),
+      row('stay', 6990, 'At work', null, 'from 07:52'),
+    ],
+    current: 1,
+    note: null,
+  };
+  check(await visible(page, `${card} [data-day]`), 'with no log the card lists the schedule');
+  check(
+    (await page.locator(`${card} [data-label]`).textContent()) === 'Their usual day',
+    'and says it is their usual day',
+  );
+  check(!(await visible(page, `${card} [data-prev]`)), 'with no day to page through there are no arrows');
+  await page.evaluate((v) => window.__day.show(v), view);
+  check(!(await visible(page, `${card} [data-day]`)), 'a day from the log replaces the schedule');
+  check((await page.locator(`${card} [data-label]`).textContent()) === 'Day 2, today', 'the card names the day');
+  check(
+    (await page.locator(`${card} [data-prev]`).getAttribute('aria-disabled')) === 'false',
+    'the day before can be chosen',
+  );
+  check(
+    (await page.locator(`${card} [data-next]`).getAttribute('aria-disabled')) === 'true',
+    'the day after today cannot',
+  );
+  const rows = page.locator(`${card} [data-log] li`);
+  check((await rows.count()) === 4, 'every entry is listed');
+  check(
+    (await page.locator(`${card} [data-log] li[aria-current] button`).getAttribute('data-row')) === '1',
+    'the entry they are in is marked',
+  );
+  check(
+    (await rows.nth(1).locator('button').innerText()).replace(/\s+/g, ' ') ===
+      'Drove to work, Harbor Mill 07:30 to 07:52',
+    'a trip says where to and when',
+  );
+  check((await rows.nth(0).getAttribute('data-carried')) !== null, 'an entry from before midnight is marked');
+  check((await rows.nth(2).getAttribute('data-tick')) === '6950', 'each entry carries its tick');
+  await page.screenshot({ path: join(out, 'follow-day-log-1280.png') });
+  await page.evaluate(() => {
+    window.__picked = [];
+    window.__day.onPick = (i) => window.__picked.push(i);
+  });
+  await rows.nth(3).locator('button').click();
+  await page.focus(`${card} [data-log] li:nth-child(2) button`);
+  await page.keyboard.press('Enter');
+  check(
+    JSON.stringify(await page.evaluate(() => window.__picked)) === '[3,1]',
+    'a click or Enter on an entry chooses it',
+  );
+  // Focus stays where it is when the list is drawn again: as the row they are in moves, as a row is added, and when the
+  // arrow that has focus is no longer usable. Otherwise a key press would find focus on the page.
+  const focusedTick = () => page.evaluate(() => document.activeElement?.closest('li')?.dataset.tick ?? null);
+  await page.focus(`${card} [data-log] li:nth-child(2) button`);
+  await page.evaluate((v) => window.__day.show({ ...v, current: 3 }), view);
+  check((await focusedTick()) === '6900', 'focus stays on the entry when the one they are in moves');
+  await page.evaluate(
+    (v) => window.__day.show({ ...v, rows: [...v.rows, { ...v.rows[3], tick: 7200, text: 'Shopping' }], current: 3 }),
+    view,
+  );
+  check((await focusedTick()) === '6900', 'focus stays on the entry when a new one is added');
+  await page.focus(`${card} [data-prev]`);
+  await page.evaluate((v) => window.__day.show({ ...v, canPrev: false }), view);
+  check(
+    await page.evaluate(() => document.activeElement?.hasAttribute('data-prev')),
+    'focus stays on an arrow that stops being usable',
+  );
+  await page.evaluate(
+    (v) =>
+      window.__day.show({ ...v, status: 'loading', rows: [], current: null, note: 'Reading their day from the log.' }),
+    view,
+  );
+  check(
+    (await page.locator(`${card} [data-note]`).innerText()) === 'Reading their day from the log.',
+    'the card says it is reading',
+  );
+  await page.evaluate(() => window.__day.show({ status: 'unavailable' }));
+  check(await visible(page, `${card} [data-day]`), 'a page with no log goes back to the schedule');
+  await context.close();
+}
 {
   const { context, page } = await open('tier=low&still&t=12&attract=0', DESKTOP);
   const card = '#follow';

@@ -41,13 +41,22 @@ interface ReplanEvent {
   node: number;
   route: [number, number][];
 }
-interface ArrivedEvent {
-  type: 'arrived';
-  resident: number;
-}
 interface SpeedEvent {
   type: 'speed';
   ticksPerSecond: number;
+}
+/** A resident reached a building; their `activity` follows in the same tick. */
+interface ArrivedEvent {
+  type: 'arrived';
+  resident: number;
+  lot: number;
+}
+/** What a resident is doing inside, from the tick they arrive until `until`. */
+interface ActivityEvent {
+  type: 'activity';
+  resident: number;
+  kind: number;
+  until: number;
 }
 /** What became of a builder's command: `result` 0 is applied, anything else a refusal (core/src/record.rs). */
 export interface CommandEvent {
@@ -67,13 +76,14 @@ interface BalanceEvent {
   type: 'balance';
   amount: number;
 }
-/** The events this page acts on; the rest of what a record carries is ignored. */
+/** The events the city's state and a resident's day act on; the rest of what a record carries is ignored. */
 export type TickEvent =
   | TripEvent
+  | ReplanEvent
   | ArrivedEvent
+  | ActivityEvent
   | BuildingEvent
   | RoadworkEvent
-  | ReplanEvent
   | SpeedEvent
   | CommandEvent
   | LedgerEvent
@@ -81,6 +91,15 @@ export type TickEvent =
   | CouncilEvent
   | PolicyEvent
   | { type: 'other' };
+
+/** A resident in a keyframe: indoors (`activity`, `lot`, `until`) or on the road (`vehicle`). */
+export interface KeyframeResident {
+  id: number;
+  activity?: number;
+  lot?: number;
+  until?: number;
+  vehicle?: number;
+}
 
 export interface TickRecord {
   kind: 'tick';
@@ -94,8 +113,7 @@ export interface TickRecord {
     buildings: [number, number, number][];
     /** `[segment, change, a, b]` for every road a builder added in the district, live or removed. */
     roads?: [number, number, number, number][];
-    /** The district's residents. One on the road has a `vehicle`, the kind of car or 0 on foot. */
-    residents?: readonly { id: number; vehicle?: number }[];
+    residents?: KeyframeResident[];
   } | null;
   events: TickEvent[];
 }
@@ -272,6 +290,8 @@ export class CityState {
   onCommand: ((event: CommandEvent) => void) | null = null;
   /** Told what became of every record handed to {@link apply}, for checking the order a district was followed in. */
   onRecord: ((district: number, tick: number, result: 'applied' | 'seen' | 'gap') => void) | null = null;
+  /** Told each record that was applied, for what reads the log's events rather than the city they build. */
+  onApplied: ((record: TickRecord) => void) | null = null;
 
   constructor(
     private readonly city: City,
@@ -312,6 +332,7 @@ export class CityState {
   apply(record: TickRecord, allowGap = false): 'applied' | 'seen' | 'gap' {
     const result = this.fold(record, allowGap);
     this.onRecord?.(record.district, record.tick, result);
+    if (result === 'applied') this.onApplied?.(record);
     return result;
   }
 
