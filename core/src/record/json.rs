@@ -4,7 +4,8 @@
 use std::fmt::Write;
 
 use super::{
-    Command, CommandRecord, Doing, Event, Keyframe, Leg, RegistryRecord, TickRecord, Vehicle,
+    Command, CommandRecord, Doing, Event, Keyframe, Leg, MarkersRecord, RegistryRecord, TickRecord,
+    Vehicle,
 };
 
 fn text(out: &mut String, s: &str) {
@@ -347,5 +348,21 @@ pub(super) fn registry(e: &RegistryRecord) -> String {
             let _ = write!(out, ",\"tick\":{tick},\"wallUs\":{wall_us}}}");
         }
     }
+    out
+}
+
+pub(super) fn markers(m: &MarkersRecord) -> String {
+    let mut out = String::new();
+    let _ = write!(out, "{{\"kind\":\"markers\",\"day\":{},\"markers\":", m.day);
+    list(&mut out, &m.markers, |o, mark| {
+        let _ = write!(
+            o,
+            "{{\"tick\":{},\"type\":{},\"subject\":{},\"what\":{},\"by\":",
+            mark.tick, mark.kind, mark.subject, mark.what
+        );
+        text(o, &mark.by);
+        o.push('}');
+    });
+    out.push('}');
     out
 }

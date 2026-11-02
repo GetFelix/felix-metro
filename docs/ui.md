@@ -25,6 +25,10 @@ controls looking like the ones already there.
 - **Get a hint on a first visit.** When the timeline first appears, a line above it says "Drag the timeline to go
   back in time". It goes away on your first click, key press or scroll, or after a few seconds, and it is not
   shown again in that browser.
+- **Jump to a notable moment.** Small marks on a row above the timeline show the morning and evening rush hours and
+  every building a builder put up or took down. Click one to go there. Where marks are too close to tell apart they
+  share one numbered mark, and clicking it again goes to the next moment in it. With the keyboard, `Tab` to the row,
+  move along it with the arrow keys and press `Enter`.
 - **Follow a resident.** Click a car or walker (tap on a touch screen), or press `F` for the one nearest the middle of
   the view. The camera tracks them, and a card under
   the city name shows their name, what kind of resident they are, what they are doing now and their day: the trips and
@@ -82,7 +86,7 @@ framework. Each part has one file of each kind:
 | Felix Metro chip and city picker | `web/src/ui/picker.ts`                                             | `web/src/ui/brand.css`    |
 | Loading screen                   | `web/src/ui/loader.ts`                                             | `web/src/ui/loader.css`   |
 | Clock, LIVE pill, past row       | `web/src/ui/clock.ts`, `web/src/ui/status.ts`                      | `web/src/ui/clock.css`    |
-| Timeline bar                     | `web/src/timeline.ts`                                              | `web/src/ui/timeline.css` |
+| Timeline bar and its moments     | `web/src/timeline.ts`, `web/src/marker-row.ts`                     | `web/src/ui/timeline.css` |
 | Settings sheet and key list      | `web/src/ui/shell.ts`, `settings.ts`, `keys.ts`, `sheet.ts`        | `web/src/ui/sheet.css`    |
 | Share button, photo mode         | `web/src/ui/share.ts`, `web/src/ui/photo.ts`, `web/src/moments.ts` | `web/src/ui/photo.css`    |
 | City stats panel                 | `web/src/ui/stats.ts`, `web/src/stats.ts`                          | `web/src/ui/stats.css`    |
@@ -249,6 +253,26 @@ only the buildings have numbers.
 `#clock` always holds plain `HH:MM` text, so a screen reader and the check scripts read it as one time. `clock.ts`
 wraps each digit in its own element and, when a digit changes, animates the new one in. The old digit is drawn
 from the element's `data-old` attribute, which is not text.
+
+### The timeline
+
+The bar itself is a slider: `web/src/timeline.ts` draws the days, the hours and the handle, and reports where the
+person put the handle. The notable moments are a separate row of buttons in `#markers`, above the bar. They are not
+inside the slider because a slider's children are not read out, and each button needs its own name.
+
+- **What is marked.** The rush hours at 08:00 and 17:15 of every day the bar spans, from the clock alone, and each
+  change a builder made, from the sim's per-day list ([Timeline markers](design.md#timeline-markers) says how it is
+  stored and read). `web/src/markers.ts` holds the maths, `web/src/marker-row.ts` the buttons.
+- **Where they are.** A mark sits under the moment it names, on the same scale as the bar. None is drawn past the
+  live tip or before the oldest moment kept, whatever moment the page is showing. The builders' marks are read
+  when the span is, so they appear the first time the bar is reached for.
+- **Crowding.** Marks closer than 14 pixels are one button with a count, and the count is in its name. A click goes
+  to the first moment in it after the handle, so repeated clicks walk through it.
+- **Names.** Every button has a name such as "Mara built a building, Day 2, 14:15". The row is one stop in the tab
+  order (a toolbar); the arrow keys, `Home` and `End` move along it and `Enter` or `Space` goes to the moment.
+
+A click is a release of the handle at that moment: it seeks the same way, and within a city minute of the live tip it
+returns to the live city.
 
 ### The hint
 
