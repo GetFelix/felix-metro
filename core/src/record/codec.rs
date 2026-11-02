@@ -2,7 +2,7 @@
 
 use super::wire::{Reader, Writer};
 use super::{
-    BuildingDiff, Command, CommandRecord, Counts, DecodeError, Doing, EncodeError, Event,
+    Authored, BuildingDiff, Command, CommandRecord, Counts, DecodeError, Doing, EncodeError, Event,
     FLAG_KEYFRAME, Header, KIND_COMMAND, KIND_REGISTRY, KIND_TICK, Keyframe, Leg, MAX_PROGRESS,
     RegistryRecord, ResidentState, RoadDiff, TickRecord, Vehicle,
 };
@@ -26,7 +26,7 @@ const EV_SPEED: u8 = 11;
 const EV_COMMAND_CURSOR: u8 = 12;
 /// An `arrived` and the same resident's `activity` that follows it, which is every arrival the sim makes.
 const EV_ARRIVAL: u8 = 13;
-/// Tag 14 was the last one free when this was added; events after it need a wider tag.
+/// The tag `author` is written under. The only place that says so, so it can move to an extended kind.
 const EV_AUTHOR: u8 = 14;
 
 const CMD_PLACE_ROAD: u8 = 1;
@@ -339,15 +339,20 @@ fn put_event(w: &mut Writer, e: &Event, tick: u32) -> Result<(), EncodeError> {
             Ok(())
         }),
         Event::Author {
-            lot,
-            tick: built,
             principal,
             name,
+            lots,
         } => w.framed(EV_AUTHOR, EVENT_TAG_BITS, |b| {
-            b.varint(u64::from(*lot));
-            b.varint(u64::from(*built));
             b.u64(*principal);
             b.str(name)?;
+            b.varint(lots.len() as u64);
+            // Lots are usually listed in order and built some time before the record, so both are deltas.
+            let mut prev = 0;
+            for a in lots {
+                b.delta(prev, a.lot);
+                prev = a.lot;
+                b.delta(tick, a.built);
+            }
             Ok(())
         }),
     }
@@ -423,12 +428,26 @@ fn get_entry(r: &mut Reader, tick: u32, out: &mut Vec<Event>) -> Result<(), Deco
             ticks_per_second: r.u8()?,
         },
         EV_COMMAND_CURSOR => Event::CommandCursor { next: r.varint()? },
-        EV_AUTHOR => Event::Author {
-            lot: r.varint_u32()?,
-            tick: r.varint_u32()?,
-            principal: r.u64()?,
-            name: r.str()?,
-        },
+        EV_AUTHOR => {
+            let principal = r.u64()?;
+            let name = r.str()?;
+            // Each lot is two bytes at least, so a count that cannot fit is cut off early.
+            let n = r.count()?;
+            let mut prev = 0;
+            let mut lots = Vec::with_capacity(n);
+            for _ in 0..n {
+                prev = r.delta(prev)?;
+                lots.push(Authored {
+                    lot: prev,
+                    built: r.delta(tick)?,
+                });
+            }
+            Event::Author {
+                principal,
+                name,
+                lots,
+            }
+        }
         _ => return Ok(()),
     };
     out.push(event);

@@ -238,11 +238,10 @@ fn authors(log: &Memory) -> Vec<(u32, u32, u32, String)> {
     for district in 0..4 {
         for r in log.records(district) {
             for e in &r.events {
-                if let Event::Author {
-                    lot, tick, name, ..
-                } = e
-                {
-                    out.push((r.header.tick, *lot, *tick, name.clone()));
+                if let Event::Author { name, lots, .. } = e {
+                    for a in lots {
+                        out.push((r.header.tick, a.lot, a.built, name.clone()));
+                    }
                 }
             }
         }

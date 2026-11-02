@@ -156,16 +156,23 @@ fn event(out: &mut String, e: &Event) {
             let _ = write!(out, "{{\"type\":\"commandCursor\",\"next\":{next}");
         }
         Event::Author {
-            lot,
-            tick,
             principal,
             name,
+            lots,
         } => {
             let _ = write!(
                 out,
-                "{{\"type\":\"author\",\"lot\":{lot},\"tick\":{tick},\"principal\":\"{principal:016x}\",\"name\":"
+                "{{\"type\":\"author\",\"principal\":\"{principal:016x}\",\"name\":"
             );
             text(out, name);
+            out.push_str(",\"lots\":[");
+            for (i, a) in lots.iter().enumerate() {
+                if i > 0 {
+                    out.push(',');
+                }
+                let _ = write!(out, "[{},{}]", a.lot, a.built);
+            }
+            out.push(']');
         }
     }
     out.push('}');

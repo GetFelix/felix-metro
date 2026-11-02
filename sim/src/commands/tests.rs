@@ -1,6 +1,6 @@
 use felix_metro_core::City;
 use felix_metro_core::record::{
-    NO_BUILDING, REFUSED_BAD_KIND, REFUSED_BAD_SPEED, REFUSED_EMPTY, REFUSED_IN_USE,
+    Authored, NO_BUILDING, REFUSED_BAD_KIND, REFUSED_BAD_SPEED, REFUSED_EMPTY, REFUSED_IN_USE,
     REFUSED_MALFORMED, REFUSED_OCCUPIED, REFUSED_UNKNOWN, REFUSED_UNSUPPORTED,
 };
 use felix_metro_core::{BuildingKind, KINDS};
@@ -262,10 +262,9 @@ fn every_keyframe_tick_says_who_built_each_lot_in_that_lots_district() {
         (
             usize::from(world.city.lots[lot as usize].district),
             Event::Author {
-                lot,
-                tick: 3,
                 principal: principal_hash(who),
                 name: who.into(),
+                lots: vec![Authored { lot, built: 3 }],
             },
         )
     };
@@ -286,6 +285,44 @@ fn every_keyframe_tick_says_who_built_each_lot_in_that_lots_district() {
             assert!(got.is_empty(), "tick {tick}");
         }
     }
+}
+
+#[test]
+fn one_builder_is_one_event_in_a_district_with_all_their_lots_in_order() {
+    let mut world = World::new(city());
+    let district = |lot: u32| world.city.lots[lot as usize].district;
+    let mut free: Vec<u32> = (0..world.city.lots.len() as u32)
+        .filter(|&l| {
+            world
+                .building(l)
+                .is_some_and(|(k, _)| k >= u16::from(BuildingKind::TREE_FIRST))
+        })
+        .collect();
+    let first = free.remove(0);
+    let same: Vec<u32> = free
+        .into_iter()
+        .filter(|&l| district(l) == district(first))
+        .take(2)
+        .collect();
+    let lots = [first, same[1], same[0]];
+    for lot in lots {
+        build(&mut world, "mayor", lot);
+    }
+    let found = world.author_events();
+    assert_eq!(found.len(), 1);
+    let mut want = lots.to_vec();
+    want.sort_unstable();
+    assert_eq!(
+        found[0].1,
+        Event::Author {
+            principal: principal_hash("mayor"),
+            name: "mayor".into(),
+            lots: want
+                .into_iter()
+                .map(|lot| Authored { lot, built: 0 })
+                .collect(),
+        }
+    );
 }
 
 #[test]

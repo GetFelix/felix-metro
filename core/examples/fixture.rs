@@ -7,8 +7,8 @@ use std::fmt::Write;
 use felix_metro_core::{
     City, Congestion, Mode, Places, Resident, day_hash,
     record::{
-        BuildingDiff, Command, CommandRecord, Counts, Doing, Event, Header, Keyframe, Leg,
-        RegistryRecord, ResidentState, RoadDiff, TickRecord, Vehicle, decode_json,
+        Authored, BuildingDiff, Command, CommandRecord, Counts, Doing, Event, Header, Keyframe,
+        Leg, RegistryRecord, ResidentState, RoadDiff, TickRecord, Vehicle, decode_json,
     },
 };
 
@@ -114,10 +114,15 @@ fn records() -> Vec<(&'static str, Vec<u8>)> {
                 ticks_per_second: 8,
             },
             Event::Author {
-                lot: 17,
-                tick: 31_000,
                 principal: 0xdead_beef_0123_4567,
                 name: "Ana \"the\" Builder".into(),
+                lots: vec![
+                    Authored {
+                        lot: 17,
+                        built: 31_000,
+                    },
+                    Authored { lot: 18, built: 99 },
+                ],
             },
         ],
     };

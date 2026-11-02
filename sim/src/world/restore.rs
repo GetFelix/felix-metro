@@ -113,15 +113,18 @@ impl World {
     /// them, so the log says it alongside.
     pub(crate) fn restore_authors<'a>(&mut self, events: impl Iterator<Item = &'a Event>) {
         for event in events {
-            if let Event::Author {
-                lot,
-                tick,
+            let Event::Author {
                 principal,
                 name,
+                lots,
             } = event
-                && (*lot as usize) < self.city.lots.len()
-            {
-                self.set_author(*lot, *tick, *principal, name);
+            else {
+                continue;
+            };
+            for a in lots {
+                if (a.lot as usize) < self.city.lots.len() {
+                    self.set_author(a.lot, a.built, *principal, name);
+                }
             }
         }
     }

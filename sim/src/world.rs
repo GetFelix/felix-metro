@@ -3,9 +3,9 @@
 use std::collections::{BTreeMap, HashSet};
 
 use felix_metro_core::record::{
-    BuildingDiff, Command, Counts, Doing, Event, Keyframe, Leg, NO_BUILDING, REFUSED_BAD_KIND,
-    REFUSED_EMPTY, REFUSED_IN_USE, REFUSED_OCCUPIED, REFUSED_UNKNOWN, REFUSED_UNSUPPORTED,
-    RESULT_APPLIED, ResidentState, Vehicle,
+    Authored, BuildingDiff, Command, Counts, Doing, Event, Keyframe, Leg, NO_BUILDING,
+    REFUSED_BAD_KIND, REFUSED_EMPTY, REFUSED_IN_USE, REFUSED_OCCUPIED, REFUSED_UNKNOWN,
+    REFUSED_UNSUPPORTED, RESULT_APPLIED, ResidentState, Vehicle,
 };
 use felix_metro_core::{
     Activity, BuildingKind, City, Congestion, Mode, Places, Resident, TICKS_PER_DAY,
@@ -378,19 +378,42 @@ impl World {
             for (district, keyframe) in self.keyframes(tick).into_iter().enumerate() {
                 out[district].keyframe = Some(keyframe);
             }
-            // The keyframe lists no builders, so each keyframe tick says who built what.
-            for (&lot, author) in &self.authors {
-                let district = usize::from(self.city.lots[lot as usize].district);
-                out[district].events.push(Event::Author {
-                    lot,
-                    tick: author.tick,
-                    principal: author.principal,
-                    name: author.name.clone(),
-                });
+            for (district, event) in self.author_events() {
+                out[district].events.push(event);
             }
         }
         self.tick += 1;
         out
+    }
+
+    /// One `author` event per district and builder, for the lots that builder built there that still
+    /// stand. A keyframe lists no builders, so each keyframe tick says who built what.
+    pub(crate) fn author_events(&self) -> Vec<(usize, Event)> {
+        let mut groups: BTreeMap<(usize, u64, &str), Vec<Authored>> = BTreeMap::new();
+        for (&lot, author) in &self.authors {
+            let district = usize::from(self.city.lots[lot as usize].district);
+            groups
+                .entry((district, author.principal, author.name.as_str()))
+                .or_default()
+                .push(Authored {
+                    lot,
+                    built: author.tick,
+                });
+        }
+        groups
+            .into_iter()
+            .map(|((district, principal, name), lots)| {
+                let name = name.to_owned();
+                (
+                    district,
+                    Event::Author {
+                        principal,
+                        name,
+                        lots,
+                    },
+                )
+            })
+            .collect()
     }
 
     /// Every district's state at the end of `tick`.

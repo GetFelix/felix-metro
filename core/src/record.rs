@@ -253,17 +253,22 @@ pub enum Event {
     CommandCursor {
         next: u64,
     },
-    /// Who built the building on `lot`, and when: the tick of its `built`
-    /// event. Written for every attributed lot on every keyframe tick, so a
-    /// page that starts from a keyframe, which lists no builder, can still say
-    /// who built what. `principal` and `name` are those of the `command` event
-    /// that caused the build.
+    /// The lots a builder built that still stand, each with the tick of its `built` event.
+    /// A district writes one per builder on every keyframe tick, so a page that starts from a
+    /// keyframe, which lists no builder, can still say who built what. `principal` and `name` are
+    /// those of the `command` events that caused the builds.
     Author {
-        lot: u32,
-        tick: u32,
         principal: u64,
         name: String,
+        lots: Vec<Authored>,
     },
+}
+
+/// A lot a builder built, and the tick of its `built` event.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Authored {
+    pub lot: u32,
+    pub built: u32,
 }
 
 /// A district's state at one tick, drawable with nothing before it.

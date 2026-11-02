@@ -89,10 +89,14 @@ fn event(rng: &mut Rng) -> Event {
             next: rng.next_u64() >> rng.below(64),
         },
         _ => Event::Author {
-            lot: rng.next_u64() as u32,
-            tick: rng.next_u64() as u32,
             principal: rng.next_u64(),
             name: name(rng),
+            lots: (0..rng.below(6))
+                .map(|_| Authored {
+                    lot: rng.next_u64() as u32,
+                    built: rng.next_u64() as u32,
+                })
+                .collect(),
         },
     }
 }
@@ -718,39 +722,57 @@ fn json_names_every_field_and_escapes_text() {
 #[test]
 fn an_author_event_round_trips_and_has_its_json() {
     let author = Event::Author {
-        lot: 1234,
-        tick: 70_000,
         principal: 255,
         name: "Ana \"A\"".into(),
+        lots: vec![
+            Authored {
+                lot: 1234,
+                built: 4,
+            },
+            Authored { lot: 9, built: 5 },
+        ],
     };
     let tick = plain_tick(vec![author]);
     assert_eq!(TickRecord::decode(&tick.encode().unwrap()).unwrap(), tick);
     assert_eq!(
         tick.to_json(),
-        r#"{"kind":"tick","epoch":1,"district":0,"tick":5,"speed":4,"keyframeOffset":0,"wallUs":0,"keyframe":null,"events":[{"type":"author","lot":1234,"tick":70000,"principal":"00000000000000ff","name":"Ana \"A\""}]}"#
+        r#"{"kind":"tick","epoch":1,"district":0,"tick":5,"speed":4,"keyframeOffset":0,"wallUs":0,"keyframe":null,"events":[{"type":"author","principal":"00000000000000ff","name":"Ana \"A\"","lots":[[1234,4],[9,5]]}]}"#
     );
 }
 
 #[test]
-fn an_author_event_is_22_bytes_with_a_six_letter_name() {
-    // The cost design.md quotes: a 2-byte head, a lot (2), a tick (3), the hash (8) and the name (1 + 6).
-    let event = Event::Author {
-        lot: 1234,
-        tick: 70_000,
-        principal: 1,
-        name: "Marcus".into(),
+fn an_author_event_costs_the_name_once_and_a_few_bytes_a_lot() {
+    // The cost design.md quotes, in the worst case: a log six days old (ticks of 2^21), builds from the first day,
+    // and lots a few apart. A lot is a one-byte delta and a four-byte tick delta.
+    let at = 1 << 21;
+    let lots = |n: u32| {
+        (0..n)
+            .map(|i| Authored {
+                lot: 1000 + 3 * i,
+                built: 100 + i,
+            })
+            .collect::<Vec<_>>()
     };
-    let bytes = plain_tick(vec![event]).encode().unwrap();
-    assert_eq!(bytes.len(), PLAIN_HEADER + 22);
+    let size = |n: u32| {
+        let mut r = plain_tick(vec![Event::Author {
+            principal: 1,
+            name: "Marcus".into(),
+            lots: lots(n),
+        }]);
+        r.header.tick = at;
+        r.encode().unwrap().len()
+    };
+    // The first lot's delta is from 0, so it is a byte or two longer than the ones after it.
+    assert_eq!(size(1) - size(0), 6);
+    assert_eq!(size(101) - size(1), 100 * 5);
 }
 
 #[test]
 fn an_author_name_over_the_limit_is_refused() {
     let event = Event::Author {
-        lot: 1,
-        tick: 1,
         principal: 1,
         name: "x".repeat(MAX_STR + 1),
+        lots: Vec::new(),
     };
     assert_eq!(
         plain_tick(vec![event]).encode(),
