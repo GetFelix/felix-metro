@@ -400,13 +400,14 @@ impl History {
                             })
                     })
                     .collect::<Result<Vec<_>>>()?;
+                let policy = self.policy(base, &city.seed);
                 World::restore(
                     city,
                     base,
                     &frames,
                     &self.balances(base),
                     self.council(base),
-                    self.policy(base),
+                    policy,
                     &self.departures,
                 )?
             }
@@ -469,16 +470,16 @@ impl History {
             .unwrap_or_else(Council::new)
     }
 
-    /// The policies as the keyframe tick `base` left them. A log from before
-    /// policies has none, and the city starts with the usual hours and limits.
-    fn policy(&self, base: u32) -> Policy {
+    /// The policies as the keyframe tick `base` left them. A log with no
+    /// `policy` event has none changed, and the city of `seed` still has the ones it opened with.
+    fn policy(&self, base: u32, seed: &str) -> Policy {
         self.ticks[&base]
             .first()
             .into_iter()
             .flatten()
             .flat_map(|r| &r.events)
             .find_map(Policy::from_event)
-            .unwrap_or_else(Policy::new)
+            .unwrap_or_else(|| Policy::opening(seed))
     }
 
     /// The ticks some district has not committed yet, oldest first.

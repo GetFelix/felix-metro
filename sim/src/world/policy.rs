@@ -41,6 +41,16 @@ impl Policy {
         Policy { settings }
     }
 
+    /// The policies a city opens with: a chapter's, if its seed names one, or [`Policy::new`].
+    pub(crate) fn opening(seed: &str) -> Policy {
+        let mut policy = Policy::new();
+        if let Some(chapter) = felix_metro_core::chapter_for(seed) {
+            policy.settings[POLICY_AVENUE_LIMIT].value = chapter.opening_avenue_limit;
+            policy.settings[POLICY_STREET_LIMIT].value = chapter.opening_street_limit;
+        }
+        policy
+    }
+
     /// The policies a `policy` event describes, or `None` for any other event.
     pub(crate) fn from_event(event: &Event) -> Option<Policy> {
         match *event {
