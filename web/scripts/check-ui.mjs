@@ -430,9 +430,26 @@ for (const [size, tag] of [
 // 11. Following a resident from a link: the card shows who they are and their day, the camera goes to their building,
 // Esc and a pan let go, and turning and zooming do not. With no log the resident is placed by their schedule at the
 // hour on the slider, so this runs without a gateway; picking a moving car is checked against the live stack.
+// Frames are slow under software GL, so each step waits on the page's state (the card shown or hidden, a number of
+// frames drawn) and never on a fixed time.
+const cardIs = (page, shown) =>
+  page.waitForFunction((on) => document.getElementById('follow').hidden !== on, shown, {
+    polling: 50,
+    timeout: 60_000,
+  });
+const frames = (page, n = 3) =>
+  page.evaluate(async (count) => {
+    for (let i = 0; i < count; i++) await new Promise((done) => requestAnimationFrame(done));
+  }, n);
+const followFrom = async (page, resident) => {
+  await page.evaluate((r) => window.__following.start(r), resident);
+  await cardIs(page, true);
+};
 {
   const { context, page } = await open('tier=low&still&t=12&follow=3&attract=0', DESKTOP);
-  await settle(page, 1200);
+  await cardIs(page, true);
+  // The camera eases in on a spring; the goal it heads for is set on the first frame.
+  await page.waitForFunction(() => window.__camera.state().distance <= 14.01, null, { polling: 50, timeout: 60_000 });
   const card = '#follow';
   const text = (selector) => page.locator(`${card} ${selector}`).innerText();
   check(await visible(page, card), '?follow= shows the resident’s card');
@@ -468,7 +485,7 @@ for (const [size, tag] of [
   await page.mouse.move(700, 380, { steps: 4 });
   await page.mouse.up();
   await page.mouse.wheel(0, -200);
-  await settle(page, 600);
+  await frames(page);
   const turned = await view();
   check(turned.azimuth !== camera.azimuth, 'a left drag still turns the view');
   check(await visible(page, card), 'turning and zooming keep following');
@@ -479,19 +496,23 @@ for (const [size, tag] of [
 
   // A click that is not on a car or walker does nothing.
   await page.mouse.click(300, 600);
+  await frames(page);
   check(await visible(page, card), 'a click on empty ground leaves the follow alone');
 
   // Photo mode hides the card, and its Esc is its own.
   await page.keyboard.press('h');
+  await frames(page);
   check(!(await visible(page, card)), 'photo mode hides the card');
   await page.keyboard.press('Escape');
+  await frames(page);
   check(await visible(page, card), 'Esc leaves photo mode and keeps following');
 
   await page.keyboard.press('Escape');
+  await cardIs(page, false).catch(() => {});
   check(!(await visible(page, card)), 'Esc stops following');
   check((await page.evaluate(() => window.__following.resident())) === null, 'nobody is followed after Esc');
   const left = await view();
-  await settle(page, 400);
+  await frames(page, 4);
   const still = await view();
   check(still.x === left.x && still.z === left.z, 'the camera stays where it was when the follow ends');
   await context.close();
@@ -501,19 +522,20 @@ for (const [size, tag] of [
   const card = '#follow';
   check(!(await visible(page, card)), 'no card until someone is followed');
   check(await page.evaluate(() => window.__following.start(5)), 'the page can follow a resident it is told of');
-  await settle(page, 300);
+  await cardIs(page, true).catch(() => {});
   check(await visible(page, card), 'the card shows');
   await page.locator(`${card} [data-stop]`).click();
+  await cardIs(page, false).catch(() => {});
   check(!(await visible(page, card)), 'the card’s button stops following');
   // From the keyboard, the card's button stops it and focus goes to a control, not the page; a region always in the page says who.
-  await page.evaluate(() => window.__following.start(5));
-  await settle(page, 300);
+  await followFrom(page, 5);
   check(
     /^Following .+\.$/.test(await page.locator('body > [role=status].sr-only').first().textContent()),
     'a live region says who is followed',
   );
   await page.focus(`${card} [data-stop]`);
   await page.keyboard.press('Enter');
+  await cardIs(page, false).catch(() => {});
   check(!(await visible(page, card)), 'Enter on the card’s button stops following');
   check((await active(page)) === 'settings-button', 'focus goes to a control when the card goes');
   check(
@@ -544,10 +566,9 @@ for (const [size, tag] of [
     ['a pan key', async () => page.keyboard.press('w')],
     ['the reset key', async () => page.keyboard.press('0')],
   ]) {
-    await page.evaluate(() => window.__following.start(5));
-    await settle(page, 200);
+    await followFrom(page, 5);
     await act();
-    await settle(page, 200);
+    await cardIs(page, false).catch(() => {});
     check(!(await visible(page, card)), `${what} lets go`);
   }
   // The key list names the gesture.
@@ -560,6 +581,7 @@ for (const [size, tag] of [
   // A resident the city does not have is said so, and the page carries on as it was.
   const { context, page } = await open('tier=low&still&t=12&follow=99999999', DESKTOP);
   check(!(await visible(page, '#follow')), 'a resident who does not exist gets no card');
+  await page.waitForSelector('.toast', { timeout: 60_000 }).catch(() => {});
   check(
     /no resident 99999999/.test(await page.locator('.toast').first().innerText()),
     'the page says there is no such resident',
@@ -569,14 +591,21 @@ for (const [size, tag] of [
 {
   // Attract mode goes on turning the view round the one being followed, and a phone has room for the card.
   const { context, page } = await open('tier=low&t=12&follow=3&attract=2', DESKTOP);
+  await cardIs(page, true);
   await settle(page, 2500);
   const first = await page.evaluate(() => window.__camera.state().azimuth);
-  await settle(page, 1500);
-  check((await page.evaluate(() => window.__camera.state().azimuth)) !== first, 'attract mode still turns the view');
+  const turned = await page
+    .waitForFunction((was) => window.__camera.state().azimuth !== was, first, { polling: 100, timeout: 120_000 })
+    .then(
+      () => true,
+      () => false,
+    );
+  check(turned, 'attract mode still turns the view');
   check(await visible(page, '#follow'), 'and the follow is kept');
   await context.close();
   const phone = await open('tier=low&still&t=12&follow=3&attract=0', PHONE);
-  await settle(phone.page, 1000);
+  await cardIs(phone.page, true);
+  await frames(phone.page);
   const box = await phone.page.locator('#follow').boundingBox();
   check(box && box.x >= 0 && box.x + box.width <= PHONE.width, 'the card fits on a phone');
   await phone.page.screenshot({ path: join(out, 'follow-day-360.png') });
