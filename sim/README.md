@@ -86,6 +86,15 @@ writes a `balance` event with its share. The prices and rates are in `sim/src/wo
 [docs/design.md](../docs/design.md#money) has the rules. A restart restores the account from the newest keyframe and the
 `ledger` events after it.
 
+## The council
+
+Three factions (commuters, the shore's residents, and shops) are scored once a city day from the trips and buildings,
+and each states what it asks for. District 0 writes a `council` event on every keyframe tick with the demands, the
+latest scores, how many days in a row each faction has been unhappy, and the open day's running totals. A faction
+unhappy for 3 days in a row recalls the mayor, which the sim only records. The demands are in
+`sim/src/world/council.rs`, and [docs/design.md](../docs/design.md#the-council) has the rules. A restart restores the
+council, running totals included, from the newest keyframe tick.
+
 ## The registry
 
 Every city, when it starts, writes a `created` record (name, seed, districts a side, wall time) to

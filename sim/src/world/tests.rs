@@ -573,6 +573,15 @@ fn balances(step: &[DistrictTick]) -> Vec<i64> {
         .collect()
 }
 
+/// The council a keyframe tick wrote.
+fn council(step: &[DistrictTick]) -> Council {
+    step[0]
+        .events
+        .iter()
+        .find_map(Council::from_event)
+        .expect("a keyframe tick writes the council")
+}
+
 #[test]
 fn a_world_restored_from_a_keyframe_steps_as_the_original_does() {
     // From an hour of the night, the rush hours and the middle of the day, in cities of 4 and 9 districts.
@@ -611,8 +620,9 @@ fn a_world_restored_from_a_keyframe_steps_as_the_original_does() {
                 }
             }
             let balances = balances(&ticks[at as usize]);
+            let council = council(&ticks[at as usize]);
             let mut restored =
-                World::restore(city.clone(), at, &frames, &balances, &departures).unwrap();
+                World::restore(city.clone(), at, &frames, &balances, council, &departures).unwrap();
             assert_eq!(restored.next_tick(), at + 1);
             for tick in at + 1..at + 400 {
                 assert!(
@@ -635,8 +645,108 @@ fn a_keyframe_with_nobody_on_the_road_to_say_where_from_is_refused() {
         .map(|d| d.keyframe.clone().unwrap())
         .collect();
     let balances = balances(&ticks[at as usize]);
-    let Err(err) = World::restore(city, at, &frames, &balances, &HashMap::new()) else {
+    let council = council(&ticks[at as usize]);
+    let Err(err) = World::restore(city, at, &frames, &balances, council, &HashMap::new()) else {
         panic!("restored with no trip events");
     };
     assert!(format!("{err:#}").contains("no trip event"), "{err:#}");
+}
+
+/// The page's city stats are checked in `web/src/stats.test.ts` against this file: the log of a morning as the browser
+/// reads it, and what the sim says was on the road at every tick. Run with `METRO_WRITE_FIXTURE=1` to rewrite it.
+#[test]
+fn the_stats_fixture_for_the_page_is_current() {
+    use std::fmt::Write;
+
+    // From 07:00, when nobody is out, to 09:00, past the morning rush.
+    const FROM: u32 = 7 * TICKS_PER_HOUR;
+    const TO: u32 = 9 * TICKS_PER_HOUR;
+    let mut world = World::new(City::generate("harbor", 2).unwrap());
+    let mut records = Vec::new();
+    let (mut on_road, mut walkers, mut population) = (Vec::new(), Vec::new(), 0);
+    for tick in 0..=TO {
+        let step = world.step();
+        if tick < FROM {
+            continue;
+        }
+        let frames = world.keyframes(tick);
+        let road = frames.iter().map(|f| f.counts.on_road).sum::<u32>();
+        if tick == FROM {
+            assert_eq!(road, 0, "residents are on the road at the start");
+        }
+        let walking = frames
+            .iter()
+            .flat_map(|f| &f.residents)
+            .filter(|r| matches!(&r.doing, Doing::Trip(v) if v.kind == 0))
+            .count();
+        population = frames.iter().map(|f| f.residents.len()).sum::<usize>();
+        on_road.push(road);
+        walkers.push(walking);
+        for (district, d) in step.into_iter().enumerate() {
+            if d.events.is_empty() && d.keyframe.is_none() {
+                continue;
+            }
+            // A keyframe's residents are most of the file. Those at home or at work are only counted; those on the
+            // road are kept, without their routes, since the page reads who they are.
+            let held = d.keyframe.as_ref().map_or(0, |k| k.residents.len());
+            let keyframe = d.keyframe.map(|k| Keyframe {
+                residents: k
+                    .residents
+                    .into_iter()
+                    .filter_map(|r| match r.doing {
+                        Doing::Trip(v) => Some(ResidentState {
+                            id: r.id,
+                            doing: Doing::Trip(Vehicle {
+                                route: Vec::new(),
+                                ..v
+                            }),
+                        }),
+                        Doing::Activity { .. } => None,
+                    })
+                    .collect(),
+                ..k
+            });
+            let record = TickRecord {
+                header: Header {
+                    epoch: 1,
+                    district: district as u16,
+                    tick,
+                    speed: 4,
+                    keyframe_offset: 0,
+                    wall_us: 0,
+                },
+                keyframe,
+                events: d.events,
+            };
+            records.push(format!(
+                "{{\"held\":{held},\"record\":{}}}",
+                record.to_json()
+            ));
+        }
+    }
+    let list = |v: &[usize]| {
+        v.iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(",")
+    };
+    let mut json = String::new();
+    write!(
+        json,
+        "{{\"seed\":\"harbor\",\"districts\":2,\"from\":{FROM},\"to\":{TO},\"population\":{population},\
+         \"onRoad\":[{}],\"walkers\":[{}],\"records\":[\n{}\n]}}\n",
+        list(&on_road.iter().map(|&n| n as usize).collect::<Vec<_>>()),
+        list(&walkers),
+        records.join(",\n"),
+    )
+    .unwrap();
+
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../web/src/stats-fixture.json");
+    if std::env::var_os("METRO_WRITE_FIXTURE").is_some() {
+        std::fs::write(path, &json).unwrap();
+    }
+    assert!(
+        std::fs::read_to_string(path).is_ok_and(|now| now == json),
+        "web/src/stats-fixture.json is out of date; rewrite it with METRO_WRITE_FIXTURE=1 cargo test -p felix-metro-sim the_stats_fixture"
+    );
 }
