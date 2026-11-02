@@ -284,6 +284,40 @@ async fn the_account_is_the_same_after_a_restart_on_either_side_of_a_day() {
     }
 }
 
+/// A policy is rebuilt from a `policy` event after the keyframe, or from the one on the keyframe tick itself. Shop
+/// hours move shopkeepers' trips, so a restart that dropped the policy would write different records.
+#[tokio::test(start_paused = true)]
+async fn a_policy_set_before_a_restart_still_holds_after_it() {
+    const TOTAL: u32 = 4400;
+    let policy = Command::Policy { kind: 0, value: 3 };
+    let run = |log: Memory, stop: u32, command: Option<Command>| {
+        let inbox = command.map(|command| {
+            let (send, inbox) = mpsc::channel(8);
+            send.try_send(log.publish("mayor", 1, command)).unwrap();
+            std::mem::forget(send);
+            inbox
+        });
+        async move { run_city_with("harbor", harbor(), quick(stop), log, inbox).await }
+    };
+    let whole_log = Memory::healthy();
+    run(whole_log.clone(), 250, None).await.unwrap();
+    run(whole_log.clone(), TOTAL, Some(policy.clone()))
+        .await
+        .unwrap();
+    let whole = records(&whole_log);
+    assert_eq!(command_events(&whole_log), vec![(250, 1, RESULT_APPLIED)]);
+
+    // 300 restarts from the keyframe before the command, 480 from the one after it, and 4200 from one
+    // where the shopkeepers are held at work by the policy.
+    for stop in [300, 480, 4200] {
+        let log = Memory::healthy();
+        run(log.clone(), 250, None).await.unwrap();
+        run(log.clone(), stop, Some(policy.clone())).await.unwrap();
+        run(log.clone(), TOTAL, None).await.unwrap();
+        assert!(records(&log) == whole, "stopped at tick {stop}");
+    }
+}
+
 #[tokio::test(start_paused = true)]
 async fn the_command_stream_resumes_where_the_sim_stopped_reading() {
     let world = World::new(harbor());

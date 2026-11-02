@@ -42,6 +42,7 @@ import { intoThePast, startsRewind, whooshDue } from './soundscape-mix';
 import { createStatus, type Status } from './ui/status';
 import { note, toast } from './ui/toast';
 import { councilView, fitCouncil, renderCouncil, TALL_SCREEN, type CouncilEvent } from './council';
+import { policyRows, USUAL_POLICY, type PolicyEvent } from './policy';
 import { money } from './money';
 import { displayName } from './registry';
 import { Traffic } from './traffic';
@@ -548,6 +549,7 @@ async function main() {
   let fundsShown: number | null = null;
   const councilChip = document.getElementById('council-chip')!;
   let councilShown: CouncilEvent | null = null;
+  let policyShown: PolicyEvent | null = null;
   let liveInfo: NonNullable<Window['__live']> | null = null;
   if (state && traffic) {
     liveInfo = {
@@ -1320,15 +1322,19 @@ async function main() {
           fundsChip.classList.toggle('short', funds !== null && funds < 0);
           if (funds !== null) fundsText.textContent = money(funds);
         }
-        if (state.council !== councilShown) {
+        if (state.council !== councilShown || state.policy !== policyShown) {
           councilShown = state.council;
+          policyShown = state.policy;
           councilChip.classList.toggle('hidden', councilShown === null);
-          if (councilShown)
+          if (councilShown) {
+            const rows = policyRows(policyShown ?? USUAL_POLICY, tick);
             renderCouncil(
               councilChip,
               councilView(councilShown, city?.shore ?? null),
               window.innerHeight >= TALL_SCREEN,
+              rows,
             );
+          }
         }
         timelineFrame?.(tick);
         Object.assign(liveInfo, {

@@ -4,8 +4,8 @@ use super::wire::{Reader, Writer};
 use super::{
     BuildingDiff, Command, CommandRecord, Counts, DecodeError, Doing, EncodeError, Event, FACTIONS,
     FLAG_KEYFRAME, Header, KIND_COMMAND, KIND_MARKERS, KIND_REGISTRY, KIND_TICK, Keyframe, Leg,
-    MARK_BUILT, MARK_DEMOLISHED, MARK_ROAD, MAX_PROGRESS, Marker, MarkersRecord, RegistryRecord,
-    ResidentState, RoadDiff, Standing, Tally, TickRecord, Vehicle,
+    MARK_BUILT, MARK_DEMOLISHED, MARK_ROAD, MAX_PROGRESS, Marker, MarkersRecord, POLICIES,
+    PolicySetting, RegistryRecord, ResidentState, RoadDiff, Standing, Tally, TickRecord, Vehicle,
 };
 use crate::city::City;
 use crate::schedule::TICKS_PER_DAY;
@@ -35,6 +35,7 @@ const EXT_LEDGER: u64 = 1;
 const EXT_BALANCE: u64 = 2;
 // Kind 3 is taken by the author event on another branch.
 const EXT_COUNCIL: u64 = 4;
+const EXT_POLICY: u64 = 5;
 
 const CMD_PLACE_ROAD: u8 = 1;
 const CMD_ZONE: u8 = 2;
@@ -42,6 +43,7 @@ const CMD_BUILD: u8 = 3;
 const CMD_DEMOLISH: u8 = 4;
 const CMD_SPEED: u8 = 5;
 const CMD_FORK: u8 = 6;
+const CMD_POLICY: u8 = 7;
 
 const REG_CREATED: u8 = 1;
 const REG_FORKED: u8 = 2;
@@ -381,6 +383,15 @@ fn put_event(w: &mut Writer, e: &Event, tick: u32) -> Result<(), EncodeError> {
             b.varint(u64::from(tally.visits));
             Ok(())
         }),
+        Event::Policy { settings } => w.framed(EV_EXTENDED, EVENT_TAG_BITS, |b| {
+            b.varint(EXT_POLICY);
+            for s in settings {
+                b.u8(s.value);
+                // Zero for a policy that never changed, so a tick of 0 reads back as 1.
+                b.varint(s.changed.map_or(0, |t| u64::from(t) + 1));
+            }
+            Ok(())
+        }),
     }
 }
 
@@ -485,6 +496,25 @@ fn get_entry(r: &mut Reader, tick: u32, out: &mut Vec<Event>) -> Result<(), Deco
                         visits: r.varint_u32()?,
                     },
                 }
+            }
+            EXT_POLICY => {
+                let mut settings = [PolicySetting {
+                    value: 0,
+                    changed: None,
+                }; POLICIES];
+                for s in &mut settings {
+                    *s = PolicySetting {
+                        value: r.u8()?,
+                        changed: r
+                            .varint()?
+                            .checked_sub(1)
+                            .map(|t| {
+                                u32::try_from(t).map_err(|_| DecodeError::Invalid("policy tick"))
+                            })
+                            .transpose()?,
+                    };
+                }
+                Event::Policy { settings }
             }
             _ => return Ok(()),
         },
@@ -632,6 +662,11 @@ pub(super) fn encode_command(c: &CommandRecord) -> Result<Vec<u8>, EncodeError> 
             w.u32(*tick);
             w.str(name)?;
         }
+        Command::Policy { kind, value } => {
+            w.u8(CMD_POLICY);
+            w.u8(*kind);
+            w.u8(*value);
+        }
     }
     Ok(w.0)
 }
@@ -662,6 +697,10 @@ pub(super) fn decode_command(bytes: &[u8]) -> Result<CommandRecord, DecodeError>
         CMD_FORK => Command::Fork {
             tick: r.u32()?,
             name: r.str()?,
+        },
+        CMD_POLICY => Command::Policy {
+            kind: r.u8()?,
+            value: r.u8()?,
         },
         tag => return Err(DecodeError::UnknownTag(tag)),
     };
