@@ -287,10 +287,10 @@ pub async fn run_with_history<L: Log>(
                     changed: changed.then_some(at),
                     cursor: said,
                     wall_us: unix_micros(),
+                    marked,
                 },
                 step,
                 commanded,
-                marked,
                 &mut shards,
                 |district| !history.lacks(district, tick),
             )
@@ -440,10 +440,10 @@ pub async fn run_with_history<L: Log>(
                 changed,
                 cursor: cursor.filter(|_| moved || keyframe),
                 wall_us: unix_micros(),
+                marked,
             },
             step,
             commanded,
-            marked,
             &mut shards,
             |_| false,
         )
@@ -489,6 +489,8 @@ struct Tick {
     /// The command stream position to record, on the ticks that record one.
     cursor: Option<u64>,
     wall_us: u64,
+    /// The day's timeline markers this tick changed, which go in district 0's commit.
+    marked: Option<Marked>,
 }
 
 /// The markers the tick's applied commands make, with the day's list read first when this run has not
@@ -514,7 +516,7 @@ async fn mark<L: Log>(
 
 /// Encodes the tick's record for each district and commits them, except the
 /// districts `has` says already hold the tick. Waits for every answer, then
-/// moves the districts' offsets on. `marked` goes in district 0's commit.
+/// moves the districts' offsets on.
 /// Returns the commits that had to be sent again.
 async fn commit_tick<L: Log>(
     log: &L,
@@ -522,7 +524,6 @@ async fn commit_tick<L: Log>(
     tick: Tick,
     step: Vec<crate::world::DistrictTick>,
     mut commanded: Vec<Vec<Event>>,
-    marked: Option<Marked>,
     shards: &mut [Shard],
     has: impl Fn(usize) -> bool,
 ) -> Result<u64> {
@@ -559,7 +560,11 @@ async fn commit_tick<L: Log>(
             .encode()
             .with_context(|| format!("encode district {district} tick {}", tick.number))?;
         let log = log.clone();
-        let marked = if district == 0 { marked.clone() } else { None };
+        let marked = if district == 0 {
+            tick.marked.clone()
+        } else {
+            None
+        };
         commits.spawn(async move {
             let attempts = commit_until_written(
                 &log,
