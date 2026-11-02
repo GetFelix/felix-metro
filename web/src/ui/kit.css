@@ -127,7 +127,3 @@ canvas {
 #sound-button[aria-pressed='false'] .waves {
   display: none;
 }
-/* Photo mode takes the overlay away. */
-body.photo #sound-button {
-  display: none;
-}

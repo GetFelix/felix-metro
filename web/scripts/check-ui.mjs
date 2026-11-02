@@ -223,8 +223,6 @@ const made = (page) => page.evaluate(() => window.__audio.made);
   await page.reload({ waitUntil: 'load' });
   await page.waitForFunction(() => window.__ready === true, null, { polling: 100, timeout: 180_000 });
   check((await pressed(page)) === 'false', 'sound turned off stays off after a reload');
-  await page.evaluate(() => document.body.classList.add('photo'));
-  check(!(await visible(page, '#sound-button')), 'the sound button is hidden in photo mode');
   await context.close();
 }
 {

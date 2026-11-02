@@ -1,9 +1,9 @@
 # The page overlay
 
 The overlay is everything on the page that is not the city: the Felix Metro chip, the clock, the timeline,
-the settings and sound buttons and the panels the first one opens. This page says what it does, where it lives in the code, and how
-to add to it. It also holds the rules (colour, type, motion and wording) that keep new controls looking like
-the ones already there.
+the settings and sound buttons and the panels the first one opens. This page says what it does, where it lives
+in the code, and how to add to it. It also holds the rules (colour, type, motion and wording) that keep new
+controls looking like the ones already there.
 
 | Day, with the LIVE pill                                  | Night, with the settings sheet                                         |
 | -------------------------------------------------------- | ---------------------------------------------------------------------- |
@@ -122,8 +122,10 @@ tested without a browser.
 
 A browser only lets a page start audio from a click or key press, so the page makes no `AudioContext` until the sound
 button, or `M`, is first used. The context is then made once and kept; turning the sound off fades it out and
-suspends it. If the browser has no `AudioContext`, or refuses to make one, `enable()` returns false: the button stays off
-and a short note says "Sound is not available in this browser". Nothing is logged to the console.
+suspends it.
+
+If the browser has no `AudioContext`, or refuses to make one, `enable()` returns false. The button stays off and a
+short note says "Sound is not available in this browser". Nothing is logged to the console. The next press tries again.
 
 ```mermaid
 flowchart LR
@@ -137,11 +139,16 @@ flowchart LR
 ```
 
 The whoosh plays when a backward playback starts (not when it speeds up or slows down) and when the timeline is moved
-to an earlier moment. It is rate limited, so dragging the handle back does not rattle.
+to an earlier moment, once the earlier moment is on screen. A drag or a held arrow key plays it once, at its first move
+into the past. It is also limited to one every 1.5 seconds, and a seek that fails is silent.
 
 The choice is kept in local storage under `felix-metro.sound`; blocked storage reads as off. If it was left on, the
 button shows as on after a reload and the sound starts at the first click or key press, since the browser allows
-nothing sooner. Using the button or `M` first switches it off instead.
+nothing sooner. Shift, Ctrl, Alt, Cmd and `Esc` do not count: a browser does not accept them as a go-ahead, so the sound
+waits for the next press. Using the button or `M` first switches it off instead.
+
+A hidden tab is suspended and wakes when you return, and a context the system interrupted (iOS does this) is resumed
+at the same moment.
 
 ### The clock
 
@@ -250,11 +257,13 @@ cd web
 node scripts/check-ui.mjs http://localhost:5173/ /tmp/ui
 ```
 
-`check-ui.mjs` drives the page with the keyboard (open the sheet, pick a quality, read the key list, `Esc`),
-checks that the hint is shown once and never under `?ui=0` or `?capture`, that no audio context is made before the
-sound button is used, that the button and `M` switch it, and that blocked audio gives a note and no console error,
-that the clock rolls and holds still
-with reduced motion, and that nothing overflows or collides at 360px, even with the city picker's arrow showing
-and the Reconnecting pill. It writes screenshots of the shell, the
-sheet, the key list and the hint, by day and night, at 1280px and 360px wide, into the folder you name. Look at
-them: the checks do not know whether the page looks right.
+`check-ui.mjs` drives the page with the keyboard (open the sheet, pick a quality, read the key list, `Esc`). It checks that:
+
+- the hint is shown once, and never under `?ui=0` or `?capture`;
+- no audio context is made before the sound button is used, the button and `M` switch the sound, and blocked audio
+  gives a note and no console error;
+- the clock rolls, and holds still with reduced motion;
+- nothing overflows or collides at 360px, even with the city picker's arrow showing and the Reconnecting pill.
+
+It writes screenshots of the shell, the sheet, the key list and the hint, by day and night, at 1280px and 360px wide,
+into the folder you name. Look at them: the checks do not know whether the page looks right.

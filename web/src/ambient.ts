@@ -8,6 +8,11 @@ export interface Ambient {
   readonly on: boolean;
   /** Start the sound. Call it from a click or key press. False when the browser has no audio or refuses it. */
   enable(): boolean;
+  /**
+   * Whether the audio is running, a moment after `enable`. False when the browser did not count the click or key press
+   * as a gesture and left the context suspended, so the caller can try again on the next one.
+   */
+  settled(): Promise<boolean>;
   disable(): void;
   /** The hour of the city, 0 to 24; the mix follows it. */
   setHour(hour: number): void;
@@ -29,21 +34,26 @@ const MASTER = 0.5;
 const EASE = 1.2;
 const FADE = 0.25;
 
-/** Two seconds of brown noise, which loops without a click; brown noise is the low rumble a street makes. */
-function brownNoise(ctx: AudioContext): AudioBuffer {
+/**
+ * Two seconds of brown noise, which loops without a click; brown noise is the low rumble a street makes. The walk runs
+ * on past the end, and the start is faded from that run-on into the walk, so the step from the last sample back to the
+ * first is as small as any other.
+ */
+export function brownNoise(ctx: Pick<AudioContext, 'sampleRate' | 'createBuffer'>): AudioBuffer {
   const length = ctx.sampleRate * 2;
+  const seam = Math.floor(ctx.sampleRate * 0.05);
+  const walk = new Float32Array(length + seam);
+  let last = 0;
+  for (let i = 0; i < walk.length; i++) {
+    last = (last + 0.02 * (Math.random() * 2 - 1)) / 1.02;
+    walk[i] = last * 3.5;
+  }
   const buffer = ctx.createBuffer(1, length, ctx.sampleRate);
   const data = buffer.getChannelData(0);
-  let last = 0;
-  for (let i = 0; i < length; i++) {
-    last = (last + 0.02 * (Math.random() * 2 - 1)) / 1.02;
-    data[i] = last * 3.5;
-  }
-  // Fade the ends into each other so the loop has no seam.
-  const seam = Math.floor(ctx.sampleRate * 0.05);
+  data.set(walk.subarray(0, length));
   for (let i = 0; i < seam; i++) {
     const t = i / seam;
-    data[i] = data[i]! * t + data[length - seam + i]! * (1 - t);
+    data[i] = walk[i]! * t + walk[length + i]! * (1 - t);
   }
   return buffer;
 }
@@ -128,13 +138,31 @@ function build(ctx: AudioContext): Graph {
   return { ctx, master, traffic, crickets, hum, hiss: whiteNoise(ctx) };
 }
 
+/** What the ambient sound needs to know about the page being on screen. */
+export interface PageVisibility {
+  hidden(): boolean;
+  onChange(cb: () => void): void;
+}
+
+const pageVisibility = (): PageVisibility | null =>
+  typeof document === 'undefined'
+    ? null
+    : { hidden: () => document.hidden, onChange: (cb) => document.addEventListener('visibilitychange', cb) };
+
+/** How long to wait for a context to start running before taking it that the browser did not count the gesture. */
+const START_MS = 300;
+
 /** The sound, created lazily: no AudioContext exists until the first `enable`. */
-export function createAmbient(open: ContextFactory = pageAudio): Ambient {
+export function createAmbient(
+  open: ContextFactory = pageAudio,
+  visibility: PageVisibility | null = pageVisibility(),
+): Ambient {
   let graph: Graph | null = null;
   let on = false;
   let hour = 12;
-  let refused = false;
+  let watching = false;
   let parked: ReturnType<typeof setTimeout> | undefined;
+  let starting: Promise<boolean> = Promise.resolve(false);
 
   const mix = () => {
     if (!graph || !on) return;
@@ -144,27 +172,53 @@ export function createAmbient(open: ContextFactory = pageAudio): Ambient {
     crickets.gain.setTargetAtTime(levels.crickets, ctx.currentTime, EASE);
   };
 
+  const resume = (ctx: AudioContext) =>
+    Promise.race([ctx.resume().catch(() => {}), new Promise((done) => setTimeout(done, START_MS))]).then(
+      () => ctx.state === 'running',
+    );
+
+  // A hidden tab makes no sound, and iOS can interrupt a context; both come back when the page does.
+  const watch = () => {
+    if (watching || !visibility) return;
+    watching = true;
+    visibility.onChange(() => {
+      if (!graph || !on) return;
+      const { ctx } = graph;
+      if (visibility.hidden()) void ctx.suspend().catch(() => {});
+      else if (ctx.state !== 'running') void ctx.resume().catch(() => {});
+    });
+  };
+
   return {
     get on() {
       return on;
     },
     enable() {
-      if (refused) return false;
       try {
         clearTimeout(parked);
-        graph ??= build(open());
-        void graph.ctx.resume().catch(() => {});
+        if (!graph) {
+          const ctx = open();
+          try {
+            graph = build(ctx);
+          } catch (err) {
+            void ctx.close?.().catch(() => {});
+            throw err;
+          }
+        }
+        watch();
+        starting = resume(graph.ctx);
         on = true;
         graph.master.gain.setTargetAtTime(MASTER, graph.ctx.currentTime, FADE);
         mix();
         return true;
       } catch {
-        refused = true;
+        // The next attempt may do better, so nothing is remembered about this one.
         graph = null;
         on = false;
         return false;
       }
     },
+    settled: () => starting,
     disable() {
       on = false;
       if (!graph) return;
@@ -172,6 +226,7 @@ export function createAmbient(open: ContextFactory = pageAudio): Ambient {
       try {
         master.gain.setTargetAtTime(0, ctx.currentTime, FADE);
         // Park the context once the fade is out, so a muted page spends nothing.
+        clearTimeout(parked);
         parked = setTimeout(() => void ctx.suspend().catch(() => {}), 1500);
       } catch {
         // A context that has gone away is as quiet as we wanted.

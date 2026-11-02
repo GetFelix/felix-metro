@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import type { Ambient } from '../ambient';
-import { UNAVAILABLE_TEXT, createSoundMemory, createSoundSwitch, isSoundKey, type SoundStorage } from './sound';
+import {
+  UNAVAILABLE_TEXT,
+  countsAsGesture,
+  createSoundMemory,
+  createSoundSwitch,
+  isSoundKey,
+  type SoundStorage,
+} from './sound';
 
 const storage = (): SoundStorage & { data: Map<string, string> } => {
   const data = new Map<string, string>();
@@ -11,6 +18,8 @@ function fakeAmbient(works = true) {
   const a = {
     on: false,
     enabled: 0,
+    running: true,
+    settled: () => Promise.resolve(a.running),
     enable: () => {
       a.enabled++;
       a.on = works;
@@ -52,7 +61,19 @@ function setup(opts: { remembered?: boolean; works?: boolean; blocked?: boolean 
     },
     onChange: (on) => changes.push(on),
   });
-  return { sw, ambient, store, told, changes, touch: () => gesture?.(), waiting: () => gesture !== null };
+  return {
+    sw,
+    ambient,
+    store,
+    told,
+    changes,
+    touch: () => {
+      const cb = gesture;
+      gesture = null;
+      cb?.();
+    },
+    waiting: () => gesture !== null,
+  };
 }
 
 describe('the sound switch', () => {
@@ -110,12 +131,36 @@ describe('the sound switch', () => {
     expect(store.data.get('felix-metro.sound')).toBe('0');
   });
 
+  it('waits for another click when the first one left the audio suspended', async () => {
+    const { ambient, touch, waiting } = setup({ remembered: true });
+    ambient.running = false;
+    touch();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(ambient.enabled).toBe(1);
+    expect(waiting()).toBe(true);
+    ambient.running = true;
+    touch();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(ambient.enabled).toBe(2);
+    expect(waiting()).toBe(false);
+  });
+
   it('gives up quietly when the first click cannot start the sound', () => {
     const { sw, touch, told, changes } = setup({ remembered: true, works: false });
     touch();
     expect(sw.on).toBe(false);
     expect(told).toEqual([]);
     expect(changes.at(-1)).toBe(false);
+  });
+});
+
+describe('what counts as a gesture', () => {
+  it('leaves out modifier keys and Esc', () => {
+    for (const key of ['Shift', 'Control', 'Alt', 'Meta', 'CapsLock', 'Escape'])
+      expect(countsAsGesture(key)).toBe(false);
+    for (const key of ['a', 'Enter', ' ', 'ArrowLeft', 'Tab']) expect(countsAsGesture(key)).toBe(true);
   });
 });
 

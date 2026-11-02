@@ -58,7 +58,12 @@ export function createSoundSwitch(deps: SoundDeps) {
       if (!ambient.enable()) {
         wanted = false;
         deps.onChange(false);
+        return;
       }
+      // A key the browser does not count as a gesture leaves the audio suspended: wait for the next one.
+      void ambient.settled().then((running) => {
+        if (!running && wanted && stopWaiting === null) arm();
+      });
     });
   };
   if (wanted) arm();
@@ -83,6 +88,13 @@ export function createSoundSwitch(deps: SoundDeps) {
       deps.onChange(wanted);
     },
   };
+}
+
+const NOT_GESTURES = new Set(['Shift', 'Control', 'Alt', 'Meta', 'CapsLock', 'Escape']);
+
+/** Whether a key press is one a browser accepts as the user's go-ahead to play audio; modifiers and Esc are not. */
+export function countsAsGesture(key: string): boolean {
+  return !NOT_GESTURES.has(key);
 }
 
 /** Whether a key press is the sound key: M alone, and not while typing. */
@@ -138,7 +150,8 @@ export function createSound(
     onChange: (on) => button.setAttribute('aria-pressed', String(on)),
     onGesture: (cb) => {
       const run = (e: Event) => {
-        if (button.contains(e.target as Node) || (e instanceof KeyboardEvent && isSoundKey(e))) return;
+        if (button.contains(e.target as Node)) return;
+        if (e instanceof KeyboardEvent && (isSoundKey(e) || !countsAsGesture(e.key))) return;
         off();
         cb();
       };
