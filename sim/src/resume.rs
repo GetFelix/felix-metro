@@ -12,7 +12,7 @@ use felix_metro_core::record::{Doing, Event, TickRecord};
 use tracing::warn;
 
 use crate::runner::{Log, Retry};
-use crate::world::{Departure, World};
+use crate::world::{Departure, World, opening_share};
 
 /// Records before the keyframe a restart first reads, so that a trip that
 /// left before it is found. A trip takes minutes of city time; a longer one
@@ -379,7 +379,8 @@ impl History {
                             })
                     })
                     .collect::<Result<Vec<_>>>()?;
-                let mut world = World::restore(city, base, &frames, &self.departures)?;
+                let mut world =
+                    World::restore(city, base, &frames, &self.balances(base), &self.departures)?;
                 world.restore_authors(self.ticks[&base].iter().flatten().flat_map(|r| &r.events));
                 world
             }
@@ -389,12 +390,37 @@ impl History {
             return Ok(world);
         };
         for tick in self.base.map_or(0, |base| base + 1)..=level {
-            for record in self.ticks[&tick].iter().flatten() {
-                world.apply_logged(tick, &record.events);
+            for (district, record) in self.ticks[&tick].iter().enumerate() {
+                if let Some(record) = record {
+                    world.apply_logged(district, tick, &record.events);
+                }
             }
             world.step();
         }
         Ok(world)
+    }
+
+    /// Each district's share of the account at the keyframe tick `base`. A log
+    /// from before the account has none, and the city starts it with its
+    /// opening funds. A keyframe tick finished by a different sim version can
+    /// leave some districts without a balance; they restart at their opening
+    /// share.
+    fn balances(&self, base: u32) -> Vec<i64> {
+        let districts = self.ticks[&base].len();
+        self.ticks[&base]
+            .iter()
+            .enumerate()
+            .map(|(district, record)| {
+                record
+                    .iter()
+                    .flat_map(|r| &r.events)
+                    .find_map(|e| match e {
+                        Event::Balance { amount } => Some(*amount),
+                        _ => None,
+                    })
+                    .unwrap_or_else(|| opening_share(districts, district))
+            })
+            .collect()
     }
 
     /// The ticks some district has not committed yet, oldest first.

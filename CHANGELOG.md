@@ -11,12 +11,11 @@
   applied commands), so a command sent while the sim was down runs when it comes back and none runs twice. A new city now
   reads its command stream from the start. The epoch in the tick header stays the same across a restart.
 
-- The sim records who built each building. On every keyframe tick each district writes an `author` event (event tag
-  14: a builder's hash and name and the lots they built that still stand, with the tick each was built) per builder
-  and district, so a page that starts from a keyframe can say who built what. A restart restores them from the newest
-  keyframe tick and the `command` and `built` events after it. Each lot costs 2 to 5 bytes an hour (under 0.1 B/s) and
-  a test holds the evening rush under the 10 KB/s goal with 150 built lots added. A city nobody has built in writes
-  none, so the log-size figures below are for that city.
+- The city has funds. It starts with $100,000; each city day residents and businesses pay tax and roads and parks cost
+  upkeep, and building or demolishing takes a price when the command applies. A command the city cannot pay for is
+  refused with result 10. The sim records a `ledger` event per district per day and per paid command, and a `balance`
+  event per district on every keyframe tick; a restart restores the account. The page shows the funds beside the clock,
+  and shows the funds of the moment you scrub to.
 
 ### Added
 
@@ -52,11 +51,6 @@
 
 ### The page
 
-- Point at a building (tap it on a phone) and a card says who built it and when: "Built by Ana · Day 2, 09:12 · See
-  it go up". Your own read "Built by you", and buildings the city began with read "Here since the start". "See it go
-  up" takes the city to 30 city seconds before the building was built through the timeline's own seek, and plays it
-  forward. The page asks the gateway for the `principal` feature to know which buildings are yours; a gateway without
-  it (before 0.8.0) shows names only. The card is left out with `?ui=0`.
 - Optional ambient sound, off until turned on. A speaker button beside the settings button, or the `M` key, switches it;
   the choice is kept in local storage and nothing plays before a click or key press. Traffic by day fades into crickets
   at dusk and back at dawn, following the city's clock, and a whoosh plays when a rewind or a scrub into the past starts
@@ -125,9 +119,6 @@
 
 ### Tools
 
-- `dev/check-restart.mjs` also checks that the keyframes after a restart still say who built each lot, and when.
-- `web/scripts/check-attribution.mjs` hovers a building someone built and a generated one in the live page, reads the
-  card, and follows "See it go up". CI runs it in the dev-stack job.
 - `web/scripts/check-ui.mjs` drives the overlay with the keyboard and takes day and night screenshots at 1280 and 360
   pixels wide. CI runs it as its own job, `overlay controls`.
 - The builder bot with `--rebuild` handles a demolish that gets no answer. The sim may have applied it, so the bot

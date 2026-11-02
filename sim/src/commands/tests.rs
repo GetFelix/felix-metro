@@ -1,7 +1,7 @@
 use felix_metro_core::City;
 use felix_metro_core::record::{
-    Authored, NO_BUILDING, REFUSED_BAD_KIND, REFUSED_BAD_SPEED, REFUSED_EMPTY, REFUSED_IN_USE,
-    REFUSED_MALFORMED, REFUSED_OCCUPIED, REFUSED_UNKNOWN, REFUSED_UNSUPPORTED,
+    Authored, LEDGER_BUILD, NO_BUILDING, REFUSED_BAD_KIND, REFUSED_BAD_SPEED, REFUSED_EMPTY,
+    REFUSED_IN_USE, REFUSED_MALFORMED, REFUSED_OCCUPIED, REFUSED_UNKNOWN, REFUSED_UNSUPPORTED,
 };
 use felix_metro_core::{BuildingKind, KINDS};
 
@@ -149,6 +149,11 @@ fn a_build_lands_in_the_lots_district_with_the_command_that_asked_for_it() {
                 lot,
                 kind: 3,
                 rotation: 2
+            },
+            Event::Ledger {
+                reason: LEDGER_BUILD,
+                earned: 0,
+                spent: 500,
             },
         ]
     );
@@ -342,7 +347,7 @@ fn a_restart_reads_the_author_back_from_the_command_and_built_pair() {
             rotation: 0,
         },
     ];
-    world.apply_logged(7, &mine);
+    world.apply_logged(0, 7, &mine);
     assert_eq!(world.building(lot), Some((3, 0)));
     assert_eq!(world.authors[&lot].tick, 7);
     assert_eq!(world.authors[&lot].name, "mayor");
@@ -368,9 +373,10 @@ fn a_restart_reads_the_author_back_from_the_command_and_built_pair() {
             rotation: 0,
         },
     ];
-    world.apply_logged(8, &refused);
+    world.apply_logged(0, 8, &refused);
     assert!(!world.authors.contains_key(&other));
     world.apply_logged(
+        0,
         9,
         &[
             Event::Command {

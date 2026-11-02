@@ -26,7 +26,7 @@ fn name(rng: &mut Rng) -> String {
 
 fn event(rng: &mut Rng) -> Event {
     let resident = rng.next_u64() as u32;
-    match rng.below(13) {
+    match rng.below(15) {
         0 => Event::Trip {
             resident,
             vehicle: rng.below(6) as u8,
@@ -87,6 +87,14 @@ fn event(rng: &mut Rng) -> Event {
         },
         11 => Event::CommandCursor {
             next: rng.next_u64() >> rng.below(64),
+        },
+        12 => Event::Ledger {
+            reason: rng.below(3) as u8,
+            earned: rng.next_u64() >> rng.below(64),
+            spent: rng.next_u64() >> rng.below(64),
+        },
+        13 => Event::Balance {
+            amount: (rng.next_u64() as i64) >> rng.below(64),
         },
         _ => Event::Author {
             principal: rng.next_u64(),
@@ -429,7 +437,7 @@ const FLAGS_AT: usize = 5;
 const COUNT_AT: usize = 15;
 
 /// A tag no build has used.
-const UNKNOWN_EVENT_TAG: u8 = 15;
+const UNKNOWN_EVENT_TAG: u8 = 0;
 
 /// A tick record's header for `events` events, with a keyframe if asked, then `body`.
 fn raw_tick(keyframe: bool, events: u8, body: &[u8]) -> Vec<u8> {
@@ -461,6 +469,19 @@ fn unknown_event_tags_are_skipped_and_the_rest_is_kept() {
 }
 
 const EV_SPEED_TAG: u8 = 11;
+
+#[test]
+fn an_unknown_extended_kind_is_skipped_and_the_rest_is_kept() {
+    let mut body = vec![head(15, 3), 99, 1, 2];
+    body.extend_from_slice(&[head(EV_SPEED_TAG, 1), 4]);
+    let r = TickRecord::decode(&raw_tick(false, 2, &body)).unwrap();
+    assert_eq!(
+        r.events,
+        [Event::Speed {
+            ticks_per_second: 4
+        }]
+    );
+}
 
 #[test]
 fn an_event_body_may_grow_but_not_shrink() {

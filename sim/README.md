@@ -61,7 +61,7 @@ principal itself.
 Commands are read in stream order and applied before the next tick is stepped, up to 256
 a tick, so that tick's records carry them and its keyframe shows the result. Each is
 recorded as a `command` event (hash, builder name, id, result) in the district it touched,
-followed by `built` or `demolished`. The sim remembers who built each lot. A keyframe lists
+followed by `built` or `demolished` and the `ledger` event that paid for it. The sim remembers who built each lot. A keyframe lists
 buildings but not who built them, so every keyframe tick each district writes an `author` event per
 builder: their hash and name, and the lots they built there with the tick of each. A refusal has a result code and nothing else, and the
 city steps exactly as if it had not been sent. A command with no district, such as a
@@ -69,13 +69,22 @@ malformed record or an unknown lot, is recorded in district 0.
 
 | Command | Applied when | Refused with |
 |---|---|---|
-| `build` | the lot is bare or holds only trees and props, no resident goes there, the kind is a building and the rotation 0 to 3 | unknown lot, bad kind, occupied, in use |
-| `demolish` | the lot has a building no resident's schedule uses | unknown lot, empty, in use |
+| `build` | the lot is bare or holds only trees and props, no resident goes there, the kind is a building and the rotation 0 to 3, and the city can pay | unknown lot, bad kind, occupied, in use, no funds |
+| `demolish` | the lot has a building no resident's schedule uses, and the city can pay | unknown lot, empty, in use, no funds |
 | `speed` | 0, 4, 8 or 16; a paused city resumes on a nonzero one | bad speed |
 | `place road`, `zone`, `fork` | not yet | unsupported |
 
 The result codes are in `core/src/record.rs`. A paused city holds the commands it reads
 until a `speed` command or the operator resumes it.
+
+## Money
+
+The city has one account, $100,000 to start, kept as a share per district. A build or demolition takes its price
+(`ledger` event, reason 1 or 2) when it is applied, and is refused with result 10 when the city cannot pay. When a
+city day ends every district writes a `ledger` event (reason 0) with its taxes and upkeep, and every keyframe tick it
+writes a `balance` event with its share. The prices and rates are in `sim/src/world/economy.rs`, and
+[docs/design.md](../docs/design.md#money) has the rules. A restart restores the account from the newest keyframe and the
+`ledger` events after it.
 
 ## The registry
 

@@ -49,6 +49,16 @@ interface AuthorEvent {
   name: string;
   lots: [lot: number, tick: number][];
 }
+interface LedgerEvent {
+  type: 'ledger';
+  reason: number;
+  earned: number;
+  spent: number;
+}
+interface BalanceEvent {
+  type: 'balance';
+  amount: number;
+}
 /** The events this page acts on; the rest of what a record carries is ignored. */
 export type TickEvent =
   | TripEvent
@@ -57,6 +67,8 @@ export type TickEvent =
   | SpeedEvent
   | CommandEvent
   | AuthorEvent
+  | LedgerEvent
+  | BalanceEvent
   | { type: 'other' };
 
 /** The result of a `command` event that changed the city. */
@@ -150,6 +162,11 @@ export class CityState {
   private readonly epochs: number[];
   /** The sim's ticks a second, from the newest record. */
   speed = 4;
+  /**
+   * Each district's share of the city's funds, or `null` before its record says. A record's `balance` sets the share
+   * and a `ledger` moves it, so a state folded from a keyframe and the records after it has the funds of its tick.
+   */
+  private readonly shares: (number | null)[];
   /** Trips the log described that no record has said arrived, by resident. */
   readonly voyages = new Map<number, Voyage>();
   /** Voyages a resident's next trip replaced before they arrived; still drawn until they do. */
@@ -170,6 +187,17 @@ export class CityState {
   ) {
     this.ticks = Array<number>(districts).fill(-1);
     this.epochs = Array<number>(districts).fill(-1);
+    this.shares = Array<number | null>(districts).fill(null);
+  }
+
+  /** The city's funds: the districts' shares added up, or `null` until every district has said what its share is. */
+  get funds(): number | null {
+    let total = 0;
+    for (const share of this.shares) {
+      if (share === null) return null;
+      total += share;
+    }
+    return total;
   }
 
   /** The sim epoch of a district's newest record, or -1 before it has one. */
@@ -237,6 +265,11 @@ export class CityState {
         this.road(d, e.segment, e.change);
       } else if (e.type === 'speed') {
         this.speed = e.ticksPerSecond;
+      } else if (e.type === 'ledger') {
+        const share = this.shares[d];
+        if (share !== null && share !== undefined) this.shares[d] = share + e.earned - e.spent;
+      } else if (e.type === 'balance') {
+        this.shares[d] = e.amount;
       }
     }
     this.prune(d);

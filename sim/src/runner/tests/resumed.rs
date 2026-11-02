@@ -328,6 +328,57 @@ async fn a_restart_from_a_keyframe_keeps_the_author_that_keyframe_tick_wrote() {
     );
 }
 
+/// The account is rebuilt from a keyframe and the prices and days after it. The build lands mid-hour, so a restart
+/// at 300 or 470 reads its price from the log, and one at 5600 or 5770 reads it from a keyframe.
+#[tokio::test(start_paused = true)]
+async fn the_account_is_the_same_after_a_restart_on_either_side_of_a_day() {
+    const TOTAL: u32 = 5900;
+    let lot = free_lot(&World::new(harbor()));
+    let build = Command::Build {
+        lot,
+        kind: 4,
+        rotation: 1,
+    };
+    // Runs the city to `stop`, sending `command` first when there is one.
+    let run = |log: Memory, stop: u32, command: Option<Command>| {
+        let inbox = command.map(|command| {
+            let (send, inbox) = mpsc::channel(8);
+            send.try_send(log.publish("mayor", 1, command)).unwrap();
+            // Keep the sender alive for the run, as the follower would.
+            std::mem::forget(send);
+            inbox
+        });
+        async move { run_city_with("harbor", harbor(), quick(stop), log, inbox).await }
+    };
+    // The reference restarts once, at tick 250, where the build is sent.
+    let whole_log = Memory::healthy();
+    run(whole_log.clone(), 250, None).await.unwrap();
+    run(whole_log.clone(), TOTAL, Some(build.clone()))
+        .await
+        .unwrap();
+    let whole = records(&whole_log);
+    let balance_at = |tick: usize| -> i64 {
+        (0..4)
+            .flat_map(|d| whole_log.records(d)[tick].events.clone())
+            .filter_map(|e| match e {
+                Event::Balance { amount } => Some(amount),
+                _ => None,
+            })
+            .sum()
+    };
+    let (before, after) = (balance_at(5520), balance_at(5760));
+    assert!(before < 100_000, "the build cost something: {before}");
+    assert!(after > before, "the day's taxes outran its upkeep");
+
+    for stop in [300, 470, 5600, 5770] {
+        let log = Memory::healthy();
+        run(log.clone(), 250, None).await.unwrap();
+        run(log.clone(), stop, Some(build.clone())).await.unwrap();
+        run(log.clone(), TOTAL, None).await.unwrap();
+        assert!(records(&log) == whole, "stopped at tick {stop}");
+    }
+}
+
 #[tokio::test(start_paused = true)]
 async fn the_command_stream_resumes_where_the_sim_stopped_reading() {
     let world = World::new(harbor());

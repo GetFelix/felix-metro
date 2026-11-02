@@ -5,7 +5,7 @@ use std::collections::HashMap;
 
 use anyhow::{Context, Result, bail, ensure};
 use felix_metro_core::record::{
-    BuildingDiff, Doing, Event, Keyframe, Leg, NO_BUILDING, RESULT_APPLIED, Vehicle,
+    BuildingDiff, Doing, Event, Keyframe, LEDGER_DAY, Leg, NO_BUILDING, RESULT_APPLIED, Vehicle,
 };
 use felix_metro_core::{City, Mode, TICKS_PER_DAY};
 
@@ -22,8 +22,9 @@ pub(crate) struct Departure {
 
 impl World {
     /// The world as it stood at the end of tick `at`, which `frames` (one
-    /// keyframe per district, taken at `at`) describe. `departures` holds the
-    /// latest `trip` event of every resident who was on the road.
+    /// keyframe per district, taken at `at`) describe. `balances` is each
+    /// district's share of the account then, and `departures` the latest `trip`
+    /// event of every resident who was on the road.
     ///
     /// Stepping the result gives the records the original would have, as long
     /// as the builds after `at` are applied to it first. A keyframe does not
@@ -33,9 +34,17 @@ impl World {
         city: City,
         at: u32,
         frames: &[Keyframe],
+        balances: &[i64],
         departures: &HashMap<u32, Departure>,
     ) -> Result<World> {
         let mut world = World::new(city);
+        ensure!(
+            balances.len() == world.districts(),
+            "{} balances for {} districts",
+            balances.len(),
+            world.districts()
+        );
+        world.accounts = balances.to_vec();
         ensure!(
             frames.len() == world.districts(),
             "{} keyframes for {} districts",
@@ -129,14 +138,18 @@ impl World {
         }
     }
 
-    /// Carries out what the `built` and `demolished` events of one district's
-    /// record for `tick` say, and whose command they were. Other events change
-    /// nothing a restart has to rebuild: stepping makes them.
-    pub(crate) fn apply_logged(&mut self, tick: u32, events: &[Event]) {
+    /// Carries out what the `built`, `demolished` and command `ledger` events of
+    /// `district`'s record for `tick` say, and whose command they were. Other events
+    /// change nothing a restart has to rebuild: stepping makes them, a day's `ledger`
+    /// included.
+    pub(crate) fn apply_logged(&mut self, district: usize, tick: u32, events: &[Event]) {
         // A `built` or `demolished` comes right after the `command` that caused it.
         let mut by: Option<(u64, &str)> = None;
         for event in events {
             match event {
+                Event::Ledger { reason, spent, .. } if *reason != LEDGER_DAY => {
+                    self.accounts[district] -= *spent as i64;
+                }
                 Event::Command {
                     principal,
                     name,
