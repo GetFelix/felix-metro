@@ -344,6 +344,17 @@ When Felix publishes a release, a bot opens a "chore: use Felix <version>" PR
 that moves every pin listed in [`.github/felix-bump.sh`](.github/felix-bump.sh)
 and the lockfiles, and merges it once CI passes. Prereleases are skipped.
 
+Every night a workflow
+([`felix-nightly.yml`](.github/workflows/felix-nightly.yml)) points the Felix
+crates listed in `.felix-version` at the commit behind Felix's `nightly` tag and
+runs [`.github/felix-nightly.sh`](.github/felix-nightly.sh): it starts the sim's
+test stack and the dev stack from the `:nightly` Felix images, runs a city for a
+day, and runs the dev-stack checks that need no browser. When a run on `main`
+fails it opens an issue labelled `felix-nightly`, and a green run closes it, so
+a Felix change that breaks this repo shows up before the next release. See the
+latest run with `gh run list -R GetFelix/felix-metro --workflow "Felix nightly"
+--limit 1`, or start one from the Actions tab.
+
 The gateway is pinned on its own, by image tag in [`dev/compose.yml`](dev/compose.yml) (0.8.0 today). Move that tag
 when a gateway release adds something the page needs.
 
