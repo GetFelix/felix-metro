@@ -11,15 +11,14 @@
   applied commands), so a command sent while the sim was down runs when it comes back and none runs twice. A new city now
   reads its command stream from the start. The epoch in the tick header stays the same across a restart.
 
+- The city has funds. It starts with $100,000; each city day residents and businesses pay tax and roads and parks cost
+  upkeep, and building or demolishing takes a price when the command applies. A command the city cannot pay for is
+  refused with result 10. The sim records a `ledger` event per district per day and per paid command, and a `balance`
+  event per district on every keyframe tick; a restart restores the account. The page shows the funds beside the clock,
+  and shows the funds of the moment you scrub to.
+
 ### Added
 
-- Follow a life: click a car or walker (tap on a touch screen, or press `F` for the one nearest the middle of the view) and the camera follows that resident, with a card under
-  the city name that shows their name, what kind of resident they are, what they are doing now and their day. The
-  resident is known by number, so the follow holds across districts and through seeks, scrubs and rewinds; indoors the
-  camera stays on their building and the card says what they are doing there. `Esc`, the card's button or moving the
-  view lets go; turning and zooming keep the follow. `?follow=<resident>` opens a page on one, and **Share this moment**
-  adds it to the link. The key list has a Following group. `core`'s WebAssembly `Metro` gains `population()` and
-  `profile(resident)`, a resident's name, kind and day as JSON.
 - Moments: a **Share this moment** button copies a link such as `/?at=<tick>&cam=<x,z,distance,azimuth,polar>#harbor`
   that opens the city at that tick from that camera view (`?cam` is new). `H` is photo mode and hides every control.
   A page left alone for 60 seconds turns the camera slowly (`?attract=<seconds>`, `0` turns it off).

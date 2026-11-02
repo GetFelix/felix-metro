@@ -197,6 +197,25 @@ describe('CityState', () => {
     expect(state.speed).toBe(16);
   });
 
+  it('adds up the districts’ funds once each has said its share, and follows the ledger', () => {
+    const state = new CityState(city, trips, 2);
+    expect(state.funds).toBeNull();
+    state.apply(record(0, 240, [{ type: 'balance', amount: 5000 }]));
+    expect(state.funds).toBeNull();
+    state.apply(record(1, 240, [{ type: 'balance', amount: -200 }]));
+    expect(state.funds).toBe(4800);
+    // A build is spent in the district it is in, and the tick's balance, written last, agrees with it.
+    state.apply(record(0, 241, [{ type: 'ledger', reason: 1, earned: 0, spent: 500 }]));
+    expect(state.funds).toBe(4300);
+    state.apply(
+      record(1, 241, [
+        { type: 'ledger', reason: 0, earned: 900, spent: 300 },
+        { type: 'balance', amount: 400 },
+      ]),
+    );
+    expect(state.funds).toBe(4900);
+  });
+
   it('follows road events, and a keyframe replaces what its district knew', () => {
     const state = new CityState(city, trips, 2);
     state.apply(record(0, 1, [{ type: 'road', segment: 4, change: ROAD_CLOSED }]));
