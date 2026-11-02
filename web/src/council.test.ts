@@ -200,4 +200,16 @@ describe('renderCouncil policies', () => {
     expect(first?.all('small')[0]?.textContent).toBe('Can change again from Day 2, 17:30');
     expect(second?.all('small')).toHaveLength(0);
   });
+
+  it('redraws the policy list in place and drops it when there are none', () => {
+    const root = new Fake('div');
+    vi.stubGlobal('document', { createElement: (tag: string) => new Fake(tag) });
+    const el = root as unknown as HTMLElement;
+    const view = councilView(event(2, calm), 1);
+    renderCouncil(el, view, false, [{ name: 'Shop hours', value: 'Usual', again: null }]);
+    renderCouncil(el, view, false, [{ name: 'Shop hours', value: '2 hours later', again: '9:00' }]);
+    expect(root.all('details')[0]?.children.filter((c) => c.className === 'policies')).toHaveLength(1);
+    renderCouncil(el, view, false, []);
+    expect(root.all('details')[0]?.children.filter((c) => c.className === 'policies')).toHaveLength(0);
+  });
 });
