@@ -91,7 +91,7 @@ connection, so a page opened with `?at` cannot play or rewind.
 
 | M   | Milestone           | State                                                                                                                                                                                                                                                                                                                                                |
 | --- | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 0   | The look, locked    | In progress: style frame, assets, daylight, post-processing, quality tiers, the UI shell (settings sheet, key list, first-visit hint, rolling clock), camera controls and instanced traffic done                                                                                                                                                     |
+| 0   | The look, locked    | In progress: style frame, assets, daylight, post-processing, quality tiers, the UI shell (settings sheet, key list, first-visit hint, rolling clock), camera controls, instanced traffic and ambient life done                                                                                                                                       |
 | 1   | A live city         | Done                                                                                                                                                                                                                                                                                                                                                 |
 | 2   | Time travel         | In progress: keyframes, seeking, the timeline scrubber, rewind then follow, and backward playback with speeds built, smoothness not yet measured                                                                                                                                                                                                     |
 | 3   | Follow a life       | Planned                                                                                                                                                                                                                                                                                                                                              |
@@ -126,6 +126,16 @@ watch it rise in its scaffold. It uses the timeline, so it needs the live connec
 The sim records who built each building as an `author` event on every keyframe tick, so the card works for a page that
 joined the city live or jumped back in time. [docs/design.md](docs/design.md#who-built-what) has the details and
 [docs/ui.md](docs/ui.md) the card.
+
+## Ambient life
+
+Beyond the residents in the log, the city has a little life of its own: shop windows light while a shop is open (07:30 to
+22:00, each shop at its own hour), factory stacks smoke on work hours, birds sit on some roofs at dawn, traffic lights
+change at the crossroads, a garbage truck does a round in the morning, and delivery vans work the shopping streets by
+day. The sim does not log any of it. The page draws each from the tick on screen and the city's seed, so a seek or a
+rewind shows the right picture at once and the same tick always looks the same. The low quality tier keeps only the shop
+windows. [docs/art.md](docs/art.md#ambient-life) has the details and what it costs; `web/scripts/check-ambient.mjs`
+checks it in CI.
 
 ## Camera controls
 

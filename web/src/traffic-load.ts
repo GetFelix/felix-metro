@@ -2,6 +2,7 @@
 // drawn through the real post chain, with the draw calls and frame times of the frames it drew. Read by
 // scripts/check-traffic.mjs.
 //   ?n=200 movers (half cars, half walkers)  ?tier=high|medium|low  ?t=12 hour  ?frames=30  ?shadows=0
+//   ?ambient=0 leaves the ambient life out, to measure what it costs; it runs by default, at the hour ?t=
 //   ?show=1 draws one car and one walker standing outside the city, close up, once, for a picture to compare;
 //   ?walk=0.3 is how many seconds the walkers' clock has run, ?t= the hour
 import * as THREE from 'three';
@@ -13,6 +14,7 @@ import { createCity } from './scene';
 import { createPost, passesFor } from './post';
 import { createRenderer } from './renderer';
 import { settingsFor } from './quality';
+import { TICKS_PER_HOUR } from './clock';
 import { Traffic } from './traffic';
 import type { Journey, Voyage } from './city';
 
@@ -78,15 +80,25 @@ async function main() {
     new THREE.Vector3(),
     cityBounds(city.tiles),
   );
-  const { scene, glows, setTime, setShadows, fleet } = await createCity(renderer, tier, city, true);
+  const { scene, glows, setTime, setShadows, fleet, ambient } = await createCity(
+    renderer,
+    tier,
+    city,
+    true,
+    new Map(),
+    // The close-up picture is of a car and a walker alone.
+    params.get('ambient') !== '0' && !params.has('show'),
+  );
   const s = settingsFor(tier);
   setShadows(s.shadows && params.get('shadows') !== '0', s.shadowMapSize);
   const post = createPost(renderer, scene, camera, passesFor(tier), glows);
-  setTime(Number(params.get('t') ?? '12'), post.bloom);
+  const hour = Number(params.get('t') ?? '12');
+  setTime(hour, post.bloom);
   const half = (city.tiles - 1) / 2;
   const traffic = new Traffic(fleet!, half, city.lots);
   // The tier's cap is what this page measures the cost of, so it does not apply here.
   traffic.cap = Infinity;
+  if (ambient) traffic.extras = (f) => ambient.place(f);
 
   // Trips along the roads, a seeded few tiles each way.
   let seed = 11;
@@ -109,9 +121,11 @@ async function main() {
 
   const target = controls.target;
   camera.lookAt(target);
-  let tick = 100;
+  // The ambient life depends on the hour, so the run starts at it.
+  let tick = Math.round(hour * TICKS_PER_HOUR);
   const step = () => {
     tick += 0.25;
+    ambient?.update(tick);
     traffic.update(tick, 1 / 60, voyages);
   };
 

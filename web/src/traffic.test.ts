@@ -103,6 +103,24 @@ describe('Traffic', () => {
     expect(seen).toEqual({ rounds: 1, dt: 0.25, open: false });
   });
 
+  it('places the page’s own vehicles after the voyages, in the same round, and again when a release redraws', () => {
+    const { f, placed, seen } = fleet();
+    const traffic = new Traffic(f, 0);
+    const during: boolean[] = [];
+    traffic.extras = (fleet) => {
+      during.push(seen.open);
+      fleet.car(7, 1, 0, 1, 0, 1);
+    };
+    const a = voyage(1, 2, 0, 10);
+    traffic.update(2, 0, [a]);
+    expect(placed.map((p) => p.id)).toEqual([2, 7]);
+    expect(during).toEqual([true]);
+    traffic.release(a);
+    traffic.sync();
+    expect(placed.map((p) => p.id)).toEqual([7]);
+    expect(seen.rounds).toBe(2);
+  });
+
   it('starts every round afresh, so a voyage that ended is not drawn again', () => {
     const { f, placed } = fleet();
     const traffic = new Traffic(f, 0);

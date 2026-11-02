@@ -59,7 +59,7 @@ function sky(hour: number) {
 }
 
 // How dark it is, 0 at noon to 1 at night.
-function night(h: number) {
+export function night(h: number) {
   const d = Math.min(Math.abs(h - 13), 24 - Math.abs(h - 13)); // hours from 13:00
   return smooth(clamp01((d - 4.8) / 2.0));
 }
