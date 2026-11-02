@@ -19,8 +19,9 @@ import { createRenderer } from './renderer';
 import { createCity, move } from './scene';
 import init, { generate, Metro } from './core/felix_metro_core.js';
 import { parseCity, type City } from './layout';
+import { RoadsOnScreen } from './roads-drawn';
 import { beforeSignIn, fetchOidc, signIn } from './auth';
-import { CityState, type Building, type TickRecord } from './city';
+import { CityState, ROAD_ADDED, syncRoads, type Building, type TickRecord } from './city';
 import { TICKS_PER_HOUR, TickClock, cityTime } from './clock';
 import { connectLive, onOldLog } from './live';
 import { Gateway, GatewayError } from './gateway';
@@ -171,6 +172,16 @@ declare global {
         unavailable: string | null;
         /** The lot under the pointer and whether the tool would take it. */
         preview: { lot: number; ok: boolean; why: string | null } | null;
+        /** What the road tool would do where it points, and its first end once picked. */
+        road: {
+          kind: string;
+          a: number | null;
+          b: number | null;
+          segment: number | null;
+          ok: boolean;
+          why: string | null;
+        } | null;
+        roadStart: number | null;
         /** Commands sent and not yet answered, and what the panel says. */
         pending: number;
         /** Commands answered so far, by the city or by the page turning one away, and commands sent. */
@@ -186,6 +197,16 @@ declare global {
       screenOf(lot: number): { x: number; y: number } | null;
       /** Put the camera over a lot. */
       focus(lot: number): void;
+      /** Every road a builder added in the live city, live or taken away. */
+      roads(): { segment: number; a: number; b: number; removed: boolean }[];
+      /** The road tiles drawn now, as `[x, z]`. */
+      drawnRoads(): [number, number][];
+      /** A node's map tile, and where it is on the canvas, or null when it is out of view. */
+      node(node: number): [number, number] | null;
+      screenOfNode(node: number): { x: number; y: number } | null;
+      screenOfTile(x: number, z: number): { x: number; y: number } | null;
+      /** Put the camera over a map tile. */
+      focusTile(x: number, z: number): void;
     };
     /** Following a resident, for the CI checks and the console; absent where there is no city. */
     __following?: {
@@ -512,6 +533,7 @@ async function main() {
     fleet,
     pick,
     setLot,
+    setRoads,
     lots,
     previewBuilding,
   } = await createCity(renderer, quality.tier, city, state !== null, drawn);
@@ -540,6 +562,11 @@ async function main() {
     if (b) shown.set(lot, b);
     else shown.delete(lot);
   };
+  /** Core's city with the roads drawn now, for their tiles and for the road tool's checks. */
+  const roadMetro = city && state ? new Metro(seed, districts) : null;
+  const roadsOnScreen = roadMetro ? new RoadsOnScreen(roadMetro, city!.roads, setRoads) : null;
+  /** Draw the roads of `s` in place of those on screen: a road laid, taken away, or a rewind past one. */
+  const showRoads = (s: CityState) => void roadsOnScreen?.show(s);
   /** The state the live connection feeds, which keeps taking records while the page is held in the past. */
   const liveState = state;
   const traffic = state && fleet ? new Traffic(fleet, city ? (city.tiles - 1) / 2 : 0, city?.lots ?? []) : null;
@@ -551,6 +578,9 @@ async function main() {
     document.getElementById('timeline')!.dataset.live = '';
     state.onLot = showLot;
     for (const [lot, b] of state.changesSince(drawn)) showLot(lot, b);
+    const first = state;
+    showRoads(first);
+    first.onRoads = () => showRoads(first);
     state.onVoyageEnd = (v) => traffic.release(v);
     hour = cityTime(Math.max(0, state.latest - 1)).hour;
   }
@@ -630,9 +660,13 @@ async function main() {
       if (old !== liveState) old.retire(Infinity);
       else for (const v of old.active()) traffic.release(v);
       old.onLot = null;
+      old.onRoads = null;
       old.onVoyageEnd = null;
       for (const [lot, b] of next.changesSince(shown)) showLot(lot, b);
       next.onLot = showLot;
+      // A state folded afresh from a keyframe has the roads of its tick, so a rewind takes away a road laid after it.
+      showRoads(next);
+      next.onRoads = () => showRoads(next);
       next.onVoyageEnd = (v) => traffic.release(v);
       state = next;
       pastTick = tick;
@@ -1231,12 +1265,17 @@ async function main() {
   if (shell && city && layout === 'city') {
     const lotsOf = city.lots;
     const placement = new Placement({
-      ground: () => ({ city: city!, built: liveState?.built ?? new Map() }),
+      ground: () => ({ city: city!, built: liveState?.built ?? new Map(), roads: liveState?.roads }),
       link: commands,
       // The live city is on screen only when the page is not in, or going to, an earlier moment.
       atTip: () => liveState !== null && state === liveState && pastTick === null && scrubTarget === null,
       wantsLive: wantLive,
       facing: (lot) => lotsOf[lot]?.facing ?? 0,
+      roadCheck: (a, b) => {
+        // The tools are only up at the live tip, where the roads drawn are the live city's.
+        if (!roadMetro || !liveState || !syncRoads(roadMetro, liveState.builtRoads())) return 1;
+        return roadMetro.roadCheck(a, b);
+      },
     });
     toolHeld = () => placement.tool !== null;
     const bar = createBuildBar(shell.tools, placement, () => shell.isOpen);
@@ -1248,7 +1287,7 @@ async function main() {
           scene,
           city,
           placement,
-          ground: () => ({ city: city!, built: liveState.built }),
+          ground: () => ({ city: city!, built: liveState.built, roads: liveState.roads }),
           lots,
           previewBuilding,
         })
@@ -1261,6 +1300,7 @@ async function main() {
       window.__build = {
         state: () => {
           const preview = placement.preview();
+          const road = placement.roadPreview();
           return {
             tool: placement.tool,
             kind: placement.kind,
@@ -1270,6 +1310,15 @@ async function main() {
               ok: preview.check.ok,
               why: preview.check.ok ? null : preview.check.why,
             },
+            road: road && {
+              kind: road.kind,
+              a: road.kind === 'remove' ? null : road.a,
+              b: road.kind === 'lay' ? road.b : null,
+              segment: road.kind === 'remove' ? road.segment : null,
+              ok: road.check.ok,
+              why: road.check.ok ? null : road.check.why,
+            },
+            roadStart: placement.roadStart,
             pending: placement.pending,
             answered: placement.answered,
             sent: placement.sent,
@@ -1282,6 +1331,24 @@ async function main() {
         focus: (lot) => {
           const [x, z] = lots.centre(lot);
           controls.moveTo({ x, z }, 9, Math.PI / 4, 0.9, { ease: false });
+        },
+        roads: () =>
+          [...(liveState?.roads ?? [])].map(([segment, r]) => ({
+            segment,
+            a: r.a,
+            b: r.b,
+            removed: r.change !== ROAD_ADDED,
+          })),
+        drawnRoads: () => (roadsOnScreen?.tiles ?? city!.roads).map((r) => [r.x, r.z]),
+        node: (node) => city!.nodes[node] ?? null,
+        screenOfNode: (node) => {
+          const at = city!.nodes[node];
+          return at ? view.screenOfTile(at[0], at[1]) : null;
+        },
+        screenOfTile: (x, z) => view.screenOfTile(x, z),
+        focusTile: (x, z) => {
+          const half = (city!.tiles - 1) / 2;
+          controls.moveTo({ x: x - half, z: z - half }, 9, Math.PI / 4, 0.9, { ease: false });
         },
       };
     }

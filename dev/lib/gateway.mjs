@@ -14,6 +14,12 @@ export const BAD_KIND = 5;
 export const UNSUPPORTED = 7;
 export const IN_USE = 8;
 export const BUSY = 9;
+export const NO_FUNDS = 10;
+export const NOT_STRAIGHT = 22;
+export const TOO_LONG = 23;
+export const ROAD_EXISTS = 24;
+export const ROAD_BLOCKED = 25;
+export const NOT_BUILT = 26;
 export const BAD_FORK_NAME = 16;
 export const FORK_TOO_DEEP = 17;
 export const FORK_TICK = 18;
@@ -40,10 +46,19 @@ export const RESULT_NAMES = {
   19: "fork-exists",
   20: "fork-trimmed",
   21: "fork-limit",
+  22: "not-straight",
+  23: "too-long",
+  24: "road-exists",
+  25: "road-blocked",
+  26: "not-built",
 };
 
 /** The name a city has at the gateway and in its stream names: a fork's `~` becomes `_`. */
 export const felixName = (city) => city.replaceAll("~", "_");
+
+/** What a `roadwork` event's change says: a builder added the road, or took it away. */
+export const ROAD_ADDED = 2;
+export const ROAD_REMOVED = 3;
 
 export const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -66,7 +81,10 @@ function delta(bytes, at, prev) {
   return prev + (z % 2 === 1 ? -(z + 1) / 2 : z / 2);
 }
 
-/** Walks the keyframe at `at.i`, returning the lots it lists as differing from the generated city. */
+/**
+ * Walks the keyframe at `at.i`, returning the lots it lists as differing from the generated city, and in `roads` the
+ * roads builders added as `[segment, change, a, b]`.
+ */
 function keyframe(bytes, at) {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const buildings = new Map();
@@ -76,9 +94,12 @@ function keyframe(bytes, at) {
     buildings.set(lot, view.getUint16(at.i, true));
     at.i += 3;
   }
+  const roads = [];
+  let segment = 0;
   for (let n = varint(bytes, at); n > 0; n--) {
-    delta(bytes, at, 0);
-    at.i += 1;
+    segment = delta(bytes, at, segment);
+    const change = bytes[at.i++];
+    roads.push([segment, change, varint(bytes, at), varint(bytes, at)]);
   }
   for (let n = varint(bytes, at); n > 0; n--) {
     delta(bytes, at, 0);
@@ -87,7 +108,7 @@ function keyframe(bytes, at) {
     at.i += length;
   }
   for (let n = 0; n < 4; n++) varint(bytes, at);
-  return buildings;
+  return { buildings, roads };
 }
 
 /** A registry record (`created` or `forked`), or null for another kind of record. */
@@ -121,8 +142,8 @@ export function decode(bytes) {
   varint(bytes, at); // keyframe offset
   at.i += 8; // wall clock
   const count = varint(bytes, at);
-  const out = { district, tick, keyframe: null, events: [] };
-  if ((flags & 1) !== 0) out.keyframe = keyframe(bytes, at);
+  const out = { district, tick, keyframe: null, roads: null, events: [] };
+  if ((flags & 1) !== 0) ({ buildings: out.keyframe, roads: out.roads } = keyframe(bytes, at));
   for (let n = 0; n < count; n++) {
     // The frame head is the body length above four bits of tag.
     const head = varint(bytes, at);
@@ -135,17 +156,6 @@ export function decode(bytes) {
       // A resident's trip, change of route and arrival (alone, or with its activity as tag 13) all start with the resident.
       const type = tag === 1 ? "trip" : tag === 2 ? "replan" : "arrived";
       out.events.push({ type, resident: varint(bytes, { i: start }) });
-    } else if (tag === 15) {
-      // Extended events: a kind, then its fields. Kind 7 is a fork.
-      const inner = { i: start };
-      if (varint(bytes, inner) === 7) {
-        const tick = varint(bytes, inner);
-        const size = bytes[inner.i++];
-        const name = Buffer.from(bytes.subarray(inner.i, inner.i + size)).toString();
-        inner.i += size;
-        const principal = new DataView(bytes.buffer, bytes.byteOffset + inner.i, 8).getBigUint64(0, true);
-        out.events.push({ type: "forked", tick, name, principal });
-      }
     } else if (tag === 7 || tag === 8) {
       out.events.push({ type: tag === 7 ? "built" : "demolished", lot: body.getUint32(0, true), kind: body.getUint16(4, true) });
     } else if (tag === 10) {
@@ -154,6 +164,25 @@ export function decode(bytes) {
       out.events.push({ type: "command", principal: body.getBigUint64(0, true), id, result: body.getUint8(13 + nameLength) });
     } else if (tag === 9) {
       out.events.push({ type: "road" });
+    } else if (tag === 15) {
+      // An extended event names its kind first, as a varint.
+      const ext = { i: 0 };
+      const raw = new Uint8Array(body.buffer, body.byteOffset, length);
+      const kind = varint(raw, ext);
+      if (kind === 6) {
+        // A builder's road added or taken away.
+        const segment = varint(raw, ext);
+        const change = raw[ext.i++];
+        out.events.push({ type: "roadwork", segment, change, a: varint(raw, ext), b: varint(raw, ext) });
+      } else if (kind === 7) {
+        // A fork: its tick, name and the principal who made it.
+        const tick = varint(raw, ext);
+        const size = raw[ext.i++];
+        const name = Buffer.from(raw.subarray(ext.i, ext.i + size)).toString();
+        ext.i += size;
+        const principal = new DataView(raw.buffer, raw.byteOffset + ext.i, 8).getBigUint64(0, true);
+        out.events.push({ type: "forked", tick, name, principal });
+      }
     }
   }
   return out;
@@ -196,6 +225,12 @@ export const placeRoad = (a, z) => {
   b[0] = 1;
   b.writeUInt32LE(a, 1);
   b.writeUInt32LE(z, 5);
+  return b;
+};
+export const removeRoad = (segment) => {
+  const b = Buffer.alloc(5);
+  b[0] = 8;
+  b.writeUInt32LE(segment, 1);
   return b;
 };
 

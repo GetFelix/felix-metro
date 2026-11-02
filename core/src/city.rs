@@ -26,7 +26,10 @@ mod development;
 mod lots;
 mod noise;
 mod roads;
+mod roadwork;
 mod zoning;
+
+pub use roadwork::{BuiltRoad, MAX_ROAD_LENGTH, RoadError};
 
 /// Tiles along a district's side.
 pub const DISTRICT_TILES: u16 = 12;
@@ -144,6 +147,11 @@ pub struct Segment {
     pub speed: u16,
     /// Index into [`City::streets`].
     pub street: u16,
+    /// Added by a builder after generation. Only these can be removed.
+    pub built: bool,
+    /// A built segment that has been taken away. It keeps its id and its place in
+    /// [`City::segments`], and is in no node's adjacency.
+    pub removed: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -200,8 +208,8 @@ pub struct RoadTile {
     pub avenue: bool,
 }
 
-fn road_tile(mask: &[u8], n: i32, x: i32, z: i32) -> RoadTile {
-    let m = neighbours(mask, n, x, z);
+/// The piece and quarter turns a tile needs for the neighbours in `m`.
+fn piece_of(m: u8) -> (RoadPiece, u8) {
     let (piece, base) = match m.count_ones() {
         4 => (RoadPiece::Cross, m),
         3 => (RoadPiece::T, EAST | SOUTH | WEST),
@@ -215,6 +223,12 @@ fn road_tile(mask: &[u8], n: i32, x: i32, z: i32) -> RoadTile {
         b = turn(b);
         rot += 1;
     }
+    (piece, rot)
+}
+
+fn road_tile(mask: &[u8], n: i32, x: i32, z: i32) -> RoadTile {
+    let m = neighbours(mask, n, x, z);
+    let (piece, rot) = piece_of(m);
     RoadTile {
         x: x as u16,
         z: z as u16,
@@ -279,6 +293,10 @@ impl City {
             h.num(u64::from(seg.id) << 32 | u64::from(seg.a));
             h.num(u64::from(seg.b) << 32 | u64::from(seg.street));
             h.num(u64::from(seg.length) << 16 | u64::from(seg.speed) << 1 | seg.class as u64);
+            // Generated segments hash as they always did.
+            if seg.built {
+                h.num(1 << 1 | u64::from(seg.removed));
+            }
         }
         for street in &self.streets {
             h.text(street);
@@ -299,6 +317,27 @@ impl City {
             h.num(u64::from(id));
         }
         h.0
+    }
+
+    /// The road tiles as a JSON array of rows in the order `roadColumns` names, as
+    /// [`City::to_json`] holds them.
+    pub fn roads_json(&self) -> String {
+        let mut s = String::from("[");
+        for (n, r) in self.roads.iter().enumerate() {
+            let _ = write!(
+                s,
+                "{}[{},{},{},{},{},{}]",
+                if n > 0 { "," } else { "" },
+                r.x,
+                r.z,
+                r.piece as u8,
+                r.rot,
+                r.mask,
+                u8::from(r.avenue)
+            );
+        }
+        s.push(']');
+        s
     }
 
     /// The city as JSON for the browser to draw. Arrays hold rows in a fixed
@@ -344,11 +383,11 @@ impl City {
         for (n, (x, z)) in self.nodes.iter().enumerate() {
             let _ = write!(s, "{}[{x},{z}]", if n > 0 { "," } else { "" });
         }
-        s.push_str("],\"segmentColumns\":[\"id\",\"a\",\"b\",\"avenue\",\"length\",\"speed\",\"street\"],\"segments\":[");
+        s.push_str("],\"segmentColumns\":[\"id\",\"a\",\"b\",\"avenue\",\"length\",\"speed\",\"street\",\"built\",\"removed\"],\"segments\":[");
         for (n, g) in self.segments.iter().enumerate() {
             let _ = write!(
                 s,
-                "{}[{},{},{},{},{},{},{}]",
+                "{}[{},{},{},{},{},{},{},{},{}]",
                 if n > 0 { "," } else { "" },
                 g.id,
                 g.a,
@@ -356,26 +395,16 @@ impl City {
                 u8::from(g.class == SegmentClass::Avenue),
                 g.length,
                 g.speed,
-                g.street
+                g.street,
+                u8::from(g.built),
+                u8::from(g.removed)
             );
         }
         s.push_str(
-            "],\"roadColumns\":[\"x\",\"z\",\"piece\",\"rot\",\"mask\",\"avenue\"],\"roads\":[",
+            "],\"roadColumns\":[\"x\",\"z\",\"piece\",\"rot\",\"mask\",\"avenue\"],\"roads\":",
         );
-        for (n, r) in self.roads.iter().enumerate() {
-            let _ = write!(
-                s,
-                "{}[{},{},{},{},{},{}]",
-                if n > 0 { "," } else { "" },
-                r.x,
-                r.z,
-                r.piece as u8,
-                r.rot,
-                r.mask,
-                u8::from(r.avenue)
-            );
-        }
-        s.push_str("],\"centres\":[");
+        s.push_str(&self.roads_json());
+        s.push_str(",\"centres\":[");
         for (n, (x, z)) in self.centres.iter().enumerate() {
             let _ = write!(s, "{}[{x},{z}]", if n > 0 { "," } else { "" });
         }

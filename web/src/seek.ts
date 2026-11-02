@@ -803,6 +803,7 @@ function trim<K, V>(map: Map<K, V>, max: number): void {
  * found, so a short fold is never shown.
  */
 export function fold(state: CityState, seek: SeekResult): void {
+  for (const { records } of seek.districts) state.foresee(records);
   for (const { records } of seek.districts) for (const r of records) state.apply(r, true);
   state.settle(seek.tick);
   for (const { before } of seek.districts) state.recover(before);
@@ -832,6 +833,7 @@ export function continues(prev: SeekResult, next: SeekResult): boolean {
 
 /** Take the records of `next` past those of `prev` onto a state folded to `prev`; see {@link continues}. */
 export function foldMore(state: CityState, prev: SeekResult, next: SeekResult): void {
+  next.districts.forEach(({ records }, d) => state.foresee(records.slice(prev.districts[d]!.records.length)));
   next.districts.forEach(({ records }, d) => {
     for (const r of records.slice(prev.districts[d]!.records.length)) state.apply(r, true);
   });

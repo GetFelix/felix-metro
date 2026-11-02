@@ -73,3 +73,42 @@ export function createMarker(scene: THREE.Scene) {
     },
   };
 }
+
+/** The most tiles a road ghost draws: a road is at most 12 tiles, and one longer is shown only far enough to see it. */
+const ROAD_TILES = 24;
+
+/**
+ * Tiles laid on the ground for the road tool: the stretch a road would cover between its two crossings, or the
+ * builder's road it would take away, in the colour that says whether it can.
+ */
+export function createRoadGhost(scene: THREE.Scene) {
+  const materials: Record<Mark, THREE.MeshBasicMaterial> = {
+    fits: material(FITS, 0.45),
+    clash: material(CLASH, 0.45),
+    demolish: material(DOOMED, 0.45),
+  };
+  const tiles = new THREE.InstancedMesh(new THREE.PlaneGeometry(0.98, 0.98), materials.fits, ROAD_TILES);
+  tiles.renderOrder = 10;
+  tiles.frustumCulled = false;
+  tiles.visible = false;
+  scene.add(tiles);
+  const at = new THREE.Matrix4();
+  const flat = new THREE.Matrix4().makeRotationX(-Math.PI / 2);
+  return {
+    /** Lay a ghost tile on each world point `[x, z]`. */
+    show(points: readonly (readonly [number, number])[], mark: Mark) {
+      tiles.material = materials[mark];
+      const n = Math.min(points.length, ROAD_TILES);
+      for (let i = 0; i < n; i++) {
+        const [x, z] = points[i]!;
+        tiles.setMatrixAt(i, at.copy(flat).setPosition(x, 0.04, z));
+      }
+      tiles.count = n;
+      tiles.instanceMatrix.needsUpdate = true;
+      tiles.visible = n > 0;
+    },
+    hide() {
+      tiles.visible = false;
+    },
+  };
+}

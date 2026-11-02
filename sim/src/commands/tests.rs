@@ -1,7 +1,7 @@
 use felix_metro_core::City;
 use felix_metro_core::record::{
     LEDGER_BUILD, NO_BUILDING, REFUSED_BAD_KIND, REFUSED_BAD_SPEED, REFUSED_EMPTY, REFUSED_IN_USE,
-    REFUSED_MALFORMED, REFUSED_OCCUPIED, REFUSED_UNKNOWN, REFUSED_UNSUPPORTED,
+    REFUSED_MALFORMED, REFUSED_NOT_BUILT, REFUSED_OCCUPIED, REFUSED_UNKNOWN, REFUSED_UNSUPPORTED,
 };
 use felix_metro_core::{BuildingKind, KINDS};
 
@@ -240,7 +240,7 @@ fn each_refusal_says_why_and_leaves_the_city_as_it_was() {
             },
             REFUSED_IN_USE,
         ),
-        (Command::PlaceRoad { a: 0, b: 1 }, REFUSED_UNSUPPORTED),
+        (Command::RemoveRoad { segment: 0 }, REFUSED_NOT_BUILT),
         (Command::Zone { lot: free, zone: 1 }, REFUSED_UNSUPPORTED),
         (
             Command::Speed {

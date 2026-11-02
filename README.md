@@ -22,15 +22,17 @@ and play forward from there.
 >   and a whoosh when you go back in time. It is off until you turn it on (see [Sound](#sound)).
 > - Builders change the city through its command stream: the sim applies `build` and `demolish`, each building rises
 >   in a scaffold or falls in dust, and `dev/builder-bot.mjs` grows a neighbourhood on each city's development area.
-> - The page has its own building tools: the build and demolish buttons under the clock (or `B` and `X`) put a building
->   on the cleared ground and take it down, for a sign-in that may build, in the live city (see [Building](#building)).
+> - The page has its own building tools: the build, demolish and road buttons under the clock (or `B`, `X` and `Y`) put a
+>   building on the cleared ground and take it down, and lay a road between two crossings or take a builder's road away,
+>   for a sign-in that may build, in the live city (see [Building](#building)). Cars on a road that is taken away are
+>   sent another way.
 > - The sim resumes a city from its log after a restart.
 > - A share button under the settings button copies a link to the moment and view on screen; `H` hides every control for
 >   a clean picture, and a page left alone for a minute turns slowly (see [Moments](#moments)).
 > - Click a car or walker to follow them: the camera tracks them and a card shows their name, what they are doing
 >   and their day, read from the log, a day at a time, with each trip and stay a click away from that moment
 >   (see [Following a resident](#following-a-resident)).
-> - Not built yet: placing roads and zones.
+> - Not built yet: zones.
 >
 > The [style frame](prototype/style-frame.html) shows the look. The plan is in
 > [docs/design.md](docs/design.md) and the work is tracked in
@@ -47,7 +49,7 @@ and play forward from there.
 - Drag the timeline back to any moment the log holds and see the city exactly as it was
 - Let go and watch it play forward and catch up to live, or rewind an evening and watch it run backwards
 - Follow one resident or car through their day
-- Place roads, zones and buildings, with every change recorded with who made it (buildings and demolishing work today, see [Building](#building); roads and zones do not yet)
+- Place roads, zones and buildings, with every change recorded with who made it (buildings, demolishing and roads work today, see [Building](#building); zones do not yet)
 - Fork the city at a past moment and compare the two timelines side by side
 
 ## Felix features it uses
@@ -120,16 +122,18 @@ shown with `?ui=0` or `?capture`. [docs/ui.md](docs/ui.md#sound) explains how it
 
 ## Building
 
-A builder changes the city from the page. The buttons under the clock are **Build** and **Demolish**, and each has a key.
+A builder changes the city from the page. The buttons under the clock are **Build**, **Demolish** and **Road**, and
+each has a key.
 
 | Key        | What it does                                                        |
 | ---------- | ------------------------------------------------------------------- |
 | `B`        | Pick the build tool, or put it away                                 |
 | `X`        | Pick the demolish tool, or put it away                              |
+| `Y`        | Pick the road tool, or put it away                                  |
 | `R`        | Turn the building a quarter turn (it faces its street until you do) |
 | `[` or `,` | Choose the previous building                                        |
 | `]` or `.` | Choose the next building                                            |
-| `Esc`      | Put the tool away                                                   |
+| `Esc`      | Drop the first end of a road, or put the tool away                  |
 
 With a tool picked, a panel under the buttons lists the buildings to choose from (houses, commercial buildings,
 skyscrapers and factories) and a ghost of the building follows the pointer, snapped to the lot under it. The ghost is
@@ -150,13 +154,34 @@ short note saying why, when:
   signed in keeps its token, so use a new tab to change who you are;
 - the connection to the city is down.
 
-The tools do not exist under `?ui=0` or `?capture`. Roads and zones are not built here: a road changes the graph that
-every route and the page's own copy of the city are built from, and a zone has no record in the log yet. They are the
-next step; [docs/design.md](docs/design.md#commands-and-the-registry) lists what the sim needs.
+The tools do not exist under `?ui=0` or `?capture`. Zones are not built yet, since a zone has no record in the log;
+[docs/design.md](docs/design.md#what-zones-need) says what they need.
+
+### Roads
+
+The **Road** tool lays a straight street between two crossings and takes a builder's street away again.
+
+1. Pick the tool (`Y`). The pointer snaps to the nearest crossing.
+2. Click the first end. Then move to the other end, in the same row or column: a ghost of the road lies between them,
+   cyan if the city would take it and red if not. The line under the panel says why it is red.
+3. Click to send it. The road appears when the sim lays it, and the panel says `Road laid.` or why not.
+
+To take a road away, click the middle of a road a builder laid (it shows in amber). The city's own streets cannot go:
+homes and work have their doors on them. `Esc` drops a first end you picked. On a touch screen the second tap shows the
+ghost, and a third on the same spot sends it; a removal is a tap to pick and a tap to confirm.
+
+A road may be up to 12 tiles long, costs $100 a tile and $100 to take away, and must not cross or run beside another road.
+It may only cover ground nobody uses. The page offers the cleared ground and the filler lots that have no door, because
+it cannot tell which other lots residents use; the sim checks that too. So a stock city has few places for a road: in
+harbor it is the two crossings at the north edge with tiles (17, 0) and (18, 0) between them. A car on a road that is
+taken away drives on from its next crossing by another way. Rewind past a road and it is gone from the screen; rewind past
+its removal and it is back. [docs/design.md](docs/design.md#roads) has the rules.
 
 `web/scripts/check-placement.mjs` checks the tools in CI against the dev stack: a `mayor` page using the mouse and an
 `architect` page using touch build on different lots at once and each sees both buildings, two builds on one lot
 leave one building and tell the loser why, and a page held at an earlier moment has the tools off until Back to live.
+Then the mayor lays harbor's road with the road tool, both pages draw it while the cars run, the same road again is
+refused in the page with its reason, and the architect takes it away with two taps.
 
 ## Status
 
@@ -166,7 +191,7 @@ leave one building and tell the loser why, and a page held at an earlier moment 
 | 1   | A live city         | Done                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | 2   | Time travel         | In progress: keyframes, seeking, the timeline scrubber, rewind then follow, and backward playback with speeds built, smoothness not yet measured                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | 3   | Follow a life       | In progress: click a car or walker to follow them, with a card for their day read from the log and a `?follow=` link; ambient sound built; city stats at any tick built; markers for notable events are not built yet                                                                                                                                                                                                                                                                                                                                             |
-| 4   | Build               | In progress: the sim applies build, demolish and speed commands and records who sent them, and the page animates a building going up (scaffold) or coming down (dust) over 8 ticks, backwards when you rewind; build and demolish tools in the page; roads and zones are not built yet                                                                                                                                                                                                                                                                            |
+| 4   | Build               | In progress: the sim applies build, demolish and speed commands and records who sent them, and the page animates a building going up (scaffold) or coming down (dust) over 8 ticks, backwards when you rewind; build, demolish and road tools in the page; roads with replanning; zones are not built yet                                                                                                                                                                                                                                                         |
 | 5   | Branching timelines | In progress: the sim forks a city at a past tick with a `fork` command, the fork copies the parent's history and runs on its own; the page's way to fork and compare is not built yet                                                                                                                                                                                                                                                                                                                                                                             |
 | 6   | Scale and failover  | In progress: a restarted sim resumes from its log; 20,000 residents, 16 districts and broker loss are open                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | 7   | Self-hosting        | Planned                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
@@ -404,7 +429,10 @@ publishes `build` commands until one takes, and checks that the district of that
 records the command with its sender and the `built` event within a tick. It then sends
 commands the sim must refuse and checks each is recorded with its reason and changes
 nothing. It then waits for the district's next keyframe (up to a minute at the default speed)
-and checks it lists the built lot, and demolishes what it built. A `viewer` cannot publish.
+and checks it lists the built lot, and demolishes what it built. Last it lays the city's one road over the cleared
+ground (harbor and pinecrest each have one), checks the `roadwork` event, and takes the road away again. Roads that
+break a rule (a node to itself, one that already exists, one over other roads) and a `zone`, which is not built yet, are
+among the refusals. A `viewer` cannot publish.
 
 ### Growing a neighbourhood
 
@@ -474,7 +502,7 @@ it got no answer or the bot exited mid-turn (a second signal, or an error).
 
 SIGINT or SIGTERM stops after the lot the bot is working on and writes the end line, which carries the mean tile of
 what was built for aiming a camera. A second signal exits at once, still writing it. The bot exits 1 if a command got
-no result or nothing was built. It places no roads; the sim refuses them. CI runs it for about 20 seconds and checks
+no result or nothing was built. It lays no roads. CI runs it for about 20 seconds and checks
 the log with `dev/check-builder-bot.mjs`, which counts only net new buildings (a build applied on a lot that was
 empty, with no demolish applied on it first) and wants at least ten in one district.
 
