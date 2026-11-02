@@ -96,7 +96,6 @@ export function decode(bytes) {
     const length = Math.floor(head / 16);
     const start = at.i;
     const body = new DataView(bytes.buffer, bytes.byteOffset + at.i, length);
-    const start = at.i;
     at.i += length;
     if (tag === 1 || tag === 2 || tag === 3 || tag === 13) {
       // A resident's trip, change of route and arrival (alone, or with its activity as tag 13) all start with the resident.
