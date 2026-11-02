@@ -25,6 +25,9 @@ import { agoText, createGuess, createTimeline, moveRange, stepTick, clampTick, t
 import { createLoader, type Loader } from './ui/loader';
 import { createPicker } from './ui/picker';
 import { createShell, type Shell } from './ui/shell';
+import { createSound } from './ui/sound';
+import { createAmbient } from './ambient';
+import { intoThePast, startsRewind, whooshDue } from './ambient-mix';
 import { createStatus, type Status } from './ui/status';
 import { note, toast } from './ui/toast';
 import { displayName } from './registry';
@@ -311,6 +314,17 @@ async function main() {
   const quality = createQuality({ url: urlTier, still, onChange: (t) => apply(t) });
   // The capture job needs the page as it draws, with nothing to dismiss, so it gets no controls and no tip.
   const shell = ui && !capture && layout === 'city' ? createShell(quality) : null;
+  // The sound has no audio context until its button is first used, and none at all without the button.
+  const ambient = createAmbient();
+  const sound = shell ? createSound(ambient, shell.tools, note, () => shell.isOpen) : null;
+  let lastWhoosh: number | null = null;
+  /** The rewind sweep, at most once in a while however often a rewind is asked for. */
+  const whoosh = () => {
+    const now = performance.now();
+    if (!ambient.on || !whooshDue(lastWhoosh, now)) return;
+    lastWhoosh = now;
+    sound?.whoosh();
+  };
 
   const renderer = createRenderer(quality.tier);
   let city: City | null = null;
@@ -450,10 +464,12 @@ async function main() {
   slider.value = String(hour);
   slider.addEventListener('input', () => {
     hour = parseFloat(slider.value);
+    ambient.setHour(hour);
     setTime(hour, post!.bloom);
   });
   post = createPost(renderer, scene, camera, passesFor(quality.tier), glows);
   setTime(hour, post.bloom);
+  ambient.setHour(hour);
 
   addEventListener('visibilitychange', () => quality.restartWindow());
 
@@ -718,6 +734,7 @@ async function main() {
         p.paused = true;
       }
       const next = shuttle({ rate: p.rate, paused: p.paused }, key);
+      if (startsRewind(p, next)) whoosh();
       p.rate = next.rate;
       p.paused = next.paused;
       if (next.paused) readAhead();
@@ -864,6 +881,7 @@ async function main() {
       const to = clampTick(bounds, tick);
       // The tip is the live city: a step or a release within a city minute of it is going back to it.
       if (hasLive && !moving && to >= tip - LIVE_SNAP_TICKS) return goLive();
+      if (intoThePast(handleAt(), to)) whoosh();
       stopPlayback();
       cancelAhead();
       scrubTarget = to;
@@ -1107,6 +1125,7 @@ async function main() {
         const time = cityTime(scrubTarget ?? tick);
         if (frozenHour === null && !(Math.abs(time.hour - shownHour) <= 0.004)) {
           shownHour = hour = time.hour;
+          ambient.setHour(hour);
           setTime(hour, post!.bloom);
           day.textContent = `Day ${time.day}`;
         }

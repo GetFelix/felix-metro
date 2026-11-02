@@ -32,6 +32,11 @@
 
 ### The page
 
+- Optional ambient sound, off until turned on. A speaker button beside the settings button, or the `M` key, switches it;
+  the choice is kept in local storage and nothing plays before a click or key press. Traffic by day fades into crickets
+  at dusk and back at dawn, following the city's clock, and a whoosh plays when a rewind or a scrub into the past starts
+  (at most once every 1.5 seconds). It is synthesised with the Web Audio API, so there is no audio asset. It is not shown
+  with `?ui=0` or `?capture`, and a browser that blocks audio gets a short note and no console error.
 - A settings sheet, opened from the button under the clock. Quality is Automatic, High, Medium or Low; Automatic
   forgets a saved tier and judges frame times again from High (`Quality.setAutomatic()`).
 - A key list, opened with `?` or from the settings sheet. It is data (`SHORTCUTS` in `web/src/ui/keys.ts`), so a new key

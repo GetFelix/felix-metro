@@ -58,6 +58,7 @@ export const SHORTCUTS: readonly ShortcutGroup[] = [
   {
     title: 'Anywhere',
     rows: [
+      { keys: [['M']], action: 'Turn the sound on or off' },
       { keys: [['?']], action: 'Show this list' },
       { keys: [['Esc']], action: 'Close a menu or panel' },
       { keys: [['Tab'], ['Shift', 'Tab']], action: 'Move to the next or previous control' },
