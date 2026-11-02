@@ -89,6 +89,15 @@ describe('settingsFor', () => {
     expect(settingsFor('low').rigs).toBe(false);
   });
 
+  it('draws less ambient life on lower tiers: low keeps the shop windows and nothing that moves', () => {
+    const [high, medium, low] = (['high', 'medium', 'low'] as const).map((t) => settingsFor(t).ambient);
+    expect(low).toEqual({ shops: true, smoke: 0, birds: 0, vans: 0, truck: false, signals: false });
+    expect(medium!.smoke).toBeLessThan(high!.smoke);
+    expect(medium!.birds).toBeLessThan(high!.birds);
+    expect(medium!.vans).toBeLessThan(high!.vans);
+    expect(medium).toMatchObject({ shops: true, truck: true, signals: true });
+  });
+
   it('keeps the shadow map sizes of each tier', () => {
     expect(settingsFor('high').shadowMapSize).toBe(4096);
     expect(settingsFor('medium').shadowMapSize).toBe(2048);

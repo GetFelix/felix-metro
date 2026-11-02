@@ -146,6 +146,86 @@ The same page with `?churn` instead swaps one lot between two buildings 101 time
 load, as a run of fast timeline drags does, and reports how many objects the scene holds. The check wants the count
 after the burst to equal the count after a single swap: a lot is drawn once, whatever happened to it on the way.
 
+## Ambient life
+
+The log describes the cars and walkers. The small life around them is not in it: shop windows that light while a shop
+is open, stacks that smoke while a factory works, birds on the roofs at dawn, traffic lights that change, a garbage
+truck on its morning round and delivery vans on the shopping streets. The page draws all of it from the tick on screen
+and the city's seed, and nothing else.
+
+| What | When | How it is drawn | Low tier |
+|---|---|---|---|
+| Shop windows | A strip of glass on the street side of every shop lights between its opening (07:30 to 09:30) and its closing (18:00 to 22:00), each shop at its own hour. Pale by day, a warm glow at night | One instanced quad each | Drawn |
+| Chimney smoke | Each factory starts smoking between 05:30 and 07:00 and stops between 16:30 and 18:30, at hours fixed by its lot. Puffs rise from the model's stack and thin out as they go | Instanced soft sprites, 5 puffs a stack on high, 3 on medium | Left out |
+| Birds | A flock lands on some roofs (3 in 10) between 05:00 and 06:00 and flies off between 07:00 and 08:30; each flight takes about seven minutes | Instanced sprites, 3 a roof on high, 2 on medium | Left out |
+| Traffic lights | A post on each corner of every crossroads. One road has 13 ticks of green and 2 of amber, then the other has its turn | The model's post, instanced, with a lit lens: green, amber or red | Left out |
+| Garbage truck | Sets off between 06:00 and 07:30 and stops at every fourth tile of a long round | The fleet draws it as car kind 7 | Left out |
+| Delivery vans | Six a day on high, three on medium, setting off from 08:00 to 13:00 on rounds of a few hours, keeping to streets with shops and stopping outside them | The fleet draws each as car kind 6, the delivery van | Left out |
+
+**One rule: a function of the tick.** Every effect is worked out by `web/src/ambient.ts` from the tick, the seed of the
+city and an id (a lot, a crossing, a day). Nothing reads the wall clock or `Math.random`, and nothing is kept between
+frames, so the same tick draws the same picture whether the page got there by playing, by seeking or by rewinding. The
+hours an effect keeps are fixed by a hash of the seed and the lot, so two shops never open on the same minute and a
+second visit to a city finds the same shops open. A round of the truck or a van is planned from the seed and the day,
+as a walk along the roads that never turns round except at a dead end, so each day has its own rounds and a rewind
+across midnight replans the earlier day exactly.
+
+```mermaid
+flowchart LR
+  tick["Tick on screen"] --> pure["ambient.ts: hours, puffs, flocks, signals, rounds"]
+  pure --> fx["Ambient: instance matrices and alphas"]
+  fx --> sprites["Shop windows, smoke, birds, lights, posts: a few instanced meshes"]
+  fx --> fleet["Truck and vans: placed in the fleet's round after the voyages"]
+```
+
+The tick is the one the clock shows: the tick drawn, the scrub target while the timeline is dragged, or the held hour
+under `?t=`. A city with no live connection draws the same effects from the hour.
+
+**The truck and the vans** come out of a lot's door and go into one at the end of the round, shrinking at the threshold as
+the sim's cars do. They are placed by `Traffic` after the voyages in each round (`Traffic.extras`), so they are
+culled, lit at night and drawn instanced with the other cars. Kinds 1 to 6 are the sim's, and the van reuses the sim's
+delivery model, kind 6. Only the garbage truck, kind 7, is the page's own; the sim never logs a kind above 6, and a test
+keeps it so (`CAR_MODELS` in `web/src/ambient.ts`).
+
+**Walkers at night** are not thinned. A walker on screen is a resident in the log, so hiding some would make a person
+vanish. The quiet comes from the schedules in `core/src/schedule.rs`: for legs of up to an hour (the sim plans a leg at
+5 ticks a tile) every planned departure falls between 04:30 and 23:30, and a test holds that. A departure can be held
+back past its plan by a trip that has not finished, which the test does not model.
+
+**What it leaves out.** Roads closed in the log still carry the truck and the vans, and the lights do not stop the sim's
+cars, which never queue. Only crossroads have lights. A shop's glow and a lot's smoke follow the building on the lot:
+a lot whose building changes loses its effects for the rebuild, and a lot going up or coming down has none.
+
+**Cost.** Shop windows, smoke, birds and each of the three lamp colours are one instanced mesh each, filled every
+frame from a few hundred sites, and the posts are drawn once. The buffers are made once and grow only when a mesh
+fills, and a mesh with nothing to draw costs no call. Draw calls and frame time on the medium tier, with and without the ambient life, on the same page
+and the same 160 cars and walkers:
+
+| Hour | Draw calls, without / with | Triangles, without / with | Page's submit ms | Frame ms on SwiftShader |
+|---|---|---|---|---|
+| 11:00 (smoke, vans, shops) | 4353 / 4360 | 2.87 M / 2.92 M | 5.7 / 6.1 | 335 / 355 |
+| 06:30 (birds, truck) | 4361 / 4368 | 2.87 M / 2.90 M | 5.8 / 6.0 | 353 / 362 |
+| 19:00 (shops, lights) | 4383 / 4389 | 2.87 M / 2.90 M | 6.0 / 6.0 | 389 / 401 |
+
+The ambient life adds six or seven draw calls and 1% to 2% more triangles. The page's own work for it
+(`Ambient.update` and the fleet's round) takes about 0.04 ms a frame on the medium tier, and the page's submit time rose
+by about 0.4 ms at 11:00 and by 0.2 ms or less at the other hours. SwiftShader's frame times swing by about 10% from run
+to run, so the 3% to 6% rise in frame time is inside that noise: the cost is small, and these runs cannot say how small.
+
+Measured with `web/traffic-load.html` on SwiftShader (`?tier=medium&n=160&ambient=0|1&t=11`), which says nothing
+about a GPU but does show the page's own work and the draw calls. The low tier keeps only the shop windows.
+
+`web/ambient.html` draws the city at the ticks given in the URL, one after another, and reports what each held and a hash
+of its pixels. `web/scripts/check-ambient.mjs` runs it in CI: it draws a tick, other ticks, and the first tick again and
+wants the same pixels and counts; it sweeps a day and a half to check when each effect is on; and it checks that the low
+tier draws only shops and medium draws less than high.
+
+```sh
+cd web
+npx vite --port 5173
+node scripts/check-ambient.mjs http://localhost:5173/ambient.html /tmp/ambient
+```
+
 ## Cars and walkers
 
 Every car and walker on screen stands for one voyage in the log. The page works out where each one is from the tick
@@ -167,7 +247,7 @@ between rounds, so what is drawn is exactly what the last update placed. `web/sr
 instances.
 
 **Cars.** A car model is a body and four wheels, and on some a door, each its own mesh. The fleet makes one instanced
-mesh for each part of each of the six car models, and an instance's matrix is the car's pose times the part's place in
+mesh for each part of each of the seven car models (the sim's six, and the page's own garbage truck), and an instance's matrix is the car's pose times the part's place in
 the model. A hundred sedans draw as many times as one. Cars cast shadows, as before.
 
 **Lights.** The two headlights and two taillights of every car, and the pool of light the headlights throw on the road,
@@ -252,6 +332,9 @@ picture degrades before the frame rate does.
 | low | no | no | no | 1 | 80 | no |
 
 \* The `rigs` flag is set only on high. Rigged pedestrians arrive with #6; until then nothing reads it.
+
+The [ambient life](#ambient-life) scales with the tier too: high has the full set, medium has fewer puffs, birds and vans,
+and low keeps only the shop windows.
 
 Past the limit, a voyage is left undrawn until one that is drawn arrives. `window.__live.capped` counts what is left
 out (in a dev build, or under `?trace`).
