@@ -450,7 +450,7 @@ export class Seeker {
   }
 
   private async newestNow(d: number, signal: AbortSignal): Promise<Known> {
-    const { asOf } = await keyframePointer(this.cancellable(signal), d, this.districts, false);
+    const { asOf } = await keyframePointer(this.cancellable(signal), d, false);
     if (asOf !== null && asOf > 0) {
       const [last, past] = await Promise.all([this.at(d, asOf - 1, signal), this.at(d, asOf, signal)]);
       if (last && last.offset === asOf - 1 && !past) return last;
@@ -470,7 +470,7 @@ export class Seeker {
   /** The session as the pointer lookup reads it: its reads share and stop with the seek, and a trimmed start says so. */
   private cancellable(signal: AbortSignal): History {
     return {
-      stateGet: async (stream, key, entity) => {
+      stateGet: async (stream, key, shard) => {
         for (let attempt = 0; ; attempt++) {
           signal.throwIfAborted();
           const session = this.session();
@@ -481,7 +481,7 @@ export class Seeker {
             cleanup = () => signal.removeEventListener('abort', stop);
           });
           try {
-            return await Promise.race([session.stateGet(stream, key, entity), off]);
+            return await Promise.race([session.stateGet(stream, key, shard), off]);
           } catch (err) {
             if (!this.closedSession(err, session) || attempt >= CLOSED_RETRIES || signal.aborted) throw err;
             await this.ensure();

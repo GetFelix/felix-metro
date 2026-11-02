@@ -5,7 +5,6 @@ import type { City } from './layout';
 
 vi.mock('./core/felix_metro_core.js', () => ({
   decodeRecord: (bytes: Uint8Array) => new TextDecoder().decode(bytes),
-  districtKey: (district: number, _shards: number, routing: string) => `${routing}.${district}`,
 }));
 vi.mock('./auth', () => ({ signIn: async () => 'token' }));
 const { fold } = await import('./seek');

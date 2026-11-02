@@ -7,7 +7,6 @@ import type { SeekResult } from './seek';
 
 vi.mock('./core/felix_metro_core.js', () => ({
   decodeRecord: (bytes: Uint8Array) => new TextDecoder().decode(bytes),
-  districtKey: () => '',
 }));
 vi.mock('./auth', () => ({ signIn: async () => 'token' }));
 const { Playback, handOver, JOIN_LAG } = await import('./playback');
