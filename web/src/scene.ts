@@ -14,6 +14,7 @@ import { KINDS } from './kinds';
 const TREE_FIRST = 38; // kinds from here are trees and plaza props: no building
 import { NO_BUILDING, type Building } from './city';
 import { Ambient, type ModelPart } from './ambient-fx';
+import { CAR_MODELS } from './ambient';
 import { TICKS_PER_HOUR } from './clock';
 import { createFleet, parts, type InstancedFleet } from './fleet';
 import { ConstructionFx, type LotAccess } from './construction-fx';
@@ -91,9 +92,6 @@ const CARS = [
   'ambulance',
 ];
 const CAR_SCALE = 0.12;
-// Vehicle kinds 1 to 6 in the log, in order.
-// The seventh is the garbage truck, which only the page draws (see ambient.ts); the sim never logs a kind above 6.
-const CAR_KINDS = ['sedan', 'taxi', 'suv', 'van', 'hatchback-sports', 'delivery', 'garbage-truck'];
 const PEOPLE = 'abcdef'.split('').flatMap((c) => [`character-female-${c}`, `character-male-${c}`]);
 
 // The frame's map is 17 tiles across; a bigger city widens the shadow, fog and ground to match.
@@ -757,7 +755,7 @@ export async function createCity(
   // A live city draws its voyages as instances of the models, loaded once each.
   if (live) {
     const [cars, people] = await Promise.all([
-      Promise.all(CAR_KINDS.map((name) => loadModel('cars', name))),
+      Promise.all(CAR_MODELS.map((name) => loadModel('cars', name))),
       Promise.all(PEOPLE.map((name) => loadModel('mini-characters', name))),
     ]);
     crowd = createFleet(scene, {

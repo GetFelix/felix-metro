@@ -47,19 +47,29 @@ fn times_are_jittered_and_follow_the_archetype() {
     assert!(night.blocks[1].leave > 19 * TICKS_PER_HOUR);
 }
 
-/// The page leaves out nothing to thin the night: the quiet streets come from here. With a fifteen-minute trip, nobody
-/// sets off between 22:00 and 05:00.
+/// The quiet night the page shows is planned here, not drawn: the page does not thin walkers. Planned departures
+/// stay inside 04:30 to 23:30 for legs of up to an hour (the sim plans a leg at 5 ticks a tile). A departure can still
+/// be held back by an unfinished trip, which this does not model.
 #[test]
-fn nobody_sets_off_in_the_small_hours() {
-    for archetype in Archetype::ALL {
-        for i in 0..400 {
-            let s = make(archetype, &format!("r{i}"));
-            for b in &s.blocks {
-                assert!(
-                    (5 * TICKS_PER_HOUR..22 * TICKS_PER_HOUR).contains(&b.leave),
-                    "{archetype:?} leaves at {}",
-                    b.leave
-                );
+fn nobody_plans_to_set_off_in_the_small_hours() {
+    for travel in [0, 60, 150, 240] {
+        for archetype in Archetype::ALL {
+            for i in 0..400 {
+                let mut rng = Rng::new(&format!("r{i}"));
+                let anchors = Anchors {
+                    home: 1,
+                    work: 2,
+                    shop: 3,
+                    park: 4,
+                };
+                let s = Schedule::new(archetype, &mut rng, &anchors, |_, _| travel);
+                for b in &s.blocks {
+                    assert!(
+                        (9 * TICKS_PER_HOUR / 2..47 * TICKS_PER_HOUR / 2).contains(&b.leave),
+                        "{archetype:?} with legs of {travel} ticks leaves at {}",
+                        b.leave
+                    );
+                }
             }
         }
     }

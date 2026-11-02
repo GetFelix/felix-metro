@@ -204,6 +204,51 @@ describe('Ambient', () => {
     expect(state()).toEqual(first);
   });
 
+  it('plans each day afresh: a day later and back again draws what a fresh page draws', () => {
+    const state = (a: Ambient) => {
+      const { f, cars } = fleet();
+      a.place(f);
+      return { counts: counted(a), cars };
+    };
+    const fresh = world().ambient;
+    const t = at(8.5);
+    fresh.update(t);
+    const first = state(fresh);
+    const { ambient } = world();
+    ambient.update(TICKS_PER_DAY + t);
+    ambient.update(t);
+    expect(state(ambient)).toEqual(first);
+    // Several round trips through other days still land on the same picture.
+    for (const day of [3, 7, 1]) ambient.update(day * TICKS_PER_DAY + t);
+    ambient.update(t);
+    expect(state(ambient)).toEqual(first);
+  });
+
+  it('skips a lot the construction update has just marked busy, when what hangs on buildings is drawn after it', () => {
+    const { ambient, busy } = world();
+    ambient.drive(at(11));
+    ambient.decorate(at(11));
+    const before = ambient.counts().puffs;
+    expect(before).toBeGreaterThan(0);
+    // A seek lands on a tick where lots are mid-rise: busy changes between the vans and the decoration.
+    ambient.drive(at(11));
+    for (let id = 0; id < 20; id++) busy.add(id);
+    ambient.decorate(at(11));
+    expect(ambient.counts().puffs).toBe(0);
+    expect(ambient.counts().shops).toBe(0);
+  });
+
+  it('draws the same whether the vans and the decoration are updated together or apart', () => {
+    const a = world().ambient;
+    const b = world().ambient;
+    for (const t of [at(7.2), at(11), at(15.5)]) {
+      a.update(t);
+      b.drive(t);
+      b.decorate(t);
+      expect(counted(b)).toEqual(counted(a));
+    }
+  });
+
   it('leaves a lot alone while it is going up or coming down', () => {
     const { ambient, busy } = world();
     ambient.update(at(11));

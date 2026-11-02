@@ -226,6 +226,11 @@ export interface Placed {
   size: number;
 }
 
+// Scratch for routePose, which runs for every vehicle every frame.
+const FROM = [0, 0];
+const TO = [0, 0];
+const DOOR: RoadTile = { x: 0, z: 0 };
+
 /** Ticks a vehicle takes to come out of or go into a lot's door. */
 const DOOR_TICKS = 2;
 
@@ -233,7 +238,14 @@ const DOOR_TICKS = 2;
  * Where the route's vehicle is `t` ticks after it set off, in tiles from the city's north-west corner, or false before
  * and after the drive. Standing at a stop keeps the heading it arrived with.
  */
-export function routePose(roads: Roads, route: Route, t: number, lot: (id: number) => RoadTile | null, out: Placed) {
+export function routePose(
+  roads: Roads,
+  route: Route,
+  t: number,
+  /** Writes where lot `id` stands into `at`, or returns false when there is no such lot. */
+  lot: (id: number, at: RoadTile) => boolean,
+  out: Placed,
+) {
   const { tiles, arrive, leave } = route;
   if (tiles.length < 2 || !(t >= 0 && t < route.total)) return false;
   let lo = 0;
@@ -244,35 +256,30 @@ export function routePose(roads: Roads, route: Route, t: number, lot: (id: numbe
     else hi = mid - 1;
   }
   const i = lo;
-  const a = [0, 0];
-  const b = [0, 0];
+  const a = FROM;
+  const b = TO;
   const at = (j: number, to: number[]) => {
     to[0] = roads.x[tiles[j]!]!;
     to[1] = roads.z[tiles[j]!]!;
   };
-  let pose: { x: number; z: number; heading: number };
   if (t < leave[i]! || i === tiles.length - 1) {
     // Standing at tile i; the heading is the one it drove in with (or out with, from the first tile).
     const j = Math.max(1, i);
     at(j - 1, a);
     at(j, b);
-    pose = poseBetween(a, b, i === 0 ? 0 : 1, LANE, 0);
+    poseBetween(a, b, i === 0 ? 0 : 1, LANE, 0, out);
   } else {
     at(i, a);
     at(i + 1, b);
-    pose = poseBetween(a, b, (t - leave[i]!) / (arrive[i + 1]! - leave[i]!), LANE, 0);
+    poseBetween(a, b, (t - leave[i]!) / (arrive[i + 1]! - leave[i]!), LANE, 0, out);
   }
-  out.x = pose.x;
-  out.z = pose.z;
-  out.heading = pose.heading;
   const into = Math.max(0, 1 - Math.min(t, route.total - t) / DOOR_TICKS);
   out.size = 1 - into;
   if (into > 0) {
     const end = t < route.total / 2 ? tiles[0]! : tiles[tiles.length - 1]!;
-    const door = lot(roads.door[end]!);
-    if (door) {
-      const dx = door.x - out.x;
-      const dz = door.z - out.z;
+    if (lot(roads.door[end]!, DOOR)) {
+      const dx = DOOR.x - out.x;
+      const dz = DOOR.z - out.z;
       let turn = Math.atan2(dx, dz) - out.heading;
       turn -= Math.round(turn / (2 * Math.PI)) * 2 * Math.PI;
       out.heading += into * turn;
@@ -285,7 +292,12 @@ export function routePose(roads: Roads, route: Route, t: number, lot: (id: numbe
 
 // ---------- the truck and the vans ----------
 
-/** Vehicle kinds the fleet draws that the sim never logs: the page's own delivery van and garbage truck. */
+/**
+ * The model of each vehicle kind, kind `k` being entry `k - 1`. Kinds 1 to 6 are the sim's (core's `CAR_KINDS`), so
+ * the van is the delivery model the sim already draws for kind 6. Only the garbage truck, kind 7, is the page's own,
+ * and a kind the sim logs never reaches it.
+ */
+export const CAR_MODELS = ['sedan', 'taxi', 'suv', 'van', 'hatchback-sports', 'delivery', 'garbage-truck'] as const;
 export const VAN_KIND = 6;
 export const TRUCK_KIND = 7;
 /** The most vans in a day's plan; a tier uses the first few. */

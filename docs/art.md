@@ -161,7 +161,6 @@ and the city's seed, and nothing else.
 | Traffic lights | A post on each corner of every crossroads. One road has 13 ticks of green and 2 of amber, then the other has its turn | The model's post, instanced, with a lit lens: green, amber or red | Left out |
 | Garbage truck | Sets off between 06:00 and 07:30 and stops at every fourth tile of a long round | The fleet draws it as car kind 7 | Left out |
 | Delivery vans | Six a day on high, three on medium, setting off from 08:00 to 13:00 on rounds of a few hours, keeping to streets with shops and stopping outside them | The fleet draws each as car kind 6, the delivery van | Left out |
-| Fewer walkers at night | Already true: see below | | |
 
 **One rule: a function of the tick.** Every effect is worked out by `web/src/ambient.ts` from the tick, the seed of the
 city and an id (a lot, a crossing, a day). Nothing reads the wall clock or `Math.random`, and nothing is kept between
@@ -184,12 +183,14 @@ under `?t=`. A city with no live connection draws the same effects from the hour
 
 **The truck and the vans** come out of a lot's door and go into one at the end of the round, shrinking at the threshold as
 the sim's cars do. They are placed by `Traffic` after the voyages in each round (`Traffic.extras`), so they are
-culled, lit at night and drawn instanced with the other cars. Kinds 1 to 6 are the sim's; the page's own truck is kind 7,
-which the sim never logs.
+culled, lit at night and drawn instanced with the other cars. Kinds 1 to 6 are the sim's, and the van reuses the sim's
+delivery model, kind 6. Only the garbage truck, kind 7, is the page's own; the sim never logs a kind above 6, and a test
+keeps it so (`CAR_MODELS` in `web/src/ambient.ts`).
 
 **Walkers at night** are not thinned. A walker on screen is a resident in the log, so hiding some would make a person
-vanish. The quiet comes from the schedules in `core/src/schedule.rs`: with a fifteen-minute trip nobody sets off between
-22:00 and 05:00, a test holds that, and the only trips at night are ones that began before 22:00.
+vanish. The quiet comes from the schedules in `core/src/schedule.rs`: for legs of up to an hour (the sim plans a leg at
+5 ticks a tile) every planned departure falls between 04:30 and 23:30, and a test holds that. A departure can be held
+back past its plan by a trip that has not finished, which the test does not model.
 
 **What it leaves out.** Roads closed in the log still carry the truck and the vans, and the lights do not stop the sim's
 cars, which never queue. Only crossroads have lights. A shop's glow and a lot's smoke follow the building on the lot:
@@ -206,10 +207,10 @@ and the same 160 cars and walkers:
 | 06:30 (birds, truck) | 4361 / 4368 | 2.87 M / 2.90 M | 5.8 / 6.0 | 353 / 362 |
 | 19:00 (shops, lights) | 4383 / 4389 | 2.87 M / 2.90 M | 6.0 / 6.0 | 389 / 401 |
 
-Each figure is the median of three runs. The ambient life adds six or seven draw calls and 1% to 2% more triangles, and
-the page's own work for it (`Ambient.update` and the fleet's round) takes about 0.04 ms a frame on the medium tier.
-SwiftShader's frame times swing by 10% from run to run, and the three hours differ by 2.6% to 6%, so they show the cost is
-small and no more.
+The ambient life adds six or seven draw calls and 1% to 2% more triangles. The page's own work for it
+(`Ambient.update` and the fleet's round) takes about 0.04 ms a frame on the medium tier, and the page's submit time rose
+by about 0.4 ms at 11:00 and by 0.2 ms or less at the other hours. SwiftShader's frame times swing by about 10% from run
+to run, so the 3% to 6% rise in frame time is inside that noise: the cost is small, and these runs cannot say how small.
 
 Measured with `web/traffic-load.html` on SwiftShader (`?tier=medium&n=160&ambient=0|1&t=11`), which says nothing
 about a GPU but does show the page's own work and the draw calls. The low tier keeps only the shop windows.

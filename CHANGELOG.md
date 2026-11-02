@@ -40,8 +40,8 @@
   (`web/src/ambient.ts`): a seek or a rewind draws exactly what a forward run does, and each day plans its own rounds. The
   truck and the vans go through the fleet as car kinds 7 and 6. The medium tier draws fewer puffs, birds and vans than
   high, and the low tier keeps only the shop windows. `web/ambient.html` and `web/scripts/check-ambient.mjs` draw the
-  same tick twice, after a rewind, and sweep a day for when each effect is on; CI runs it. A test in `core` pins that no
-  resident sets off between 22:00 and 05:00, which is why the pavements are quiet at night. Roads closed in the log
+  same tick twice, after a rewind, and sweep a day for when each effect is on; CI runs it. A test in `core` pins that planned
+  departures stay between 04:30 and 23:30 for legs up to an hour, which is why the pavements are quiet at night. Roads closed in the log
   still carry the truck and the vans, and only crossroads have lights.
   ([docs/art.md](docs/art.md#ambient-life))
 - A settings sheet, opened from the button under the clock. Quality is Automatic, High, Medium or Low; Automatic

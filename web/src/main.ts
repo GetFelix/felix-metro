@@ -1104,10 +1104,14 @@ async function main() {
       if (!Number.isNaN(tick)) {
         state.retire(Math.floor(tick));
         // Ambient life follows the clock the person reads: a held hour, a scrub target, or the tick on screen.
-        ambient?.update(frozenHour !== null ? frozenHour * TICKS_PER_HOUR : (scrubTarget ?? tick));
+        const ambientTick = frozenHour !== null ? frozenHour * TICKS_PER_HOUR : (scrubTarget ?? tick);
+        // The vans go in the fleet's round; what hangs on buildings waits for the construction update, which says
+        // which lots are going up or coming down at this tick.
+        ambient?.drive(ambientTick);
         traffic.update(tick, still ? 0 : dt, state.active());
         state.settle(tick);
         construction.update(tick, state.rising, state.falling);
+        ambient?.decorate(ambientTick);
         const time = cityTime(scrubTarget ?? tick);
         if (frozenHour === null && !(Math.abs(time.hour - shownHour) <= 0.004)) {
           shownHour = hour = time.hour;

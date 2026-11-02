@@ -151,6 +151,7 @@ export function createFleet(scene: THREE.Scene, p: FleetParts): InstancedFleet {
     },
     car(kind, x, y, z, heading, size) {
       if (size <= 0 || !inView(x, y, z)) return;
+      // The sim's kinds are 1 to 6, fewer than the models, so none of them reaches the page's own truck.
       const set = cars[(kind - 1) % cars.length]!;
       const scale = p.carScale * size;
       pose(car, x, y, z, heading, scale);

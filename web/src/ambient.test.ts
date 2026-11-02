@@ -1,6 +1,8 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { TICKS_PER_DAY, TICKS_PER_HOUR } from './clock';
 import {
+  CAR_MODELS,
   MAX_VANS,
   ROOST_SHARE,
   SIGNAL_TICKS,
@@ -271,9 +273,12 @@ describe('makeRoute', () => {
 
 describe('routePose', () => {
   const { graph, lots } = street();
-  const lotAt = (id: number) => {
+  const lotAt = (id: number, at: RoadTile) => {
     const l = lots.find((x) => x.id === id);
-    return l ? { x: l.x, z: l.z } : null;
+    if (!l) return false;
+    at.x = l.x;
+    at.z = l.z;
+    return true;
   };
   // Straight east along the street from tile 0 to tile 4, one stop at tile 2.
   const route = makeRoute(graph, {
@@ -363,5 +368,17 @@ describe('planDay', () => {
 
   it('plans nothing for a city with no roads', () => {
     expect(planDay(buildRoads([], []), SEED, 0)).toEqual([]);
+  });
+});
+
+describe('vehicle kinds', () => {
+  it('keeps the truck above every kind the sim logs, and the van on the sim delivery model', () => {
+    const rust = readFileSync(new URL('../../core/src/resident.rs', import.meta.url), 'utf8');
+    const simKinds = Number(/pub const CAR_KINDS: u8 = (\d+);/.exec(rust)![1]);
+    expect(simKinds).toBeLessThan(TRUCK_KIND);
+    expect(CAR_MODELS).toHaveLength(TRUCK_KIND);
+    expect(CAR_MODELS[TRUCK_KIND - 1]).toBe('garbage-truck');
+    expect(VAN_KIND).toBeLessThanOrEqual(simKinds);
+    expect(CAR_MODELS[VAN_KIND - 1]).toBe('delivery');
   });
 });

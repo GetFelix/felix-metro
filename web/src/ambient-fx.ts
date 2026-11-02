@@ -94,6 +94,12 @@ const LENS_SIZE = 0.11;
 /** Hang a bird above the roof so its feet are on it. */
 const PERCH = 0.02;
 const MAX_VEHICLES = 8;
+const CORNERS = [
+  [-1, -1],
+  [1, -1],
+  [1, 1],
+  [-1, 1],
+] as const;
 
 const LIGHTS: Record<Light, number> = { green: 0, amber: 1, red: 2 };
 const LENS_COLOURS = ['rgba(60,235,130,1)', 'rgba(255,176,32,1)', 'rgba(255,59,42,1)'];
@@ -202,7 +208,7 @@ export class Ambient {
   };
   private readonly scratch = new THREE.Matrix4();
   private readonly point = new THREE.Vector3();
-  private readonly lotTile: (id: number) => { x: number; z: number } | null;
+  private readonly lotTile: (id: number, at: { x: number; z: number }) => boolean;
 
   constructor(
     private readonly scene: THREE.Scene,
@@ -216,9 +222,12 @@ export class Ambient {
   ) {
     this.seed = seedNumber(city.seed);
     this.half = (city.tiles - 1) / 2;
-    this.lotTile = (id) => {
+    this.lotTile = (id, at) => {
       const l = city.lots[id];
-      return l ? { x: l.x, z: l.z } : null;
+      if (!l) return false;
+      at.x = l.x;
+      at.z = l.z;
+      return true;
     };
     const commercial = (zone: string) => zone === 'commercial' || zone === 'downtown';
     this.roads = buildRoads(
@@ -351,16 +360,33 @@ export class Ambient {
 
   /** Draw the city's ambient life at `tick`, a fraction. */
   update(tick: number): void {
+    this.drive(tick);
+    this.decorate(tick);
+  }
+
+  /**
+   * The truck and the vans at `tick`, for `place`. Split from `decorate` because the fleet is drawn before the
+   * construction animations are up to date, and the vans do not depend on them.
+   */
+  drive(tick: number): void {
+    this.counted.vans = this.counted.truck = 0;
+    this.fillVehicles(tick);
+  }
+
+  /**
+   * Everything that hangs on a building, at `tick`. Call it after the construction animations have been updated to
+   * `tick`, so a lot going up or coming down is skipped by the same tick that draws it.
+   */
+  decorate(tick: number): void {
     this.tick = tick;
     const hour = hourOf(tick);
     const dark = night(hour);
     const c = this.counted;
-    c.shops = c.puffs = c.birds = c.vans = c.truck = c.green = c.amber = c.red = 0;
+    c.shops = c.puffs = c.birds = c.green = c.amber = c.red = 0;
     this.fillShops(hour, dark);
     this.fillSmoke(tick, hour, dark);
     this.fillBirds(tick, hour);
     this.fillLenses(tick, dark);
-    this.fillVehicles(tick);
   }
 
   /** One of each kind of effect, as `[x, y, z]` in world units, for a page that wants to look at it. */
@@ -411,12 +437,8 @@ export class Ambient {
       batch.mesh.castShadow = false;
       own(batch.mesh, false);
       for (const x of this.crossings) {
-        for (const [sx, sz] of [
-          [-1, -1],
-          [1, -1],
-          [1, 1],
-          [-1, 1],
-        ] as const) {
+        for (let k = 0; k < 4; k++) {
+          const [sx, sz] = CORNERS[k]!;
           corner.makeTranslation(x.x + sx * POST_CORNER, 0, x.z + sz * POST_CORNER);
           this.scratch.multiplyMatrices(corner, part.local).toArray(batch.matrices, batch.next() * 16);
         }
@@ -519,12 +541,9 @@ export class Ambient {
       const e = this.scratch.elements;
       for (const x of this.crossings) {
         const s = signalAt(tick, this.seed, x.node);
-        for (const [sx, sz] of [
-          [-1, -1],
-          [1, -1],
-          [1, 1],
-          [-1, 1],
-        ] as const) {
+        for (let k = 0; k < 4; k++) {
+          const sx = CORNERS[k]![0];
+          const sz = CORNERS[k]![1];
           // Posts across from each other show one road's light, and the next post along shows the other's.
           const light = sx * sz > 0 ? s.ns : s.ew;
           const batch = this.lenses[LIGHTS[light]]!;
