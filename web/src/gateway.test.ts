@@ -236,14 +236,25 @@ describe('Gateway', () => {
     socket.say({
       type: 'state_value',
       id: socket.sent[1]!.id,
+      shard: 3,
       payload: base64(Uint8Array.from([9])),
       version: 40,
       as_of: 44,
     });
     expect(await value).toMatchObject({ version: 40, asOf: 44 });
     const none = gateway.stateGet('events', 'keyframe', 2);
-    socket.say({ type: 'state_value', id: socket.sent[2]!.id, payload: null, version: null, as_of: 44 });
+    socket.say({ type: 'state_value', id: socket.sent[2]!.id, shard: 2, payload: null, version: null, as_of: 44 });
     expect((await none).payload).toBeNull();
+  });
+
+  it('refuses a state answer for another shard, as an older gateway gives', async () => {
+    const { gateway, socket } = await joined();
+    const older = gateway.stateGet('events', 'keyframe', 3);
+    socket.say({ type: 'state_value', id: socket.sent[1]!.id, payload: null, version: null, as_of: 44 });
+    await expect(older).rejects.toMatchObject({ code: 'state_shard' });
+    const other = gateway.stateGet('events', 'keyframe', 3);
+    socket.say({ type: 'state_value', id: socket.sent[2]!.id, shard: 0, payload: null, version: null, as_of: 44 });
+    await expect(other).rejects.toMatchObject({ code: 'state_shard' });
   });
 
   it('never has a fifth read on the wire, however the answers interleave', async () => {

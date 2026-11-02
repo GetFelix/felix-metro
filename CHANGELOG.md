@@ -20,7 +20,7 @@
   with salted keys reads the same: the records and the `keyframe` state are on the same shards.
 - Built on Felix 0.6.2: the sim's `felix-client` and `felix-wire` pins, the dev stack and CI images.
 - The dev stack runs felix-gateway 0.8.0 (was 0.7.0). It adds `shard` on `state_get`, `past_end`, `offset_for_time` and
-  the other opt-in features of that release; the page asks for none of them yet.
+  the other opt-in features of that release; the page uses `shard` on `state_get` and none of the others yet.
 - The overlay's styles moved from `web/index.html` into `web/src/ui/*.css`, and the picker, loading screen and frame-time
   display into `web/src/ui/`. `docs/ui.md` describes the kit, the motion rules and the wording rules.
 

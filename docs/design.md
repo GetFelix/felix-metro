@@ -104,11 +104,6 @@ how the stream hashes entity keys. The commit still carries an entity key,
 `d<NN>`, but only as a label. The stream needs a shard for every district, and
 the sim refuses to start on one that has fewer.
 
-An earlier version salted the entity key (`d<NN>.<n>`) until it hashed to the
-district's shard. A log written that way reads the same, because each district's
-records and `keyframe` state are on the same shard either way. The salt was never
-part of a record or a state key.
-
 One sim task steps all districts of a city in lockstep. Each tick it commits one
 record per district, in parallel, and waits for all of them before the next
 tick. Because one process owns every district, a resident crossing a district
@@ -416,11 +411,9 @@ lose a record:
 
 1. Subscribe to every district from live and hold what arrives. Each answer
    says the shard's tail.
-2. Read each district's `keyframe` state key. The key is held under the
-   district's entity key, which depends on how the stream hashes keys, and
-   Felix does not report that to a browser, so the page tries both routings
-   and trusts a pointer only when the record it names is that district's
-   keyframe.
+2. Read each district's `keyframe` state key once, with `state_get` naming
+   the district's shard. The page trusts the pointer only when the record it
+   names is that district's keyframe.
 3. Read the keyframe and everything up to the tail, apply it, then the held
    records. A record at or before a district's newest tick is skipped, so a
    reconnect can read from the keyframe again.
@@ -579,8 +572,8 @@ anything is built inside it.
 
 **Felix gaps this design runs into**
 
-1. **No time lookup in the gateway.** `offset_for_time` exists in Felix but felix-gateway does not expose it, so seeking estimates and corrects. Adding it upstream makes a seek one lookup per district.
-2. **Per-shard subscribe through the gateway.** The gateway's `read` takes a shard. Subscribing to one district's shard from a browser needs checking, and adding if missing.
+1. **The page does not use the gateway's time lookup yet.** felix-gateway 0.8.0 exposes `offset_for_time` behind its `time` feature, but the page still estimates and corrects when it seeks. Using it makes a seek one lookup per district.
+2. **Per-shard subscribe through the gateway.** Done: the gateway's `read` and `subscribe` take a shard, and the page subscribes to each district's shard (`live.ts`). Kept here because it was a gap when the design was written.
 3. **Tiered storage has no read path.** Offloaded segments cannot be read back, so history older than local retention is gone.
 4. **A commit is not idempotent.** A retried tick can land twice; readers dedupe on `(epoch, district, tick)`.
 

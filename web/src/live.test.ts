@@ -171,7 +171,7 @@ describe('follow', () => {
     expect(state.ticks[0]).toBe(1);
   });
 
-  it('reads each district keyframe from the district own shard', async () => {
+  it("reads each district keyframe from the district's own shard", async () => {
     const gateway = new FakeGateway(3);
     for (let i = 0; i < 4; i++) gateway.commit(2, false, 0, i === 1);
     gateway.commit(1, false);
