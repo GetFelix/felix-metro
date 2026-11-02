@@ -562,7 +562,7 @@ fn authors_for_eighty_built_lots_fit_in_the_rushs_headroom() {
     let empty = record(Vec::new());
     let mut per_keyframe = 0;
     let mut all = busy.author_events().into_iter().map(|(_, e)| e).peekable();
-    // Each district writes its own record, so the events are charged one record's header apiece.
+    // Each event is measured in a record of its own, as each district writes its own.
     while all.peek().is_some() {
         per_keyframe += record(vec![all.next().unwrap()]) - empty;
     }

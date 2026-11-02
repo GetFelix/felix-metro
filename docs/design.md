@@ -394,9 +394,9 @@ after 2^21 ticks (22 bytes), so it holds on a long-lived log. The same bound is 
 
 | Extrapolated to 20,000 residents in 16 districts, at 4 ticks a second | Harbor city (522 residents) | 64 residents a home (5,568) |
 | --------------------------------------------------------------------- | --------------------------- | --------------------------- |
-| Mean over a day                                                       | 5.1 KB/s                    | 5.3 KB/s                    |
-| Busiest minute, 07:45 to 08:15                                        | 8.1 KB/s                    | 8.9 KB/s                    |
-| Busiest minute, 17:00 to 17:30                                        | 9.96 KB/s                   | 9.86 KB/s                   |
+| Mean over a day                                                       | 5.2 KB/s                    | 5.3 KB/s                    |
+| Busiest minute, 07:45 to 08:15                                        | 8.2 KB/s                    | 8.9 KB/s                    |
+| Busiest minute, 17:00 to 17:30                                        | 9.99 KB/s                   | 9.86 KB/s                   |
 
 That is under 0.5 GB a day. The header of each district's record, every tick,
 is 1.4 KB/s of it (22 bytes, 16 districts, 4 ticks a second; 1 KB/s on a young
