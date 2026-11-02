@@ -75,8 +75,11 @@ The list is data. Every row is an entry in `SHORTCUTS` in `web/src/ui/keys.ts`, 
 from that array. Nothing else knows about the rows, so a feature that adds a key adds one entry:
 
 ```ts
-{ keys: [['W'], ['A'], ['S'], ['D']], action: 'Move the camera' }
+{ keys: [['Shift', '←'], ['Page Down']], action: 'Go back an hour' }
 ```
+
+The camera's keys are the exception: the View and Mouse and touch groups are built from `CAMERA_KEYS` and
+`CAMERA_GESTURES` in `web/src/camera-keys.ts`, so the list always matches what the camera reads.
 
 Each entry is a group of rows. A row lists the ways to do something (`keys`), where each way is one key or
 several pressed together, and says what it does (`action`). `['Shift', '←']` is Shift and the left arrow. The

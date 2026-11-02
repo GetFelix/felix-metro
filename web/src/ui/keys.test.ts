@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { CAMERA_GESTURES, CAMERA_KEYS } from '../camera-keys';
 import { SHORTCUTS, isHelpKey, isPlayKey, isTypingTarget } from './keys';
 
 const flat = SHORTCUTS.flatMap((g) => g.rows.flatMap((r) => r.keys.flat()));
@@ -29,6 +30,15 @@ describe('the key list', () => {
   it('lists the keys of today', () => {
     for (const key of ['←', '→', '↑', '↓', 'Shift', 'Page Up', 'Page Down', 'Home', 'End', 'Space', 'Esc', '?', 'Tab'])
       expect(flat).toContain(key);
+  });
+
+  it('has a row for every camera key and gesture', () => {
+    const actions = SHORTCUTS.flatMap((g) => g.rows.map((r) => r.action));
+    for (const key of CAMERA_KEYS) {
+      expect(flat).toContain(key.keycap);
+      expect(actions).toContain(key.label);
+    }
+    for (const gesture of CAMERA_GESTURES) expect(flat).toContain(gesture.input);
   });
 
   // The timeline answers to the keys in its handler; a key added there without a row here fails this.

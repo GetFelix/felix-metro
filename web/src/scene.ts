@@ -461,7 +461,9 @@ export async function createCity(
       if (!lot || id === c.tower) return;
       const old = lotObjects.get(id)?.jobs ?? [];
       lotObjects.delete(id);
-      for (const job of old) scene.remove(await job);
+      // Not awaited: a second call for the lot while models load would find nothing to take down and draw beside this
+      // one, and whichever drew last would be the only one tracked.
+      for (const job of old) void job.then((o) => scene.remove(o));
       const kind = building?.kind ?? lot.kind;
       let n = 0;
       const rnd = () => unitHash(id * 64 + kind, n++);

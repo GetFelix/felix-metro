@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import { createCamera, startIntro } from './camera';
+import { createCamera, startIntro, type CameraRig } from './camera';
+import { cityBounds } from './camera-math';
 import { createHud } from './ui/hud';
 import { hintDue } from './ui/hint';
 import { isPlayKey } from './ui/keys';
@@ -32,6 +33,8 @@ declare global {
   interface Window {
     /** True once the first frame is drawn with every model loaded. */
     __ready?: boolean;
+    /** The camera, for the CI checks and the console. */
+    __camera?: CameraRig;
     /** Tier history and GPU memory per tier, for the CI step-down check. Only set under ?slow or ?hud. */
     /** The live city's state, for the CI check and for looking at it from the console. */
     __live?: {
@@ -383,8 +386,9 @@ async function main() {
   }
   const span = city ? Math.max(1, city.tiles / 17) : 1;
   const { camera, controls } = city
-    ? createCamera(renderer.domElement, span * 1.2, new THREE.Vector3())
+    ? createCamera(renderer.domElement, span * 1.2, new THREE.Vector3(), cityBounds(city.tiles))
     : createCamera(renderer.domElement);
+  if (hooks) window.__camera = controls;
   const drawn: ReadonlyMap<number, Building> = new Map(state?.built);
   const { scene, construction, cars, people, glows, setTime, setShadows, fleet, setLot } = await createCity(
     renderer,
@@ -465,8 +469,7 @@ async function main() {
       closeUp() {
         const car = traffic.where().find((w) => w.car);
         if (!car) return false;
-        controls.target.set(car.x, 0.1, car.z);
-        camera.position.set(car.x + 1.1, 0.55, car.z + 1.1);
+        controls.moveTo(car, 1.6, Math.PI / 4, 1.29, { ease: false });
         return true;
       },
     };

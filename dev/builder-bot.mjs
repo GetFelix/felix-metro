@@ -24,7 +24,8 @@
 // The city comes from `cargo run -p felix-metro-core --example city_json`, which also lists the development area and
 // the lots residents go to. Those refuse any change, so the bot leaves them alone. A lot with a building is left
 // alone too, unless --rebuild: then it is demolished first and built on; if that build is then refused the bot builds
-// the old kind back and logs it as an `orphan` line.
+// the old kind back and logs it as an `orphan` line. A demolish that gets no answer counts as applied, since the sim
+// may have applied it and the answer been lost.
 // SIGINT or SIGTERM stops after the command in flight and writes the end line; a second one exits at once, still
 // writing it. Exit 1 when a command got no result or nothing was built. Roads are not placed: the sim refuses them.
 import { execFileSync } from "node:child_process";
@@ -32,7 +33,8 @@ import { createWriteStream, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { APPLIED, DISTRICTS, EMPTY, RESULT_NAMES, build, demolish, joined, sleep } from "./lib/gateway.mjs";
+import { APPLIED, DISTRICTS, RESULT_NAMES, demolish, joined, sleep } from "./lib/gateway.mjs";
+import { takeTurn } from "./lib/turn.mjs";
 
 const NAME = "builder-bot";
 const FIRST_FILLER = 38; // kinds from here are trees and plaza props: nothing a builder counts as a building
@@ -192,7 +194,8 @@ let bare = null;
 function finish(reason, code) {
   if (finished) return;
   finished = true;
-  if (bare) emit({ type: "orphan", lot: bare.id, kind: bare.kind, restored: false });
+  // Cut off mid-turn, nothing says whether the old building stands.
+  if (bare) emit({ type: "orphan", lot: bare.id, kind: bare.kind, restored: null });
   const xs = built.map((b) => b.x);
   const zs = built.map((b) => b.z);
   const mean = (a) => a.reduce((s, v) => s + v, 0) / a.length;
@@ -267,27 +270,20 @@ for (const lot of order) {
   tried.add(lot.id);
   // A lot with a building is left alone unless --rebuild, which clears it first. Nothing there to demolish (an
   // earlier run did it) is as good as done; any other refusal, here or at the build, ends the lot's turn for good.
-  let cleared = false;
-  if (lot.kind < FIRST_FILLER) {
-    if (!flags.rebuild) continue;
-    const result = await send("demolish", lot, demolish(lot.id), lot.kind);
-    if (result !== APPLIED && result !== EMPTY) continue;
-    cleared = result === APPLIED;
-    if (cleared) bare = lot;
-  }
   const kind = kindFor(world, byTile, lot);
-  const placed = (await send("build", lot, build(lot.id, kind, lot.facing), kind)) === APPLIED;
-  if (placed) bare = null;
-  if (!placed) {
-    if (cleared) {
-      // The old building is gone and nothing replaced it: put it back, and say so either way.
-      const restored = (await send("build", lot, build(lot.id, lot.kind, lot.facing), lot.kind, "restore")) === APPLIED;
-      bare = null;
-      emit({ type: "orphan", lot: lot.id, kind: lot.kind, restored });
-      log(`lot ${lot.id} was demolished and the build was refused: ${restored ? "old building restored" : "LEFT BARE"}`);
-    }
-    continue;
-  }
+  const placed = await takeTurn({
+    lot,
+    kind,
+    rebuild: flags.rebuild,
+    filler: FIRST_FILLER,
+    send,
+    mark: (l) => (bare = l),
+    orphan: (l, restored) => {
+      emit({ type: "orphan", lot: l.id, kind: l.kind, restored });
+      log(`lot ${l.id} was demolished and the build was refused: ${restored === null ? "restore got no answer, it may be BARE" : restored ? "old building restored" : "LEFT BARE"}`);
+    },
+  });
+  if (!placed) continue;
   summary.built++;
   built.push({ ...lot, built: kind });
   log(`built kind ${kind} on lot ${lot.id} (${lot.zone}) at ${lot.x},${lot.z}: ${summary.built} of ${count}`);

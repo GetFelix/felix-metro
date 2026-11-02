@@ -489,6 +489,7 @@ timelines locked to the same tick.
 - **Kenney city kits** (Roads, Commercial, Suburban, Industrial, Car Kit): CC0, one consistent style, restyled by material name to one palette.
 - **Instanced meshes** for cars, people, trees and repeated buildings.
 - **Distance haze**: a depth-of-field pass that blurs only what lies beyond a wide sharp band past the focus, with saturated colour, so the city reads sharp up close and softens toward the horizon.
+- **A camera you can move.** Turn, tilt, slide and zoom with a mouse, trackpad, touch or the keyboard, kept inside the city. See [the camera](art.md#camera).
 - **Day and night from the tick.** Sun angle, sky, street lights and window lights all follow the city clock, live and while scrubbing.
 - **Quality tiers** so the look degrades before the frame rate does. The target is 60 fps at 20,000 residents on a laptop iGPU.
 - **A small overlay** of glass panels over the city: the Felix Metro chip and city picker, the clock, the timeline, and a settings sheet with a key list. It is plain markup and TypeScript in `web/src/ui/`, and `docs/ui.md` has its kit and rules.

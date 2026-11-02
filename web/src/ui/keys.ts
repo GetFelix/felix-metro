@@ -1,5 +1,7 @@
 // The key list: every key the page answers to, as data. A feature that adds a key adds a row here.
 
+import { CAMERA_GESTURES, CAMERA_KEYS } from '../camera-keys';
+
 /** One way of doing something: keys pressed together, such as `['Shift', '←']`. */
 export type Chord = readonly string[];
 
@@ -29,6 +31,15 @@ export const SHORTCUTS: readonly ShortcutGroup[] = [
       { keys: [['Home']], action: 'Jump to the earliest moment' },
       { keys: [['End']], action: 'Back to live' },
     ],
+  },
+  {
+    title: 'View',
+    // Built from the camera's own tables, so the list cannot drift from the keys the camera reads.
+    rows: CAMERA_KEYS.map((key) => ({ keys: [[key.keycap]], action: key.label })),
+  },
+  {
+    title: 'Mouse and touch',
+    rows: CAMERA_GESTURES.map((gesture) => ({ keys: [[gesture.input]], action: gesture.label })),
   },
   {
     title: 'Playback',
