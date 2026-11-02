@@ -427,6 +427,91 @@ for (const [size, tag] of [
   await context.close();
 }
 
+// 12. The stats panel: off until asked for, toggled by C or the settings sheet, remembered, hidden in photo mode, and clear
+// of the other controls at both widths. With no gateway there is no folded city, so only the buildings have numbers.
+{
+  const { context, page } = await open('tier=low&still&t=12', DESKTOP);
+  const text = (name) => page.locator(`#stats [data-stat=${name}]`).innerText();
+  check(!(await visible(page, '#stats')), 'the stats panel is off on a first visit');
+  await page.keyboard.press('c');
+  check(await visible(page, '#stats'), 'C shows the stats panel');
+  // The panel is drawn from a frame, and a software-rendered frame can take seconds: wait for the figures.
+  await page
+    .waitForFunction(() => document.querySelector('#stats [data-stat=homes]').textContent !== '', null, {
+      polling: 100,
+      timeout: 120_000,
+    })
+    .catch(() => {});
+  const homes = Number((await text('homes')).replace(/,/g, ''));
+  check(homes > 0, `the panel counts the homes of the generated city (${homes})`);
+  check((await text('population')) === '-', 'the residents are not known without a gateway');
+  await page.keyboard.press('c');
+  check(!(await visible(page, '#stats')), 'C hides it again');
+  await page.keyboard.press('c');
+  await page.keyboard.press('?');
+  await page.keyboard.press('c');
+  check(await visible(page, '#stats'), 'C does nothing under an open sheet');
+  await page.keyboard.press('Escape');
+  await page.evaluate(() => window.__ui.openSettings());
+  const box = page.locator('#sheet [data-stats]');
+  check(await box.isChecked(), 'the settings sheet shows the panel as on');
+  await box.uncheck();
+  check(!(await visible(page, '#stats')), 'the settings switch hides the panel');
+  await box.check();
+  await page.keyboard.press('Escape');
+  check(await visible(page, '#stats'), 'the settings switch shows the panel');
+  const keyed = await page.locator('[data-keys] kbd', { hasText: /^C$/ }).count();
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForFunction(() => window.__ready === true, null, { polling: 100, timeout: 180_000 });
+  check(keyed > 0, 'the key list names C');
+  check(await visible(page, '#stats'), 'the panel stays on for the next visit');
+  await page.keyboard.press('h');
+  check(!(await visible(page, '#stats')), 'H hides the panel with the other controls');
+  await page.keyboard.press('h');
+  await context.close();
+}
+for (const [size, tag] of [
+  [DESKTOP, '1280'],
+  [PHONE, '360'],
+  [{ width: 740, height: 360 }, '740x360'],
+]) {
+  const { context, page } = await open('tier=low&still&t=12', size);
+  await page.keyboard.press('c');
+  await page.evaluate(() => {
+    document.getElementById('pill').classList.remove('hidden');
+    document.getElementById('chevron').classList.remove('hidden');
+  });
+  await settle(page, 100);
+  const rects = await page.evaluate(() =>
+    Object.fromEntries(
+      ['#stats', '.brand', '.corner', '#timeline'].map((s) => {
+        const { left, right, top, bottom } = document.querySelector(s).getBoundingClientRect();
+        return [s, { left, right, top, bottom }];
+      }),
+    ),
+  );
+  const meets = (a, b) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+  for (const other of ['.brand', '.corner', '#timeline'])
+    check(!meets(rects['#stats'], rects[other]), `the stats panel clears ${other} at ${tag}px`);
+  const r = rects['#stats'];
+  check(
+    r.left >= 0 && r.right <= size.width && r.top >= 0 && r.bottom <= size.height,
+    `the panel is on screen at ${tag}px`,
+  );
+  check(
+    !(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)),
+    `the panel overflows nothing at ${tag}px`,
+  );
+  await page.screenshot({ path: join(out, `stats-day-${tag}.png`) });
+  await context.close();
+}
+{
+  const { context, page } = await open('tier=low&still&t=12&ui=0', DESKTOP);
+  await page.keyboard.press('c');
+  check((await page.locator('#stats').count()) === 0, 'there is no stats panel or C key under ?ui=0');
+  await context.close();
+}
+
 // 11. Following a resident from a link: the card shows who they are and their day, the camera goes to their building,
 // Esc and a pan let go, and turning and zooming do not. With no log the resident is placed by their schedule at the
 // hour on the slider, so this runs without a gateway; picking a moving car is checked against the live stack.

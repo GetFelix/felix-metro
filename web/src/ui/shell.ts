@@ -6,6 +6,7 @@ import { isHelpKey, isTypingTarget, renderKeys } from './keys';
 import { CHOICES, choose, runningText, selectedChoice, type Choice } from './settings';
 import { PHOTO_CLASS } from './photo';
 import { createSheet } from './sheet';
+import type { StatsPanel } from './stats';
 import { toast } from './toast';
 
 export interface Shell {
@@ -41,6 +42,10 @@ const SHEET = `
       ).join('')}
     </fieldset>
     <p class="running" data-running></p>
+    <label class="choice toggle">
+      <input type="checkbox" data-stats />
+      <span><b>City stats</b><small>Residents, who is on the road and the buildings, for the moment on screen.</small></span>
+    </label>
     <button type="button" class="text-button" data-open-keys>Keyboard shortcuts<kbd>?</kbd></button>
   </section>
   <section data-view="keys" hidden>
@@ -55,8 +60,11 @@ const SHEET = `
     <div class="keys" data-keys></div>
   </section>`;
 
-/** Build the controls into the page. Nothing here changes the city; the quality options go through `quality`. */
-export function createShell(quality: Quality): Shell {
+/**
+ * Build the controls into the page. Nothing here changes the city; the quality options go through `quality`, and the
+ * stats switch through `stats`.
+ */
+export function createShell(quality: Quality, stats: StatsPanel): Shell {
   const button = document.createElement('button');
   button.type = 'button';
   button.className = 'icon-button';
@@ -87,6 +95,7 @@ export function createShell(quality: Quality): Shell {
   const view = (name: string) => root.querySelector<HTMLElement>(`[data-view="${name}"]`)!;
   const radios = [...root.querySelectorAll<HTMLInputElement>('input[name="quality"]')];
   const running = root.querySelector<HTMLElement>('[data-running]')!;
+  const statsBox = root.querySelector<HTMLInputElement>('[data-stats]')!;
   renderKeys(root.querySelector<HTMLElement>('[data-keys]')!);
 
   const refresh = () => {
@@ -94,7 +103,10 @@ export function createShell(quality: Quality): Shell {
     for (const r of radios) r.checked = r.value === picked;
     running.textContent = runningText(quality);
     running.hidden = running.textContent === '';
+    statsBox.checked = stats.on;
   };
+  statsBox.addEventListener('change', () => stats.set(statsBox.checked));
+  stats.onChange((on) => (statsBox.checked = on));
   for (const r of radios) {
     r.addEventListener('change', () => {
       if (r.checked) choose(quality, r.value as Choice);
