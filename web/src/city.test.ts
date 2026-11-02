@@ -396,6 +396,23 @@ describe('CityState', () => {
       expect(state.onRoad(26).cars).toBe(0);
     });
 
+    it('takes over only the trip under way, not an earlier one that arrived', () => {
+      const metro: Trips = {
+        trip: (_resident, _vehicle, depart) => new FakeJourney(depart === 2 ? 8 : depart + 10),
+        replan: (_resident, _vehicle, depart) => new FakeJourney(depart + 5),
+      };
+      const state = new CityState(city, metro, 2);
+      // District 0 holds the arrival and the replan; district 1, folded after it, holds both trips.
+      state.apply(record(0, 8, [{ type: 'arrived', resident: 1 } as TickEvent]), true);
+      state.apply(record(0, 10, [replan(1)]), true);
+      state.apply(record(1, 9, [trip(1, 2), trip(1, 9)]), true);
+      expect(state.onRoad(5).cars).toBe(1);
+      expect(state.onRoad(8).cars).toBe(0);
+      expect(state.onRoad(12).cars).toBe(1);
+      expect(state.onRoad(15).cars).toBe(0);
+      expect(state.voyages.get(1)!.depart).toBe(10);
+    });
+
     it('counts a replan core cannot place, and draws nothing for it', () => {
       const state = new CityState(city, replanning(), 2);
       state.apply(record(0, 5, [trip(999, 5)]));

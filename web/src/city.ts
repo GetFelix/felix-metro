@@ -337,10 +337,19 @@ export class CityState {
         const t = e;
         const replanned = this.replans.get(t.resident);
         if (replanned?.epoch === record.epoch && t.depart < replanned.tick) {
-          // The replan's route is the one to draw. The trip still counts from when it left.
-          const covered = this.spells.get(t.resident)?.some((s) => s.from <= replanned.tick && s.to > replanned.tick);
-          const to = this.voyages.get(t.resident)?.journey.arrive() ?? Infinity;
-          if (!covered) this.depart(t.resident, { vehicle: t.vehicle, from: t.depart, to });
+          if (t.depart >= this.lastArrival(t.resident, replanned.tick)) {
+            // The replan took this trip over: its route is the one to draw. The trip still counts from when it left.
+            const covered = this.spells.get(t.resident)?.some((s) => s.from <= replanned.tick && s.to > replanned.tick);
+            const to = this.voyages.get(t.resident)?.journey.arrive() ?? Infinity;
+            if (!covered) this.depart(t.resident, { vehicle: t.vehicle, from: t.depart, to });
+            continue;
+          }
+          // An earlier trip that arrived before the replan: it counts as itself and leaves the replanned voyage alone.
+          syncRoads(this.trips, this.routeRoads());
+          const earlier = this.trips.trip(t.resident, t.vehicle, t.depart, Uint32Array.from(t.route.flat()));
+          this.depart(t.resident, { vehicle: t.vehicle, from: t.depart, to: earlier?.arrive() ?? Infinity });
+          if (!earlier) this.unplaced++;
+          else this.finishing.push({ resident: t.resident, vehicle: t.vehicle, depart: t.depart, journey: earlier });
           continue;
         }
         syncRoads(this.trips, this.routeRoads());
@@ -382,6 +391,14 @@ export class CityState {
     }
     this.prune(d);
     return 'applied';
+  }
+
+  // The tick of the resident's last arrival at or before `tick`, or -1 when none is known yet.
+  private lastArrival(resident: number, tick: number): number {
+    let last = -1;
+    for (const s of this.spells.get(resident) ?? []) if (s.to <= tick && s.to > last) last = s.to;
+    for (const t of this.orphans.get(resident) ?? []) if (t <= tick && t > last) last = t;
+    return last;
   }
 
   // The old trip may run along a road that is gone, so it stops being drawn now rather than when it would have arrived.
