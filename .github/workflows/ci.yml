@@ -188,6 +188,16 @@ jobs:
           name: overlay-frames
           path: web/frames
 
+  # Cheap: python only. Catches a misnamed or empty fragment before the release does.
+  changelog:
+    name: changelog fragments
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 .github/scripts/changelog-assemble.py --check
+      - run: python3 .github/scripts/test_changelog_assemble.py
+
   rust-fmt:
     name: rust fmt
     runs-on: ubuntu-latest
