@@ -56,6 +56,11 @@ export function authorizeUrl(
   return url.href;
 }
 
+/** Who a loopback sign-in asks for: `?as=mayor` signs in as the builder, and the default is the viewer who only watches. */
+export function userFrom(search: string): string {
+  return new URLSearchParams(search).get('as')?.trim() || 'viewer';
+}
+
 /** What the gateway says about signing in, or `null` when nothing here answers like a gateway. */
 export async function fetchOidc(base: string): Promise<Oidc | null> {
   try {
@@ -140,7 +145,14 @@ export async function signIn(oidc: Oidc): Promise<string> {
   const flow = { state: random(), verifier: random(), search: location.search, hash: location.hash };
   sessionStorage.setItem(FLOW_KEY, JSON.stringify(flow));
   location.assign(
-    authorizeUrl(oidc, discovery.authorization_endpoint, redirectUri, flow.state, await challengeFor(flow.verifier)),
+    authorizeUrl(
+      oidc,
+      discovery.authorization_endpoint,
+      redirectUri,
+      flow.state,
+      await challengeFor(flow.verifier),
+      userFrom(location.search),
+    ),
   );
   return new Promise(() => {});
 }

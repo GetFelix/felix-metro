@@ -154,6 +154,8 @@ for (const [query, what] of [
   check(await page.evaluate(() => window.__ui === undefined), `no controls and no tip under ${what}`);
   check((await page.locator('#settings-button').count()) === 0, `no settings button under ${what}`);
   check((await page.locator('#sound-button').count()) === 0, `no sound button under ${what}`);
+  check((await page.locator('#build-button').count()) === 0, `no build button under ${what}`);
+  check((await page.locator('#demolish-button').count()) === 0, `no demolish button under ${what}`);
   if (query.includes('ui=0'))
     for (const [selector, name] of [
       ['.brand', 'the Felix Metro chip'],
@@ -695,6 +697,40 @@ const followFrom = async (page, resident) => {
   check(box && box.x >= 0 && box.x + box.width <= PHONE.width, 'the card fits on a phone');
   await phone.page.screenshot({ path: join(out, 'follow-day-360.png') });
   await phone.context.close();
+}
+
+// 12. The building tools without a live city: the buttons are there and off, each says why, and no key picks a tool. What
+// they do on a live city is check-placement.mjs, which needs the dev stack.
+for (const size of [DESKTOP, PHONE]) {
+  const { context, page } = await open('tier=low&still&t=12', size);
+  for (const id of ['build-button', 'demolish-button']) {
+    check(await visible(page, `#${id}`), `the ${id} is on screen at ${size.width}px`);
+    check((await page.getAttribute(`#${id}`, 'aria-disabled')) === 'true', `the ${id} is off with no live city`);
+    check(/needs a live city/.test((await page.getAttribute(`#${id}`, 'title')) ?? ''), `the ${id} says why it is off`);
+  }
+  await page.click('#build-button', { force: true });
+  check(
+    (await page.locator('.toast').allInnerTexts()).some((t) => /needs a live city/.test(t)),
+    'pressing an off build button says why',
+  );
+  check(!(await visible(page, '#build-panel')), 'an off build button opens no panel');
+  for (const key of ['b', 'x', 'r', '[', ']']) await page.keyboard.press(key);
+  check(!(await visible(page, '#build-panel')), 'no building key opens a panel with no live city');
+  check(
+    (await page.evaluate(() => window.__build)) === undefined,
+    'a page with no live city installs no building hooks',
+  );
+  if (size === DESKTOP) {
+    await page.keyboard.press('?');
+    const headings = await page.locator('[data-keys] h3').allTextContents();
+    check(headings.includes('Building'), 'the key list has a Building group');
+    await page.keyboard.press('Escape');
+    await page.keyboard.press('h');
+    check(!(await visible(page, '#build-button')), 'photo mode hides the build buttons');
+    await page.keyboard.press('h');
+  }
+  await page.screenshot({ path: join(out, `build-off-${size.width}.png`) });
+  await context.close();
 }
 
 await browser.close();
