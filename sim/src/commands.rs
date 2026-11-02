@@ -3,11 +3,12 @@
 
 use std::sync::Arc;
 
-use felix_client::ClusterClient;
+use felix_client::{ClusterClient, SubscribeCursorError};
 use felix_metro_core::record::{
     Command, CommandRecord, Event, REFUSED_BAD_SPEED, REFUSED_BUSY, REFUSED_MALFORMED,
     REFUSED_UNSUPPORTED, RESULT_APPLIED, principal_hash, split_stamp,
 };
+use felix_wire::StartPosition;
 use tokio::sync::mpsc;
 use tracing::{error, info, warn};
 
@@ -26,17 +27,20 @@ pub struct Incoming {
     pub principal: u64,
     /// `None` when the bytes after the stamp are not a command record.
     pub command: Option<CommandRecord>,
+    /// Where it was on the command stream, when the broker says.
+    pub offset: Option<u64>,
 }
 
 impl Incoming {
     /// Reads a payload the gateway stamped. `None` when the stamp itself is
     /// missing: the stream only takes publishes through the gateway, so there
     /// is nobody to attribute it to.
-    pub fn from_payload(payload: &[u8]) -> Option<Incoming> {
+    pub fn from_payload(payload: &[u8], offset: Option<u64>) -> Option<Incoming> {
         let (principal, record) = split_stamp(payload)?;
         Some(Incoming {
             principal: principal_hash(principal),
             command: CommandRecord::decode(record).ok(),
+            offset,
         })
     }
 
@@ -60,26 +64,47 @@ pub fn commands_stream(city: &str) -> String {
     format!("metro.commands.{city}")
 }
 
-/// Follows a city's command stream from its tail, so a restart does not run
-/// what was asked while the sim was down. Commands arrive on the channel in
-/// stream order. The subscription opens in the background and is retried until
-/// it does, because a broker still electing its leaders refuses it at startup;
-/// commands sent before it opens are not seen.
+/// Follows a city's command stream from offset `from`, or from its tail when
+/// there is none, so a command is applied once however often the sim restarts.
+/// Commands arrive on the channel in stream order. The subscription opens in
+/// the background and is retried until it does, because a broker still
+/// electing its leaders refuses it at startup; from the tail, commands sent
+/// before it opens are not seen.
 pub fn follow(
     client: Arc<ClusterClient>,
     connection: Connection,
     city: String,
+    from: Option<u64>,
 ) -> mpsc::Receiver<Incoming> {
     let stream = commands_stream(&city);
     let (send, receive) = mpsc::channel(1024);
     tokio::spawn(async move {
+        let mut start = from.map_or(StartPosition::Latest, StartPosition::Offset);
         let mut subscription = loop {
             match client
-                .subscribe_shard(&connection.tenant, &connection.namespace, &stream, 0, None)
+                .subscribe_shard(
+                    &connection.tenant,
+                    &connection.namespace,
+                    &stream,
+                    0,
+                    Some(start),
+                )
                 .await
             {
                 Ok(subscription) => break subscription,
                 Err(err) => {
+                    // The stream no longer holds the offset (retention took it, or the stream began again):
+                    // start at the nearest one it does.
+                    if let Some(cursor) = err.downcast_ref::<SubscribeCursorError>() {
+                        warn!(
+                            city,
+                            requested = cursor.requested,
+                            available = cursor.available,
+                            "the command stream does not hold the offset to resume at"
+                        );
+                        start = StartPosition::Offset(cursor.available);
+                        continue;
+                    }
                     warn!(city, error = %format!("{err:#}"), "cannot follow the command stream yet");
                     tokio::time::sleep(std::time::Duration::from_secs(1)).await;
                 }
@@ -89,7 +114,8 @@ pub fn follow(
         loop {
             match subscription.next_event().await {
                 Ok(Some(event)) => {
-                    let Some(incoming) = Incoming::from_payload(&event.payload) else {
+                    let Some(incoming) = Incoming::from_payload(&event.payload, event.offset)
+                    else {
                         warn!(city, "dropped a command with no sender stamp");
                         continue;
                     };

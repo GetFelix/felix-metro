@@ -293,7 +293,7 @@ export class Playback {
     for (const pump of this.pumps) {
       while (pump.queue.length > 0 && pump.queue[0]!.record.tick <= limit) {
         const { record } = pump.queue.shift()!;
-        // A restarted sim numbers its ticks from the start again, below the playhead, which cannot follow it.
+        // A newer epoch numbers its ticks from the start again, below the playhead, which cannot follow it.
         const had = this.state.epochOf(record.district);
         if (had >= 0 && record.epoch > had) {
           // An earlier failure keeps its reason.

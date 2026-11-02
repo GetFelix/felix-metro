@@ -247,6 +247,13 @@ pub enum Event {
     Speed {
         ticks_per_second: u8,
     },
+    /// The offset on the command stream the sim reads next: every command
+    /// before it has been applied. Every district's record carries it on a
+    /// keyframe tick and on a tick that applied commands, so a sim that
+    /// restarts picks the stream up exactly there.
+    CommandCursor {
+        next: u64,
+    },
 }
 
 /// A district's state at one tick, drawable with nothing before it.

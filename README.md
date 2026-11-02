@@ -7,7 +7,7 @@ A 3D city simulator that runs in the browser, built on
 is stored in durable Felix streams, so you can scrub back to any earlier moment
 and play forward from there.
 
-> **Status:** a live city runs end to end. The sim steps it, the browser draws it live, and a city picker switches between cities. Opening the city at an earlier moment works (`/?at=<tick>#harbor` draws it there, paused); the timeline bar scrubs the city back through the hours it still holds (it spans at least one city day, with the part after the live head dimmed; drag the handle, or step with `←` and `→`, `Shift` for an hour); Space plays forward from there at the city's speed and Back to live races to the live city and joins it with no gap and no reload. Builders change the city through its command stream: the sim applies `build` and `demolish`, each building rises in a scaffold or falls in dust, and `dev/builder-bot.mjs` grows a neighbourhood on each city's development area. Following a resident and the page's own building tools are not built yet. The [style frame](prototype/style-frame.html) shows the look. The plan is in
+> **Status:** a live city runs end to end. The sim steps it, the browser draws it live, and a city picker switches between cities. Opening the city at an earlier moment works (`/?at=<tick>#harbor` draws it there, paused); the timeline bar scrubs the city back through the hours it still holds (it spans at least one city day, with the part after the live head dimmed; drag the handle, or step with `←` and `→`, `Shift` for an hour); Space plays forward from there at the city's speed and Back to live races to the live city and joins it with no gap and no reload. Builders change the city through its command stream: the sim applies `build` and `demolish`, each building rises in a scaffold or falls in dust, and `dev/builder-bot.mjs` grows a neighbourhood on each city's development area. The sim resumes from its log after a restart. Following a resident and the page's own building tools are not built yet. The [style frame](prototype/style-frame.html) shows the look. The plan is in
 > [docs/design.md](docs/design.md) and the work is tracked in
 > [milestones](https://github.com/GetFelix/felix-metro/milestones).
 
@@ -61,10 +61,11 @@ there. [docs/design.md](docs/design.md) has the details.
 | 3   | Follow a life       | Planned                                                                                                                                                                                                                                                                       |
 | 4   | Build               | In progress: the sim applies build, demolish and speed commands and records who sent them, and the page animates a building going up (scaffold) or coming down (dust) over 8 ticks, backwards when you rewind; placement tools in the page, roads and zones are not built yet |
 | 5   | Branching timelines | Planned                                                                                                                                                                                                                                                                       |
-| 6   | Scale and failover  | Planned                                                                                                                                                                                                                                                                       |
+| 6   | Scale and failover  | In progress: a restarted sim resumes from its log; 20,000 residents, 16 districts and broker loss are open |
 | 7   | Self-hosting        | Planned                                                                                                                                                                                                                                                                       |
+| 8   | A first chapter     | In progress: the sim resumes from its log after a restart (nothing built is lost, no tick repeated or missing, commands run once); money, factions, policy, goals and investigations are planned (see [docs/game.md](docs/game.md))                                                                                  |
 
-What runs today: the sim, the dev stack and a browser page that shows a city live, with
+What runs today: the sim, which picks up where it left off after a restart, the dev stack and a browser page that shows a city live, with
 cars and walkers moving in time with the sim and the sun following the tick. The page
 opens on a loading screen that fills in district by district, then drifts down onto the
 city. If the connection drops, a `Reconnecting…` pill shows, the city keeps moving, and
@@ -287,6 +288,19 @@ what was built for aiming a camera. A second signal exits at once, still writing
 no result or nothing was built. It places no roads; the sim refuses them. CI runs it for about 20 seconds and checks
 the log with `dev/check-builder-bot.mjs`, which counts only net new buildings (a build applied on a lot that was
 empty, with no demolish applied on it first) and wants at least ten in one district.
+
+To see the sim carry on from its log, restart it alone. The broker keeps the log, so each city goes on from the next
+tick with every building and everyone where they were:
+
+```sh
+docker compose -f dev/compose.yml restart sim   # podman compose the same
+docker compose -f dev/compose.yml logs sim | grep "resumed from its log"
+```
+
+The page keeps drawing and picks up when the sim is back. A command sent while the sim is down runs when it returns,
+and none runs twice. [sim/README.md](sim/README.md#restart) has the details. `dev/check-restart.mjs` checks this through
+the gateway: run `node dev/check-restart.mjs before pinecrest`, stop the sim, run `offline`, start the sim and run `after`
+(CI does the same).
 
 The sim runs at 4 ticks a second. Its speed endpoint accepts only loopback, so it is
 not published; `dev/speed.sh` runs `curl` inside the sim's container:

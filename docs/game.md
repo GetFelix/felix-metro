@@ -156,9 +156,9 @@ The numbers are placeholders until the economy is in the sim and measured.
 
 ## What this needs from the sim and the log
 
-- **Persistence across a restart.** Today a restarted sim begins again at tick 0 with
-  the generated city, and what builders built is lost. A game cannot do that. The sim
-  has to resume from the newest keyframe and the records after it.
+- **Persistence across a restart.** Done: a restarted sim resumes from the newest keyframe
+  and the records after it (see Restart in design.md). The new state below has to be
+  rebuilt the same way, so each new keyframe field is restored in `sim/src/world/restore.rs`.
 - **New events:** `ledger` (account changes), `moved` (a resident joining or leaving),
   `policy` (a policy's value changed). Each is small and rare next to `trip`.
 - **Keyframes grow by** the account, policy values and the set of residents living in
@@ -172,7 +172,7 @@ The numbers are placeholders until the economy is in the sim and measured.
 
 ## Order
 
-1. Persistence across a restart.
+1. Persistence across a restart (done).
 2. Money and the `ledger` event, shown as one number on the page and on the timeline.
 3. Factions: three satisfaction numbers from the log, their demands, and the recall
    warning with its countdown.

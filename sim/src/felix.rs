@@ -11,6 +11,7 @@ use felix_metro_core::{Routing, district_key};
 use felix_wire::routing::ShardRouting;
 use tracing::warn;
 
+use crate::commands::{Incoming, commands_stream};
 use crate::runner::{Log, Write};
 
 /// How to reach Felix and which tenant to act as.
@@ -105,6 +106,7 @@ pub struct FelixLog {
     tenant: Arc<str>,
     namespace: Arc<str>,
     stream: Arc<str>,
+    commands: Arc<str>,
     keys: Arc<[String]>,
 }
 
@@ -130,6 +132,7 @@ impl FelixLog {
             tenant: connection.tenant.as_str().into(),
             namespace: connection.namespace.as_str().into(),
             stream: stream.into(),
+            commands: commands_stream(city).into(),
             keys: keys.into(),
         })
     }
@@ -181,6 +184,76 @@ impl Log for FelixLog {
             .into_iter()
             .find(|record| record.offset == offset)
             .map(|record| record.payload.to_vec()))
+    }
+
+    async fn keyframe(&self, district: u16) -> Result<Option<u64>> {
+        let key = &self.keys[usize::from(district)];
+        let state = self
+            .client
+            .state_get(
+                &self.tenant,
+                &self.namespace,
+                &self.stream,
+                key.as_bytes(),
+                "keyframe",
+            )
+            .await?;
+        state
+            .value
+            .map(|bytes| {
+                let bytes: [u8; 8] = bytes[..].try_into().map_err(|_| {
+                    anyhow::anyhow!("district {district}'s keyframe state is not an offset")
+                })?;
+                Ok(u64::from_le_bytes(bytes))
+            })
+            .transpose()
+    }
+
+    async fn read_from(&self, district: u16, offset: u64, max: u32) -> Result<Vec<(u64, Vec<u8>)>> {
+        let page = self
+            .client
+            .read(
+                &self.tenant,
+                &self.namespace,
+                &self.stream,
+                u32::from(district),
+                offset,
+                None,
+                max,
+            )
+            .await?;
+        Ok(page
+            .records
+            .into_iter()
+            .map(|record| (record.offset, record.payload.to_vec()))
+            .collect())
+    }
+
+    async fn commands(&self, from: u64, until: u64) -> Result<Vec<Incoming>> {
+        let mut found = Vec::new();
+        let mut next = from;
+        while next < until {
+            let page = self
+                .client
+                .read(
+                    &self.tenant,
+                    &self.namespace,
+                    &self.commands,
+                    0,
+                    next,
+                    Some(until),
+                    0,
+                )
+                .await?;
+            if page.records.is_empty() {
+                break;
+            }
+            for record in &page.records {
+                found.extend(Incoming::from_payload(&record.payload, Some(record.offset)));
+            }
+            next = page.next_offset;
+        }
+        Ok(found)
     }
 }
 
