@@ -493,7 +493,15 @@ async function main() {
     return readStats(folded ? state : null, folded ? Math.floor(tick) : 0);
   };
   let statsAt = 0;
-  stats?.onChange(() => (statsAt = 0));
+  // Drawn at once when switched on, so the panel is never up empty while a slow first frame is awaited.
+  const showStats = () => {
+    const read = statsNow();
+    if (read) stats?.show(read);
+  };
+  stats?.onChange((on) => {
+    statsAt = 0;
+    if (on) showStats();
+  });
   if (hooks) window.__stats = statsNow;
   hour = frozenHour ?? (state ? hour : parseFloat(slider.value));
   slider.value = String(hour);
@@ -1206,8 +1214,7 @@ async function main() {
     // A few times a second is plenty for numbers a person reads.
     if (stats?.on && now - statsAt >= 250) {
       statsAt = now;
-      const read = statsNow();
-      if (read) stats.show(read);
+      showStats();
     }
     // A frame with no tick has no update to draw a voyage that just ended away.
     traffic?.sync();

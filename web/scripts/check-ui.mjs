@@ -435,7 +435,13 @@ for (const [size, tag] of [
   check(!(await visible(page, '#stats')), 'the stats panel is off on a first visit');
   await page.keyboard.press('c');
   check(await visible(page, '#stats'), 'C shows the stats panel');
-  await settle(page, 400);
+  // The panel is drawn from a frame, and a software-rendered frame can take seconds: wait for the figures.
+  await page
+    .waitForFunction(() => document.querySelector('#stats [data-stat=homes]').textContent !== '', null, {
+      polling: 100,
+      timeout: 120_000,
+    })
+    .catch(() => {});
   const homes = Number((await text('homes')).replace(/,/g, ''));
   check(homes > 0, `the panel counts the homes of the generated city (${homes})`);
   check((await text('population')) === '-', 'the residents are not known without a gateway');
