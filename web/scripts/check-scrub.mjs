@@ -410,7 +410,24 @@ const momentsNow = () =>
   // A click on a lone moment goes to it, and the city rests there.
   const click = marks.find((m) => m.count === 1 && m.tick > oldest + 120 && m.tick < tip - 120);
   if (!click) await fail(`no lone moment to click: ${JSON.stringify(marks)}`);
-  await page.click(`#markers .moment[data-tick="${click.tick}"]`);
+  // The buttons slide while the live tip advances, so Playwright never sees one as stable. Click where it is now, with
+  // a real pointer, and have the page say which moment the press landed on.
+  const target = page.locator(`#markers .moment[data-tick="${click.tick}"]`);
+  const box = await target.boundingBox();
+  if (!box) await fail(`the moment at ${click.tick} is not on the bar`);
+  await page.evaluate(() => {
+    window.__pressed = null;
+    document.getElementById('markers').addEventListener(
+      'pointerdown',
+      (e) => {
+        window.__pressed = Number(e.target.closest?.('.moment')?.dataset.tick);
+      },
+      { capture: true, once: true },
+    );
+  });
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  const pressed = await page.evaluate(() => window.__pressed);
+  if (pressed !== click.tick) await fail(`the press meant for the moment at ${click.tick} landed on ${pressed}`);
   await settled(click.tick).catch(async () =>
     fail(`clicking the moment at ${click.tick} did not go there: ${JSON.stringify(await read())}`),
   );
