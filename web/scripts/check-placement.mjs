@@ -2,7 +2,9 @@
 // demolish tools. Page A signs in as `mayor` and uses the mouse, page B as `architect` and uses touch; a third page
 // signs in as `viewer`, who may watch but not build. A builds on one lot while B builds on another, both then try
 // the same lot at the same moment (one build wins and the other is told so), A takes down B's building, and a page
-// held at an earlier moment is checked to be off until Back to live. Whatever was built is taken down at the end.
+// held at an earlier moment is checked to be off until Back to live. Then A lays harbor's one road over the cleared
+// ground with the road tool, both pages draw it with the cars and ambient life running, and B takes it away again
+// with two taps. Whatever was built is taken down at the end.
 //
 // Usage: node scripts/check-placement.mjs <page url without a hash> <out dir>, against the running dev stack, whose
 // seed was told METRO_BUILDERS=mayor,architect. IDP_URL (default http://127.0.0.1:9400) mints the tokens.
@@ -287,6 +289,122 @@ await Promise.all(
     ),
   ),
 );
+// 8. A road. Harbor has one pair of crossings a road may join over the cleared ground alone, nodes 6 and 7 on the north
+// edge, with tiles (17, 0) and (18, 0) between them (core/examples/fixture.rs lays the same one).
+{
+  const [NODE_A, NODE_B] = [6, 7];
+  const TILES = [
+    [17, 0],
+    [18, 0],
+  ];
+  const drawn = (page) =>
+    page.evaluate(
+      (tiles) => tiles.every(([x, z]) => window.__build.drawnRoads().some(([rx, rz]) => rx === x && rz === z)),
+      TILES,
+    );
+  const { page } = a;
+  check(!(await drawn(page)), 'no road is drawn between the two crossings yet');
+  await page.evaluate(([x, z]) => window.__build.focusTile(x, z), [17.5, 0]);
+  await frames(page);
+  await page.keyboard.press('y');
+  check((await state(page)).tool === 'road', 'the Y key picks the road tool');
+  /** Move the mouse over a node and wait for the tool to find it; resolves with where it is on screen. */
+  const point = async (node, kind) => {
+    await frames(page);
+    const at = await page.evaluate((n) => window.__build.screenOfNode(n), node);
+    if (!at) await fail(`node ${node} is not on screen`);
+    await page.mouse.move(at.x, at.y);
+    await until(
+      page,
+      ([n, k]) => {
+        const road = window.__build.state().road;
+        return road?.kind === k && (k === 'start' ? road.a : road.b) === n;
+      },
+      [node, kind],
+      `the pointer never found node ${node}`,
+    );
+    return at;
+  };
+  let at = await point(NODE_A, 'start');
+  await page.mouse.click(at.x, at.y);
+  await until(
+    page,
+    (n) => window.__build.state().roadStart === n,
+    NODE_A,
+    'the first click did not pick the first end',
+  );
+  at = await point(NODE_B, 'lay');
+  const ghost = (await state(page)).road;
+  check(ghost.ok, `the road's ghost fits: ${ghost.why ?? 'ok'}`);
+  await page.screenshot({ path: join(out, 'a-road-ghost.png') });
+  const before = (await state(page)).answered;
+  await page.mouse.click(at.x, at.y);
+  const laid = await answer(page, before);
+  check(laid.status === 'Road laid.', `A is told: ${laid.status}`);
+  for (const p of [a, b]) {
+    await until(
+      p.page,
+      ([x, y]) => window.__build.roads().some((r) => r.a === x && r.b === y && !r.removed),
+      [NODE_A, NODE_B],
+      'the road never reached the city state',
+    );
+    await until(
+      p.page,
+      (tiles) => tiles.every(([x, z]) => window.__build.drawnRoads().some(([rx, rz]) => rx === x && rz === z)),
+      TILES,
+      'the road was never drawn',
+    );
+  }
+  check(true, 'both pages draw the new road');
+
+  // Laying it again is turned away in the page, with the reason shown in the panel. The first end is picked from the
+  // node itself, since the road's own tiles beside it would offer the road for taking away.
+  at = await point(NODE_A, 'start');
+  await page.mouse.click(at.x, at.y);
+  await until(page, (n) => window.__build.state().roadStart === n, NODE_A, 'the first end was not picked again');
+  await point(NODE_B, 'lay');
+  const again = (await state(page)).road;
+  check(!again.ok && /already joins/.test(again.why), `the same road again is refused in the page: ${again.why}`);
+  check(/already joins/.test((await page.textContent('#build-why')) ?? ''), 'the panel says why');
+  await page.keyboard.press('Escape');
+  const dropped = await state(page);
+  check(dropped.roadStart === null && dropped.tool === 'road', 'Esc drops the first end and keeps the tool');
+
+  // The cars and the ambient life go on over the new road: the city moves on with no page error.
+  const ticked = await page.evaluate(() => window.__live.tick);
+  await until(page, (t) => window.__live.tick > t + 4, ticked, 'the city stopped after the road was laid');
+  check(await page.evaluate(() => Number.isFinite(window.__live.movers)), 'the traffic layer is drawing');
+  await page.screenshot({ path: join(out, 'a-road.png') });
+  await page.keyboard.press('Escape');
+
+  // B takes it away with a tap to pick it and a tap to confirm, and A sees it go.
+  const bp = b.page;
+  await bp.evaluate(([x, z]) => window.__build.focusTile(x, z), [17.5, 0]);
+  if ((await state(bp)).tool !== 'road') await bp.click('#road-button');
+  await until(bp, () => window.__build.state().tool === 'road', null, 'B never picked the road tool');
+  await frames(bp);
+  const tile = await bp.evaluate(([x, z]) => window.__build.screenOfTile(x, z), TILES[0]);
+  if (!tile) await fail('the new road is not on B’s screen');
+  const { answered: beforeB, sent: sentB } = await state(bp);
+  await bp.touchscreen.tap(tile.x, tile.y);
+  await until(bp, () => window.__build.state().road?.kind === 'remove', null, 'B’s first tap never picked the road');
+  check((await state(bp)).sent === sentB, 'the first tap of a road removal sends nothing');
+  await bp.touchscreen.tap(tile.x, tile.y);
+  const gone = await answer(bp, beforeB);
+  check(gone.status === 'Road taken away.', `B is told: ${gone.status}`);
+  for (const p of [a, b]) {
+    await until(
+      p.page,
+      (tiles) => !tiles.some(([x, z]) => window.__build.drawnRoads().some(([rx, rz]) => rx === x && rz === z)),
+      TILES,
+      'the road was never taken off the screen',
+    );
+  }
+  check(true, 'both pages take the road off the screen');
+  await bp.keyboard.press('Escape');
+  await a.page.screenshot({ path: join(out, 'a-road-gone.png') });
+}
+
 await b.page.screenshot({ path: join(out, 'b-final.png') });
 
 await browser.close();

@@ -42,6 +42,7 @@
   outline-offset: 2px;
 }
 .build-hint,
+.build-why,
 .build-status {
   margin: 0;
   font-size: 12px;
@@ -52,6 +53,9 @@
 }
 .build-status:empty {
   display: none;
+}
+.build-why {
+  color: var(--coral);
 }
 .build-status[data-state='refused'] {
   color: var(--coral);

@@ -156,6 +156,7 @@ for (const [query, what] of [
   check((await page.locator('#sound-button').count()) === 0, `no sound button under ${what}`);
   check((await page.locator('#build-button').count()) === 0, `no build button under ${what}`);
   check((await page.locator('#demolish-button').count()) === 0, `no demolish button under ${what}`);
+  check((await page.locator('#road-button').count()) === 0, `no road button under ${what}`);
   if (query.includes('ui=0'))
     for (const [selector, name] of [
       ['.brand', 'the Felix Metro chip'],
@@ -796,7 +797,7 @@ const followFrom = async (page, resident) => {
 // they do on a live city is check-placement.mjs, which needs the dev stack.
 for (const size of [DESKTOP, PHONE]) {
   const { context, page } = await open('tier=low&still&t=12', size);
-  for (const id of ['build-button', 'demolish-button']) {
+  for (const id of ['build-button', 'demolish-button', 'road-button']) {
     check(await visible(page, `#${id}`), `the ${id} is on screen at ${size.width}px`);
     check((await page.getAttribute(`#${id}`, 'aria-disabled')) === 'true', `the ${id} is off with no live city`);
     check(/needs a live city/.test((await page.getAttribute(`#${id}`, 'title')) ?? ''), `the ${id} says why it is off`);
@@ -807,7 +808,7 @@ for (const size of [DESKTOP, PHONE]) {
     'pressing an off build button says why',
   );
   check(!(await visible(page, '#build-panel')), 'an off build button opens no panel');
-  for (const key of ['b', 'x', 'r', '[', ']']) await page.keyboard.press(key);
+  for (const key of ['b', 'x', 'y', 'r', '[', ']']) await page.keyboard.press(key);
   check(!(await visible(page, '#build-panel')), 'no building key opens a panel with no live city');
   check(
     (await page.evaluate(() => window.__build)) === undefined,

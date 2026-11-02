@@ -101,7 +101,7 @@ describe('a day built from the log by hand', () => {
   it('lists a change of route where the log has it', () => {
     const l = log(
       tick(0, 100, [trip(100)]),
-      tick(2, 120, [{ type: 'replan', resident: 7, fromSegment: 4, route: [[5, 80]] }]),
+      tick(2, 120, [{ type: 'replan', resident: 7, vehicle: 1, node: 4, route: [[5, 80]] }]),
       tick(1, 140, arrive(2, 3)),
     );
     expect(l.entries(0, TICKS_PER_DAY).map((e) => [e.kind, e.tick])).toEqual([

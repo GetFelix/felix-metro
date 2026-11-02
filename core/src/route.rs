@@ -156,6 +156,20 @@ impl Trip {
             .collect()
     }
 
+    /// The node leg `leg` ends at, or `None` when it ends partway along a segment,
+    /// at the trip's last door.
+    pub fn leg_end_node(&self, city: &City, leg: usize) -> Option<u32> {
+        let l = self.legs.get(leg)?;
+        let seg = &city.segments[l.segment as usize];
+        if l.to == 0 && l.from != 0 {
+            Some(seg.a)
+        } else if l.to == u32::from(seg.length) * 1000 && l.from != l.to {
+            Some(seg.b)
+        } else {
+            None
+        }
+    }
+
     /// Thousandths of a tile covered.
     pub fn length(&self) -> u32 {
         self.legs.iter().map(|l| l.from.abs_diff(l.to)).sum()
@@ -418,6 +432,24 @@ pub fn route(city: &City, from: Door, to: Door, depart: u32, cong: &Congestion) 
     } else {
         (Mode::Drive, spans(city, from, to, cong, Mode::Drive)?)
     };
+    Some(timed(city, spans, mode, depart, cong))
+}
+
+/// Like [`route`], but for `mode` whatever the length: a vehicle sent on a new
+/// route after a road went keeps being the walker or the car it was.
+pub fn route_as(
+    city: &City,
+    from: Door,
+    to: Door,
+    depart: u32,
+    cong: &Congestion,
+    mode: Mode,
+) -> Option<Trip> {
+    let spans = spans(city, from, to, cong, mode)?;
+    Some(timed(city, spans, mode, depart, cong))
+}
+
+fn timed(city: &City, spans: Vec<Span>, mode: Mode, depart: u32, cong: &Congestion) -> Trip {
     let mut tick = depart;
     let legs = spans
         .into_iter()
@@ -437,7 +469,7 @@ pub fn route(city: &City, from: Door, to: Door, depart: u32, cong: &Congestion) 
             }
         })
         .collect();
-    Some(Trip { mode, depart, legs })
+    Trip { mode, depart, legs }
 }
 
 /// The spans [`route`] made `legs` from, undone: `spans` drops a span of no

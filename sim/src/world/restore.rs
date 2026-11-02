@@ -5,19 +5,22 @@ use std::collections::HashMap;
 
 use anyhow::{Context, Result, bail, ensure};
 use felix_metro_core::record::{
-    BuildingDiff, Doing, Event, Keyframe, LEDGER_DAY, Leg, NO_BUILDING, Vehicle,
+    BuildingDiff, Doing, Event, Keyframe, LEDGER_DAY, Leg, NO_BUILDING, ROAD_ADDED, ROAD_REMOVED,
+    Vehicle,
 };
-use felix_metro_core::{City, Mode, TICKS_PER_DAY};
+use felix_metro_core::{BuiltRoad, City, Mode, TICKS_PER_DAY};
 
 use super::{Council, Person, Policy, State, World, activity_kind, count_car};
 
-/// A `trip` event, which holds what a keyframe's vehicle does not: when the
-/// trip left and the whole route.
+/// A `trip` or `replan` event, which holds what a keyframe's vehicle does not:
+/// when the trip left (or was moved) and the whole route.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Departure {
     pub(crate) depart: u32,
     pub(crate) vehicle: u8,
     pub(crate) route: Vec<Leg>,
+    /// The node a replanned trip starts at, or `None` for a trip from a lot.
+    pub(crate) node: Option<u32>,
 }
 
 impl World {
@@ -46,6 +49,22 @@ impl World {
             balances.len(),
             world.districts()
         );
+        let mut roads: Vec<BuiltRoad> = frames
+            .iter()
+            .flat_map(|f| &f.roads)
+            .map(|r| BuiltRoad {
+                segment: r.segment,
+                a: r.a,
+                b: r.b,
+                removed: r.change == ROAD_REMOVED,
+            })
+            .collect();
+        roads.sort_by_key(|r| r.segment);
+        world
+            .city
+            .restore_roads(&roads)
+            .context("the keyframes' roads do not fit this city")?;
+        world.roads_changed();
         world.accounts = balances.to_vec();
         world.council = council;
         world.policy = policy;
@@ -136,14 +155,56 @@ impl World {
         Ok(world)
     }
 
-    /// Carries out what a `built`, `demolished`, `policy` or command `ledger` event in
-    /// `district`'s record says. Other events change nothing a restart has to
-    /// rebuild: stepping makes them, a day's `ledger` included.
-    pub(crate) fn apply_logged(&mut self, district: usize, event: &Event) {
+    /// Carries out what one tick's logged events say, given as `(district, event)`
+    /// in any order of districts.
+    pub(crate) fn apply_logged_tick<'a>(
+        &mut self,
+        events: impl IntoIterator<Item = (usize, &'a Event)>,
+    ) -> Result<()> {
+        let mut events: Vec<_> = events.into_iter().collect();
+        // Roads took their ids in the order the sim laid them, which across districts is not the order their records
+        // are read in.
+        events.sort_by_key(|(_, e)| match e {
+            Event::Roadwork {
+                segment, change, ..
+            } => Some((*segment, *change == ROAD_REMOVED)),
+            _ => None,
+        });
+        for (district, event) in events {
+            self.apply_logged(district, event)?;
+        }
+        Ok(())
+    }
+
+    /// Carries out what a `built`, `demolished`, `roadwork`, `policy` or command
+    /// `ledger` event in `district`'s record says. Other events change nothing a restart
+    /// has to rebuild: stepping makes them, a day's `ledger` included. A road
+    /// must be the next segment id: see [`World::apply_logged_tick`].
+    pub(crate) fn apply_logged(&mut self, district: usize, event: &Event) -> Result<()> {
         let diff = match *event {
             Event::Ledger { reason, spent, .. } if reason != LEDGER_DAY => {
                 self.accounts[district] -= spent as i64;
-                return;
+                return Ok(());
+            }
+            Event::Roadwork {
+                segment,
+                change,
+                a,
+                b,
+            } => {
+                if change == ROAD_ADDED {
+                    self.city.lay_road(segment, a, b).with_context(|| {
+                        format!(
+                            "the log adds road {segment} from node {a} to {b}, which cannot be laid"
+                        )
+                    })?;
+                    self.roads_changed();
+                } else if change == ROAD_REMOVED {
+                    self.take_away(segment).with_context(|| {
+                        format!("the log removes road {segment}, which cannot be removed")
+                    })?;
+                }
+                return Ok(());
             }
             Event::Built {
                 lot,
@@ -161,11 +222,12 @@ impl World {
             },
             Event::Policy { .. } => {
                 self.policy = Policy::from_event(event).unwrap_or(self.policy);
-                return;
+                return Ok(());
             }
-            _ => return,
+            _ => return Ok(()),
         };
         self.built.insert(diff.lot, diff);
+        Ok(())
     }
 }
 
@@ -223,15 +285,26 @@ fn travelling(
     } else {
         Mode::Drive
     };
-    let (trip, block, day) = person
-        .resident
-        .trip_in_progress(city, departure.depart, &departure.route, mode, late_close)
-        .with_context(|| {
-            format!(
-                "resident {id}'s trip event at {} does not join two of their places",
-                departure.depart
-            )
-        })?;
+    let found = match departure.node {
+        Some(node) => {
+            person
+                .resident
+                .replan_in_progress(city, node, departure.depart, &departure.route, mode)
+        }
+        None => person.resident.trip_in_progress(
+            city,
+            departure.depart,
+            &departure.route,
+            mode,
+            late_close,
+        ),
+    };
+    let (trip, block, day) = found.with_context(|| {
+        format!(
+            "resident {id}'s trip event at {} does not join two of their places",
+            departure.depart
+        )
+    })?;
     ensure!(
         trip.arrive() > at,
         "resident {id}'s latest trip ended at {}, before tick {at}",

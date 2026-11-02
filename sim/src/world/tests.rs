@@ -604,6 +604,7 @@ pub(super) fn restored(city: &City, ticks: &[Vec<DistrictTick>], at: u32) -> Wor
                         depart: *depart,
                         vehicle: *vehicle,
                         route: route.clone(),
+                        node: None,
                     },
                 );
             }

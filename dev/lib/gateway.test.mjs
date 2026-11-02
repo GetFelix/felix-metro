@@ -41,13 +41,16 @@ test("reads the header and the events whatever size the varints are", () => {
     event(9, [...u32(5), 1]),
     event(10, [...u64(99), 2, 0x6d, 0x65, ...u32(7), 2]),
     event(11, [8]),
+    event(15, [...varint(6), ...varint(300), 2, ...varint(6), ...varint(7)]),
+    event(15, [...varint(99), 1, 2, 3]),
   ];
   for (const [t, offset] of [[0, 0], [300, 128], [2 ** 21 + 5, 2 ** 21]]) {
     const out = decode(tick({ district: 3, tick: t, offset, events }));
     assert.equal(out.district, 3);
     assert.equal(out.tick, t);
     assert.equal(out.keyframe, null);
-    assert.deepEqual(out.events.map((e) => e.type), ["built", "demolished", "road", "command"]);
+    assert.deepEqual(out.events.map((e) => e.type), ["built", "demolished", "road", "command", "roadwork"]);
+    assert.deepEqual(out.events[4], { type: "roadwork", segment: 300, change: 2, a: 6, b: 7 });
     assert.deepEqual(out.events[0], { type: "built", lot: 12, kind: 21 });
     assert.deepEqual(out.events[1], { type: "demolished", lot: 300, kind: 65535 });
     assert.equal(out.events[3].principal, 99n);
@@ -59,7 +62,7 @@ test("reads the header and the events whatever size the varints are", () => {
 test("reads a keyframe's building diff and steps over the rest of it", () => {
   const keyframe = [
     ...varint(2), ...zigzag(10), ...u16(21), 0, ...zigzag(-4), ...u16(65535), 1, // buildings
-    ...varint(1), ...zigzag(6), 1, // roads
+    ...varint(2), ...zigzag(104), 3, ...varint(6), ...varint(7), ...zigzag(1), 2, ...varint(200), ...varint(201), // roads
     ...varint(2), // residents
     ...zigzag(1), ...varint(3 * 4 + 0), 1, 9, 2, // an activity: kind, lot, until
     ...zigzag(1), ...varint(1 * 4 + 1), 0, // a vehicle state, one byte
@@ -68,6 +71,7 @@ test("reads a keyframe's building diff and steps over the rest of it", () => {
   const events = [event(7, [...u32(50), ...u16(22), 0])];
   const out = decode(tick({ district: 0, tick: 240, offset: 240, keyframe, events }));
   assert.deepEqual([...out.keyframe], [[10, 21], [6, 65535]]);
+  assert.deepEqual(out.roads, [[104, 3, 6, 7], [105, 2, 200, 201]]);
   assert.deepEqual(out.events, [{ type: "built", lot: 50, kind: 22 }]);
 });
 

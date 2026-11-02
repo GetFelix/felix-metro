@@ -448,6 +448,8 @@ pub(super) fn build_graph(mask: &[u8], site: &Site) -> Graph {
                 length,
                 speed: class.speed(),
                 street: street as u16,
+                built: false,
+                removed: false,
             });
             adjacency[a].push((b, id));
             adjacency[b as usize].push((a as u32, id));
