@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   CityState,
+  syncRoads,
   NO_BUILDING,
   ROAD_ADDED,
   ROAD_REMOVED,
@@ -398,5 +399,29 @@ describe('CityState', () => {
     const unknown = { type: 'command', principal: '00', name: 'x', id: 1, result: 250 } as unknown as TickEvent;
     expect(() => state.apply(record(0, 1, [unknown, { type: 'built', lot: 1, kind: 7, rotation: 0 }]))).not.toThrow();
     expect(state.built.get(1)).toEqual({ kind: 7, rotation: 0 });
+  });
+});
+
+describe('syncRoads', () => {
+  it('keeps what core had when it turns the roads down, and does not ask again for the same list', () => {
+    let asked = 0;
+    const metro: Trips = {
+      trip: () => undefined,
+      setRoads(roads) {
+        asked++;
+        if (roads[0] === 3) throw new Error('roads out of order');
+      },
+    };
+    const good = Uint32Array.from([104, 6, 7, 0]);
+    const bad = Uint32Array.from([3, 6, 7, 0]);
+    expect(syncRoads(metro, good)).toBe(true);
+    expect(syncRoads(metro, good)).toBe(true);
+    expect(asked).toBe(1);
+    expect(syncRoads(metro, bad)).toBe(false);
+    expect(syncRoads(metro, bad)).toBe(false);
+    expect(asked).toBe(2);
+    // The good list is still what core holds, so going back to it costs nothing.
+    expect(syncRoads(metro, good)).toBe(true);
+    expect(asked).toBe(2);
   });
 });

@@ -24,8 +24,7 @@ export const HINTS: Record<Tool, string> = {
   build: 'Click or tap a bare lot on the cleared ground to build.',
   demolish:
     'Click a building on the cleared ground to take it down. On a touch screen, tap it to pick it and tap again to confirm.',
-  road:
-    'Click a crossing, then another in the same row or column, to lay a road over the cleared ground. Click a road a builder laid to take it away; the city’s own streets stay. On a touch screen, tap again to confirm.',
+  road: 'Click a crossing, then another in the same row or column, to lay a road over the cleared ground. Click a road a builder laid to take it away; the city’s own streets stay. On a touch screen, tap again to confirm.',
 };
 /** The road tool's hint once the first end is picked. */
 export const ROAD_SECOND = 'Now pick the other end, in the same row or column. Esc starts again.';

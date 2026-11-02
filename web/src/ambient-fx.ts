@@ -235,17 +235,17 @@ export class Ambient {
     };
     const commercial = (zone: string) => zone === 'commercial' || zone === 'downtown';
     this.lotTiles = city.lots.map((l) => {
-        const info = KINDS[l.kind];
-        const look = info ? lotLook(info.pack, info.model) : null;
-        const building = look === 'skyscraper' || look === 'commercial' || look === 'house' || look === 'factory';
-        return {
-          id: l.id,
-          x: l.x,
-          z: l.z,
-          building: building && l.id !== city.tower,
-          commercial: building && commercial(l.zone),
-        };
-      });
+      const info = KINDS[l.kind];
+      const look = info ? lotLook(info.pack, info.model) : null;
+      const building = look === 'skyscraper' || look === 'commercial' || look === 'house' || look === 'factory';
+      return {
+        id: l.id,
+        x: l.x,
+        z: l.z,
+        building: building && l.id !== city.tower,
+        commercial: building && commercial(l.zone),
+      };
+    });
     this.roads = buildRoads(city.roads, this.lotTiles);
     this.roads.x.forEach((_, i) => {
       if (city.roads[i]!.piece === 3)

@@ -1,7 +1,7 @@
 # The page overlay
 
 The overlay is everything on the page that is not the city: the Felix Metro chip, the clock, the timeline,
-the settings, sound, build and demolish buttons and the panels they open. This page says what it does, where it lives
+the settings, sound, build, demolish and road buttons and the panels they open. This page says what it does, where it lives
 in the code, and how to add to it. It also holds the rules (colour, type, motion and wording) that keep new
 controls looking like the ones already there.
 
@@ -25,6 +25,10 @@ controls looking like the ones already there.
   shown again in that browser.
 - **Share a moment.** The link button under the settings button copies a link that opens the city at the moment on
   screen, from the same camera view. [Moments](../README.md#moments) shows the link and how it is read.
+- **Lay a road.** The third button, or `Y`, picks the road tool. Click a crossing, then another in the same row or
+  column: a ghost of the road lies between them, cyan if it fits and red if not, with the reason under it in the panel.
+  Click again to send it. Click a road a builder laid to take it away; the city's own streets stay. `Esc` drops the
+  first end. On a touch screen the far end and a removal each take a second tap to confirm.
 - **Build and take down.** The two buttons at the left of the row under the clock, or `B` and `X`, pick the build and
   demolish tools. A panel under them picks the building, `R` turns it and the pointer moves a ghost of it from lot to
   lot. Click, or tap, to place it. On a touch screen a demolish takes two taps, one to pick the building and one to confirm,
@@ -67,7 +71,7 @@ framework. Each part has one file of each kind:
 | Settings sheet and key list      | `web/src/ui/shell.ts`, `settings.ts`, `keys.ts`, `sheet.ts`        | `web/src/ui/sheet.css`    |
 | Share button, photo mode         | `web/src/ui/share.ts`, `web/src/ui/photo.ts`, `web/src/moments.ts` | `web/src/ui/photo.css`    |
 | Sound button                     | `web/src/ui/sound.ts`                                              | `web/src/ui/kit.css`      |
-| Build and demolish tools         | `web/src/ui/build-bar.ts`, `web/src/placement.ts`                  | `web/src/ui/build.css`    |
+| Build, demolish and road tools   | `web/src/ui/build-bar.ts`, `web/src/placement.ts`                  | `web/src/ui/build.css`    |
 | Hint and messages                | `web/src/ui/hint.ts`, `web/src/ui/toast.ts`                        | `web/src/ui/toast.css`    |
 | Frame times (`?hud`)             | `web/src/ui/hud.ts`                                                | `web/src/ui/kit.css`      |
 
@@ -96,13 +100,22 @@ Three files with one job each, so the rules can be tested without a screen:
 - `web/src/placement.ts` is the state of the tools: which one is held, the building and its turn, what the tool would do
   on a lot, and what became of every command sent. It knows nothing of the page; the page hands it the live city's
   buildings, the connection and a question, "is the live city what is on screen?".
-- `web/src/ui/build-bar.ts` is the markup: the two buttons, the panel, and the keys, which are read from `BUILD_KEYS` in
+- `web/src/ui/build-bar.ts` is the markup: the three buttons, the panel, and the keys, which are read from `BUILD_KEYS` in
   `web/src/build-keys.ts` the way the camera's are.
 - `web/src/placement-view.ts` finds the lot under the pointer and draws the marker and the ghost. The ground point under
   the pointer is the wrong lot for a tall building, so it also follows the ray down from rooftop height and tests the
-  lots it passes over against their models.
+  lots it passes over against their models. For the road tool it finds the nearest crossing (a node of the road graph)
+  to the ground point instead, and whether a builder's road covers the tile under it.
 
-The rules (`web/src/build.ts`) mirror the sim's, and `placement.ts` checks them before it sends anything. The
+The rules (`web/src/build.ts`) mirror the sim's, and `placement.ts` checks them before it sends anything. A road's land
+rules (one row or column, at most 12 tiles, no road already there, nothing in the way) come from core itself, through
+`Metro.roadCheck`, on a copy of the city with the live roads laid. The page adds the lots: every tile must be bare and
+either cleared ground or a filler lot with no door, since only the sim knows which other lots residents use.
+
+The road tool works in two clicks. With no first end, the pointer offers the nearest crossing, or a builder's road if
+it is over one (a removal). After the first click it only offers the other end. A road that goes through is drawn when
+the `roadwork` event arrives; the page redraws only the road tiles that changed, hides the trees and plots of the lots
+under it, and hands the new streets to the ambient vans. The
 buttons are off with a reason from `whyNot()`, and the tool in hand is put away if the page leaves the live city. A command
 goes out as a record on the command stream; the answer is the `command` event the live state hands to
 `placement.result()`, which matches it by the random id the page gave the command.
@@ -111,11 +124,12 @@ goes out as a record on the command stream; the answer is the `command` event th
 flowchart LR
     PTR["Pointer or tap"] --> VIEW["placement-view.ts<br/>which lot?"]
     VIEW --> TOOL["placement.ts<br/>fits? send"]
-    TOOL -->|"build / demolish record"| GW["Gateway: commands"]
+    TOOL -->|"build, demolish, place road or remove road record"| GW["Gateway: commands"]
     GW --> SIM["Sim applies it"]
-    SIM -->|"command event, then built / demolished"| LIVE["Live city state"]
+    SIM -->|"command event, then built, demolished or roadwork"| LIVE["Live city state"]
     LIVE -->|"result by id"| TOOL
     LIVE -->|"lot changes"| DRAW["Scaffold rises or dust falls"]
+    LIVE -->|"road changes"| ROADS["Road tiles redrawn"]
 ```
 
 ### The key list
@@ -310,8 +324,8 @@ node scripts/check-ui.mjs http://localhost:5173/ /tmp/ui
 - the hint is shown once, and never under `?ui=0` or `?capture`;
 - no audio context is made before the sound button is used, the button and `M` switch the sound, and blocked audio
   gives a note and no console error;
-- the build and demolish buttons are there and off, with the reason, on a page with no live city, and are absent under
-  `?ui=0` and `?capture`;
+- the build, demolish and road buttons are there and off, with the reason, on a page with no live city, and are absent
+  under `?ui=0` and `?capture`;
 - the clock rolls, and holds still with reduced motion;
 - `H` hides every control, `?cam` starts the camera where a link says, and attract mode turns the camera and stops on a
   mouse move;

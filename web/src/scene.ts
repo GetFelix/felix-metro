@@ -634,6 +634,8 @@ export async function createCity(
   // Additive glows: hidden while ambient occlusion reads the scene, or they shade it like solid quads.
   const glows: THREE.Object3D[] = [];
   const lampLights: LampLight[] = [];
+  /** The light of the hour last set, for a lamp hung after it. */
+  let lit: { hour: number; d: ReturnType<typeof daylight> } | null = null;
   const glowMat = new THREE.SpriteMaterial({
     map: radial('rgba(255,210,140,1)'),
     blending: THREE.AdditiveBlending,
@@ -817,8 +819,6 @@ export async function createCity(
   const nightGround = new THREE.Color(GROUND_NIGHT);
   const lampColor = new THREE.Color(PALETTE.lamp);
   const bulbOff = new THREE.Color(BULB_OFF);
-  /** The light of the hour last set, for a lamp hung after it. */
-  let lit: { hour: number; d: ReturnType<typeof daylight> } | null = null;
   function switchLamp(l: LampLight, hour: number, d: ReturnType<typeof daylight>) {
     const on = lampSwitch(hour, l.id);
     l.pool.opacity = on * d.poolOpacity;

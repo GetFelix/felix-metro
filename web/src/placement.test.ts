@@ -335,7 +335,10 @@ describe('the road tool', () => {
     expect(placement.roadPreview()).toEqual({ kind: 'remove', segment: 104, check: { ok: true } });
     expect(await placement.commitRoad()).toBeNull();
     expect(decode(sent[0]!)).toMatchObject({ command: { type: 'removeRoad', segment: 104 } });
-    expect(placement.roadPreview()!.check).toMatchObject({ ok: false, why: expect.stringMatching(/still going through/) });
+    expect(placement.roadPreview()!.check).toMatchObject({
+      ok: false,
+      why: expect.stringMatching(/still going through/),
+    });
     placement.result(100, 24);
     expect(placement.status.state === 'refused' && placement.status.text).toMatch(/builder laid/);
     roadMap.set(104, { change: ROAD_REMOVED, a: 0, b: 1 });

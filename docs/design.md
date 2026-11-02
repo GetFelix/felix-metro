@@ -669,7 +669,7 @@ before the live tip the city on screen is, in city time.
 
 ## Building
 
-Builders publish commands (`place road`, `zone`, `build`, `demolish`) to the
+Builders publish commands (`place road`, `remove road`, `zone`, `build`, `demolish`) to the
 city's command stream, a gateway `stamp_sender` stream. The sim applies
 commands at the next tick and records the result as a `command` event in the
 district it touched, with a hash of the principal. Every change to the city
@@ -754,7 +754,10 @@ describes the pieces; this is what they rely on.
   refuses more than that (a home, a workplace and a park that residents go to), but it can only know which lots those
   are by running every resident's schedule, which the page does not. The development area is exactly the lots none of
   them use, so the page's rules are never looser than the sim's. A refusal that gets past anyway comes back as a result
-  code (`web/src/build.ts` has the sentence for each).
+  code (`web/src/build.ts` has the sentence for each). Roads follow the same idea: core's `Metro.roadCheck` gives the
+  land rules on a copy of the city with the live roads laid, and the page offers a road only over bare lots that are
+  cleared ground or filler with no door, which nobody's day goes to. In the stock 2 by 2 cities that leaves one road
+  each (harbor's nodes 6 and 7, pinecrest's 65 and 75), and the sim turns the rest away with its own codes.
 - **Sent as a record, answered by an event.** The record is the one in the table above, published to the gateway's
   `commands` alias with `ack`. The acknowledgement says Felix has the record, not that the sim applied it. The answer is
   the `command` event the live state hands out as it takes records, matched on the command id, which the page draws at
@@ -762,7 +765,8 @@ describes the pieces; this is what they rely on.
   arrives the lot is held, so a second click does not send a second command. After 20 seconds with no event
   the page says so and frees the lot; the command may still go through.
 - **The ghost is the page's.** It is drawn from the tool's building, rotation and lot and is never part of the city's state: a
-  building appears only when the `built` event arrives, and then rises in its scaffold like anyone's.
+  building appears only when the `built` event arrives, and then rises in its scaffold like anyone's. A road's ghost is
+  tiles laid between the two crossings, and the road is drawn only when the `roadwork` event arrives.
   A building faces its street until the builder turns it (`R`), because a lot's `facing` is the way its door opens.
 
 #### What zones need

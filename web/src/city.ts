@@ -114,6 +114,7 @@ export interface BuiltRoad {
 const NO_ROADS = new Uint32Array(0);
 /** The built roads each `Trips` was last given. Several states can share one `Metro`, so it is tracked per `Metro`. */
 const given = new WeakMap<Trips, Uint32Array>();
+const refused = new WeakMap<Trips, Uint32Array>();
 
 /**
  * Give `trips` the roads of `roads` unless it has them already. Trips on a built segment resolve only once the
@@ -122,14 +123,17 @@ const given = new WeakMap<Trips, Uint32Array>();
 export function syncRoads(trips: Trips, roads: Uint32Array): boolean {
   const held = given.get(trips) ?? NO_ROADS;
   if (held === roads || (held.length === 0 && roads.length === 0) || !trips.setRoads) return true;
-  given.set(trips, roads);
+  // A list core turned down is not tried again for every trip; core keeps the roads it had.
+  if (refused.get(trips) === roads) return false;
   try {
     trips.setRoads(roads);
-    return true;
   } catch (err) {
     console.warn('the built roads do not fit the city', err);
+    refused.set(trips, roads);
     return false;
   }
+  given.set(trips, roads);
+  return true;
 }
 
 /** One resident's trip, from the tick it leaves to the tick it arrives. */

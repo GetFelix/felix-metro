@@ -163,7 +163,14 @@ declare global {
         /** The lot under the pointer and whether the tool would take it. */
         preview: { lot: number; ok: boolean; why: string | null } | null;
         /** What the road tool would do where it points, and its first end once picked. */
-        road: { kind: string; a: number | null; b: number | null; segment: number | null; ok: boolean; why: string | null } | null;
+        road: {
+          kind: string;
+          a: number | null;
+          b: number | null;
+          segment: number | null;
+          ok: boolean;
+          why: string | null;
+        } | null;
         roadStart: number | null;
         /** Commands sent and not yet answered, and what the panel says. */
         pending: number;
@@ -187,6 +194,7 @@ declare global {
       /** A node's map tile, and where it is on the canvas, or null when it is out of view. */
       node(node: number): [number, number] | null;
       screenOfNode(node: number): { x: number; y: number } | null;
+      screenOfTile(x: number, z: number): { x: number; y: number } | null;
       /** Put the camera over a map tile. */
       focusTile(x: number, z: number): void;
     };
@@ -1270,6 +1278,7 @@ async function main() {
           const at = city!.nodes[node];
           return at ? view.screenOfTile(at[0], at[1]) : null;
         },
+        screenOfTile: (x, z) => view.screenOfTile(x, z),
         focusTile: (x, z) => {
           const half = (city!.tiles - 1) / 2;
           controls.moveTo({ x: x - half, z: z - half }, 9, Math.PI / 4, 0.9, { ease: false });

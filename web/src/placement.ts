@@ -232,9 +232,7 @@ export class Placement {
     const mine = (what: string) => [...this.waiting.values()].some((w) => w.what === what);
     if (this.start === null) {
       if (target?.segment != null) {
-        const check = mine(`segment:${target.segment}`)
-          ? no(STILL_GOING)
-          : canRemoveRoad(ground, target.segment);
+        const check = mine(`segment:${target.segment}`) ? no(STILL_GOING) : canRemoveRoad(ground, target.segment);
         return { kind: 'remove', segment: target.segment, check };
       }
       if (target?.node == null) return null;
@@ -288,7 +286,11 @@ export class Placement {
     if (this.tool === 'road') return null;
     const rotation = this.turn ?? this.deps.facing(lot);
     const mine = [...this.waiting.values()].some((w) => w.what === `lot:${lot}`);
-    const check: Check = mine ? no(STILL_GOING) : this.tool === 'build' ? canBuild(ground, lot) : canDemolish(ground, lot);
+    const check: Check = mine
+      ? no(STILL_GOING)
+      : this.tool === 'build'
+        ? canBuild(ground, lot)
+        : canDemolish(ground, lot);
     return { lot, tool: this.tool, kind: this.kind, rotation, check };
   }
 
@@ -352,7 +354,9 @@ export class Placement {
     this.answered++;
     const tool = sent.action === 'build' || sent.action === 'demolish' ? sent.action : 'road';
     this.status =
-      code === RESULT_APPLIED ? { state: 'done', text: DONE[sent.action] } : { state: 'refused', text: refusal(code, tool) };
+      code === RESULT_APPLIED
+        ? { state: 'done', text: DONE[sent.action] }
+        : { state: 'refused', text: refusal(code, tool) };
     this.changed();
   }
 

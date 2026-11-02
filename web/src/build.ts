@@ -171,7 +171,8 @@ export function canRemoveRoad(ground: Ground, segment: number | null): Check {
   return OK;
 }
 
-const GENERATED_ROAD = 'Only a road a builder laid can be taken away. The city’s own streets stay: homes and work are on them.';
+const GENERATED_ROAD =
+  'Only a road a builder laid can be taken away. The city’s own streets stay: homes and work are on them.';
 
 /** What a refused command is told to the person as, by the result code of its `command` event. */
 export function refusal(result: number, tool: 'build' | 'demolish' | 'road' | null = null): string {
