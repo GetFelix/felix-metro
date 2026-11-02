@@ -61,10 +61,12 @@ const cases = [
   ["a build past the last lot", build(4_000_000_000), UNKNOWN, 0],
   ["a road", placeRoad(0, 1), UNSUPPORTED, 0],
 ];
+const refusedAt = [];
 {
   const seen = await mayor.send(cases.map(([, command], i) => [2000 + i, command]));
   cases.forEach(([what, , result, district], i) => {
     const e = seen.get(2000 + i);
+    refusedAt.push(e.record.tick);
     if (e.result !== result) fail(`${what}: result ${e.result}, wanted ${result}`);
     if (e.record.district !== district) fail(`${what}: recorded in district ${e.record.district}, wanted ${district}`);
     if (e.principal !== built.command.principal) fail(`${what}: the sender changed`);
@@ -75,8 +77,8 @@ const cases = [
 
 // The timeline's markers: the day's list, kept in district 0's state, names the build, and who made it. The refused
 // build of the same lot left nothing. A lot can be built and demolished more than once in a day (this check and the
-// restart check both take the first free lot), so a marker is found by its tick. District 0 commits the tick on its own, so the list can trail the command's
-// result by a moment.
+// restart check both take the first free lot), so a marker is found by its tick. District 0 commits the tick on its
+// own, so the list can trail the command's result by a moment.
 const MARK_BUILT = 1;
 const MARK_DEMOLISHED = 2;
 const markersOf = async (tick, type, lot) => {
@@ -94,6 +96,18 @@ const markersOf = async (tick, type, lot) => {
   if (found[0].tick !== built.command.record.tick) fail(`the marker is at tick ${found[0].tick}, the build at ${built.command.record.tick}`);
   if (found[0].by !== NAME) fail(`the marker names "${found[0].by}", wanted "${NAME}"`);
   console.log(`${city}: the day's markers name the build of lot ${built.lot} at tick ${found[0].tick}, by ${found[0].by}`);
+  // The refusals left no marker: none at their ticks, and no second build of the lot after the first.
+  const days = new Set([built.command.record.tick, ...refusedAt].map((t) => Math.floor(t / 5760)));
+  const listed = [];
+  for (const d of days) {
+    const bytes = await mayor.stateGet(`markers.${d}`);
+    if (bytes) listed.push(...decodeMarkers(bytes).markers);
+  }
+  const stray = listed.filter((m) => refusedAt.includes(m.tick) && m.tick !== built.command.record.tick);
+  if (stray.length) fail(`a refused command left markers: ${JSON.stringify(stray)}`);
+  const again = listed.filter((m) => m.type === MARK_BUILT && m.subject === built.lot && m.tick >= built.command.record.tick);
+  if (again.length !== 1) fail(`lot ${built.lot} has ${again.length} build markers from tick ${built.command.record.tick} on, wanted 1`);
+  console.log(`${city}: the refused commands left no markers`);
 }
 
 // The district's next keyframe shows the build: it is a diff against the generated city, so the lot must be listed.

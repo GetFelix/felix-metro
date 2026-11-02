@@ -85,7 +85,7 @@ fn a_refused_command_and_a_speed_change_leave_no_marker() {
 
 fn loaded(day: u32, stored: Option<&[u8]>) -> Today {
     let mut today = Today::default();
-    today.load(day, stored).unwrap();
+    today.load(day, stored);
     today
 }
 
@@ -126,7 +126,35 @@ fn a_day_loaded_from_the_log_carries_on() {
     );
     let subjects: Vec<_> = next.markers.iter().map(|m| m.subject).collect();
     assert_eq!(subjects, [9, 10]);
-    assert!(Today::default().load(3, Some(&written.bytes)).is_err());
+    // A list stored for another day, or one that does not decode, is dropped and the day starts empty.
+    let mut wrong = Today::default();
+    wrong.load(3, Some(&written.bytes));
+    assert!(
+        wrong
+            .add(3 * TICKS_PER_DAY, vec![marker(3 * TICKS_PER_DAY, 1)])
+            .unwrap()
+            .is_some()
+    );
+    let record = |t: &mut Today| {
+        MarkersRecord::decode(
+            &t.add(
+                3 * TICKS_PER_DAY + 9,
+                vec![marker(3 * TICKS_PER_DAY + 9, 2)],
+            )
+            .unwrap()
+            .unwrap()
+            .bytes,
+        )
+        .unwrap()
+    };
+    assert_eq!(record(&mut wrong).markers.len(), 2);
+    let mut garbled = Today::default();
+    garbled.load(2, Some(&[5, 0xff, 0xff]));
+    let kept = garbled
+        .add(2 * TICKS_PER_DAY, vec![marker(2 * TICKS_PER_DAY, 5)])
+        .unwrap()
+        .unwrap();
+    assert_eq!(MarkersRecord::decode(&kept.bytes).unwrap().markers.len(), 1);
 }
 
 #[test]

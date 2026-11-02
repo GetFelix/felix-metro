@@ -742,6 +742,13 @@ describe('stored timeline markers', () => {
     expect(await new Seeker(day(null) as never, 1).markerBytes(0)).toBeNull();
   });
 
+  it('takes an error no retry can change for a day with no markers, and a transient one for a failure', async () => {
+    const stuck = new Seeker(day(null, new GatewayError('state_shard', 'asked for shard 0')) as never, 1);
+    expect(await stuck.markerBytes(0)).toBeNull();
+    const slow = new Seeker(day(null, new GatewayError('unavailable', 'try again')) as never, 1);
+    await expect(slow.markerBytes(0)).rejects.toThrow('try again');
+  });
+
   it('asks the key of the day on district 0, and fails when the read does', async () => {
     const h = day(null, new GatewayError('timeout', 'no answer'));
     const s = new Seeker(h as never, 1);

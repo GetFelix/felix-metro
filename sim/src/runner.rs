@@ -516,7 +516,7 @@ async fn load_markers<L: Log>(
     let mut today = Today::default();
     for day in ticks.start() / TICKS_PER_DAY..=ticks.end().saturating_add(1) / TICKS_PER_DAY {
         let stored = retrying(retry, "read the day's markers", || log.markers(day)).await?;
-        today.load(day, stored.as_deref())?;
+        today.load(day, stored.as_deref());
     }
     Ok(today)
 }

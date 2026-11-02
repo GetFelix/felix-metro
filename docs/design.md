@@ -546,7 +546,9 @@ not at all, so a sim killed between them cannot leave one without the other. A t
 [Restart](#restart)) derives the same markers, because the world steps the same way, and replaces any in the list at or
 after its tick, so the list comes out as it would have. A restart reads the days it can write to from the
 stream's state before its first tick (the days from the first tick it steps to the one after the last it repeats), and
-stops there if it cannot, so a failed read never holds up a tick; every later day is new. A warm-up commits no commands, so it writes no markers. Past days are never
+stops there if it cannot, so a failed read never holds up a tick; every later day is new. A stored value that does not
+decode (or is for another day) is dropped with a warning and the day starts empty, so a bad value cannot keep the sim
+from starting. A warm-up commits no commands, so it writes no markers. Past days are never
 rewritten, and their values stay after retention has taken their records; the page asks only for the days the retained
 range touches.
 

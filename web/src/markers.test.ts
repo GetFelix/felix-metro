@@ -120,50 +120,86 @@ describe('the marker feed', () => {
 
   it('leaves a day whose read failed unsettled and reads it again after a wait', async () => {
     let fail = true;
+    let now = 0;
     const read = vi.fn(async (d: number) => {
       if (fail) throw new Error('timeout');
       return stored(d, [day(d) + 1, 1, 'Mara']);
     });
-    const feed = createMarkerFeed(read);
+    const feed = createMarkerFeed(read, () => now);
     // Day 0 is over; a failed read of it must not be taken for a day with nothing.
     const span = { oldest: 0, live: day(1) + 5 };
-    expect(await feed.load(span, 0)).toBe(false);
+    expect(await feed.load(span)).toBe(false);
     expect(feed.stored).toEqual([]);
     read.mockClear();
     // Within the wait nothing is asked; after it, the read is made and the day fills in.
-    await feed.load(span, 500);
+    now = 500;
+    await feed.load(span);
     expect(read).not.toHaveBeenCalled();
     fail = false;
-    expect(await feed.load(span, 1500)).toBe(true);
+    now = 1500;
+    expect(await feed.load(span)).toBe(true);
     expect(feed.stored.map((m) => m.tick)).toEqual([1, day(1) + 1]);
     read.mockClear();
-    await feed.load(span, 1600);
+    now = 1600;
+    await feed.load(span);
     expect(read.mock.calls.map(([d]) => d)).toEqual([1]);
   });
 
+  it('counts the wait from when the read failed, not from when the load began', async () => {
+    let now = 0;
+    const read = vi.fn(async () => {
+      now += 20_000;
+      throw new Error('timeout');
+    });
+    const feed = createMarkerFeed(read, () => now);
+    const span = { oldest: 0, live: 5 };
+    await feed.load(span);
+    read.mockClear();
+    // The read took 20 s to fail. Half a second after that is inside its 1 s wait.
+    now += 500;
+    await feed.load(span);
+    expect(read).not.toHaveBeenCalled();
+    now += 600;
+    await feed.load(span);
+    expect(read).toHaveBeenCalledTimes(1);
+  });
+
   it('waits longer after each failure, to half a minute', async () => {
+    let now = 0;
     const read = vi.fn(async () => {
       throw new Error('timeout');
     });
-    const feed = createMarkerFeed(read);
+    const feed = createMarkerFeed(read, () => now);
     const span = { oldest: 0, live: 5 };
-    let now = 0;
+    await feed.load(span);
     const waits: number[] = [];
     for (let i = 0; i < 8; i++) {
-      read.mockClear();
-      await feed.load(span, now);
       let wait = 0;
-      while (wait < 60_000) {
+      for (;;) {
         read.mockClear();
-        await feed.load(span, now + wait);
+        await feed.load(span);
         if (read.mock.calls.length) break;
+        now += 500;
         wait += 500;
       }
       waits.push(wait);
-      now += wait;
     }
     expect(waits.slice(0, 4)).toEqual([1000, 2000, 4000, 8000]);
     expect(Math.max(...waits)).toBe(30_000);
+  });
+
+  it('forgets the failures of days that have left the span', async () => {
+    let now = 0;
+    const read = vi.fn(async (_day: number) => {
+      throw new Error('timeout');
+    });
+    const feed = createMarkerFeed(read, () => now);
+    await feed.load({ oldest: 0, live: day(1) + 5 });
+    await feed.load({ oldest: day(1), live: day(1) + 5 });
+    // Day 0 is back in the span (the city restarted with an older oldest): it is read at once, not held to old waits.
+    read.mockClear();
+    await feed.load({ oldest: 0, live: day(1) + 5 });
+    expect(read.mock.calls.map(([d]) => d)).toContain(0);
   });
 
   it('keeps what it had when a read fails and tries it again', async () => {

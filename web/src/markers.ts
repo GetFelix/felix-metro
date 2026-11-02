@@ -91,7 +91,7 @@ export function mergeMarkers(span: Span, stored: readonly Marker[]): Marker[] {
 
 export interface MarkerFeed {
   /** Read the days `span` touches that are not settled, and report whether the list changed. Never throws. */
-  load(span: Span, now?: number): Promise<boolean>;
+  load(span: Span): Promise<boolean>;
   /** The stored markers of every day held, oldest first. */
   readonly stored: Marker[];
 }
@@ -99,13 +99,17 @@ export interface MarkerFeed {
 /**
  * The stored markers by day. A day before the tip's is over and its list is read once; the tip's day is read every
  * time, since it still grows. A read that fails leaves the day as it was, unsettled, and is tried again by a later load
- * once a wait that doubles from a second to half a minute has passed.
+ * once a wait, counted from the failure, that doubles from a second to half a minute has passed.
  */
-export function createMarkerFeed(read: (day: number) => Promise<Uint8Array | null>): MarkerFeed {
+export function createMarkerFeed(
+  read: (day: number) => Promise<Uint8Array | null>,
+  clock: () => number = Date.now,
+): MarkerFeed {
   const days = new Map<number, { markers: Marker[]; settled: boolean }>();
   const failed = new Map<number, { count: number; retryAt: number }>();
   return {
-    async load(span, now = Date.now()) {
+    async load(span) {
+      const now = clock();
       const first = Math.floor(span.oldest / TICKS_PER_DAY);
       const last = Math.floor(span.live / TICKS_PER_DAY);
       let changed = false;
@@ -115,6 +119,7 @@ export function createMarkerFeed(read: (day: number) => Promise<Uint8Array | nul
           changed = true;
         }
       }
+      for (const day of failed.keys()) if (day < first) failed.delete(day);
       const wanted: number[] = [];
       for (let day = first; day <= last; day++) {
         if (!days.get(day)?.settled && (failed.get(day)?.retryAt ?? 0) <= now) wanted.push(day);
@@ -126,7 +131,8 @@ export function createMarkerFeed(read: (day: number) => Promise<Uint8Array | nul
             bytes = await read(day);
           } catch {
             const count = (failed.get(day)?.count ?? 0) + 1;
-            failed.set(day, { count, retryAt: now + Math.min(30_000, 1000 * 2 ** (count - 1)) });
+            // From when the failure showed, not from when the load began: a read can fail after a long wait.
+            failed.set(day, { count, retryAt: clock() + Math.min(30_000, 1000 * 2 ** (count - 1)) });
             return;
           }
           failed.delete(day);

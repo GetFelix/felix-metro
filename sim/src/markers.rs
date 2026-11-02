@@ -11,6 +11,7 @@ use felix_metro_core::TICKS_PER_DAY;
 use felix_metro_core::record::{
     Event, MARK_BUILT, MARK_DEMOLISHED, MARK_ROAD, Marker, MarkersRecord, RESULT_APPLIED,
 };
+use tracing::warn;
 
 /// The most markers kept for one city day. A builder who passes it is not marked past it; the changes
 /// still happen and are still in the tick records.
@@ -67,23 +68,23 @@ pub(crate) fn from_commands(tick: u32, commanded: &[Vec<Event>]) -> Vec<Marker> 
 pub(crate) struct Today(BTreeMap<u32, Vec<Marker>>);
 
 impl Today {
-    /// Takes day `day`'s list as the log holds it, `None` for a day with nothing stored.
-    pub(crate) fn load(&mut self, day: u32, stored: Option<&[u8]>) -> Result<()> {
-        let markers = match stored {
-            None => Vec::new(),
-            Some(bytes) => {
-                let record = MarkersRecord::decode(bytes)
-                    .with_context(|| format!("decode the markers of day {day}"))?;
-                anyhow::ensure!(
-                    record.day == day,
-                    "the markers stored for day {day} are for day {}",
-                    record.day
-                );
-                record.markers
+    /// Takes day `day`'s list as the log holds it, `None` for a day with nothing stored. A value that does
+    /// not decode, or is for another day, is dropped with a warning and the day starts empty: the list only
+    /// feeds a timeline, and a sim that refused to start over it could not be recovered without deleting the
+    /// key by hand.
+    pub(crate) fn load(&mut self, day: u32, stored: Option<&[u8]>) {
+        let markers = stored.map_or_else(Vec::new, |bytes| match MarkersRecord::decode(bytes) {
+            Ok(record) if record.day == day => record.markers,
+            Ok(record) => {
+                warn!(day, found = record.day, "the stored markers are for another day, starting the day empty");
+                Vec::new()
             }
-        };
+            Err(err) => {
+                warn!(day, error = %err, "the stored markers do not decode, starting the day empty");
+                Vec::new()
+            }
+        });
         self.0.insert(day, markers);
-        Ok(())
     }
 
     /// Records `new`, the markers of `tick`, and returns the list to write. Anything already listed at

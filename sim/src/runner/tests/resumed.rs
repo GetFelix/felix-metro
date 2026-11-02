@@ -652,3 +652,40 @@ async fn a_failed_read_of_the_markers_stops_the_start_and_never_a_tick() {
         .unwrap_err();
     assert!(format!("{err:#}").contains("markers"), "{err:#}");
 }
+
+#[tokio::test(start_paused = true)]
+async fn a_stored_list_that_does_not_decode_does_not_stop_a_restart() {
+    let world = World::new(harbor());
+    let lot = free_lot(&world);
+    let log = Memory::healthy();
+    run_city("harbor", harbor(), quick(300), log.clone())
+        .await
+        .unwrap();
+    log.markers
+        .lock()
+        .unwrap()
+        .insert(0, vec![5, 0xff, 0xff, 0xff]);
+    let (send, inbox) = mpsc::channel(8);
+    let build = Command::Build {
+        lot,
+        kind: 4,
+        rotation: 0,
+    };
+    send.try_send(log.publish("mayor", 1, build)).unwrap();
+    let history = load_history(&log, 4, &quick(0)).await.unwrap().unwrap();
+    run_with_history(
+        "harbor",
+        harbor(),
+        quick(310),
+        log.clone(),
+        Some(inbox),
+        Some(history),
+    )
+    .await
+    .unwrap();
+    // The unreadable value is replaced by a list that holds what this run marked.
+    assert_eq!(
+        marker_subjects(&log, 0),
+        vec![(300, lot, "mayor".to_string())]
+    );
+}
