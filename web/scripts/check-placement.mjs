@@ -86,13 +86,28 @@ async function use(page, tool, lot, { kind = null, touch = false, confirm = fals
   await until(page, (t) => window.__build.state().tool === t, tool, `the ${tool} tool was not picked`);
   if (kind !== null) await page.selectOption('#build-kind', String(kind));
   if (touch) {
-    await page.touchscreen.tap(at.x, at.y);
-    if (confirm) {
-      // A touch demolish picks the building with the first tap and takes it down with the second.
+    if (!confirm) {
+      await page.touchscreen.tap(at.x, at.y);
+    } else {
+      // A touch demolish picks the building with the first tap and takes it down with the second. A slow runner can
+      // let the pick lapse (the page drops it after a few seconds) or stretch a tap into a press, and then a tap only
+      // picks again. So tap until a command goes out: any tap on an unpicked lot picks, and one on the picked lot sends.
+      await page.touchscreen.tap(at.x, at.y);
       await until(page, (l) => window.__build.state().preview?.lot === l, lot, `the first tap never picked lot ${lot}`);
       const picked = await state(page);
       check(picked.sent === sent && picked.pending === 0, 'the first tap of a touch demolish sends nothing');
-      await page.touchscreen.tap(at.x, at.y);
+      for (let tap = 0; tap < 4; tap++) {
+        const now = await page.evaluate((l) => window.__build.screenOf(l), lot);
+        await page.touchscreen.tap(now.x, now.y);
+        const went = await page
+          .waitForFunction((n) => window.__build.state().sent > n, sent, { polling: 100, timeout: 3000 })
+          .then(
+            () => true,
+            () => false,
+          );
+        if (went) break;
+        if (tap === 3) await fail(`${page.label}: no tap confirmed the demolish: ${JSON.stringify(await state(page))}`);
+      }
     }
   } else {
     await page.mouse.move(at.x, at.y);
