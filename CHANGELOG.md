@@ -13,12 +13,6 @@
 
 ### Added
 
-- The page's own building tools: **Build** and **Demolish** buttons beside the settings button (keys `B` and `X`), a
-  panel to choose the building, `R` to turn it and `[` `]` to step through them, and a ghost of the building that follows
-  the pointer from lot to lot. Click, or tap, to place it. Commands go out only from the live city, only for a sign-in that
-  may build, and only on the development area; the panel says in plain words what became of each one. `?as=mayor` signs
-  in as the builder at the dev stack's stand-in sign-in. Roads and zones are not built yet. The dev stack's seed takes
-  `METRO_BUILDERS`, and CI checks two builders editing at once.
 - Moments: a **Share this moment** button copies a link such as `/?at=<tick>&cam=<x,z,distance,azimuth,polar>#harbor`
   that opens the city at that tick from that camera view (`?cam` is new). `H` is photo mode and hides every control.
   A page left alone for 60 seconds turns the camera slowly (`?attract=<seconds>`, `0` turns it off).
