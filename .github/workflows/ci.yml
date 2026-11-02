@@ -312,9 +312,10 @@ jobs:
           ../dev/speed.sh harbor 16
           node scripts/check-playback.mjs 'http://127.0.0.1:8088/?tier=low' live-frames/playback
       # Pointing at a building in the live page names who built it and when (the builder bot's buildings are still in
-      # pinecrest, and the sim has restarted since, so this also shows the authors survived), a generated building says it has been here since the start, and "See it go up" goes to just before a building
-      # was built and plays on until it stands. The card is absent under ?ui=0 and in photo mode, and a drag still
-      # turns the camera.
+      # pinecrest, and the sim has restarted since, so this also shows the authors survived). Signed in as the builder it
+      # reads "you". A generated building says it has been here since the start, and "See it go up" goes to just before
+      # a building was built and plays on until it stands. A 64 character name is cut short on a phone with the link
+      # whole, a tap works, a drag still turns the camera, and the card is absent under ?ui=0 and in photo mode.
       - name: The page says who built each building
         working-directory: web
         timeout-minutes: 15

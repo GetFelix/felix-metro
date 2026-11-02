@@ -94,15 +94,15 @@ A trip is its legs, each with a speed percentage, and a depart tick; every leg's
 ### Districts are shards
 
 A city is a grid of districts, and each district is one shard of the city's
-event stream. The sim routes every commit with the district as its entity key.
-This keeps each district's history in order on its own shard and spreads a big
-city over brokers.
+event stream. This keeps each district's history in order on its own shard and
+spreads a big city over brokers.
 
-Felix maps an entity key to a shard by hashing it, and the keys `d00` to `d03`
-do not land on four different shards of a four-shard stream. So district `i`
-commits with `d<NN>` where that hashes to shard `i`, and with `d<NN>.<n>` for
-the first `n` that does where it does not. The stream needs a shard for every
-district, and district `i` is always shard `i`.
+District `i` is shard `i`. The sim names the shard in every commit
+(`commit_if_on_shard`) and every state read (`state_get_on_shard`), and the page
+names it in its `read`, `subscribe` and `state_get`, so nothing needs to know
+how the stream hashes entity keys. The commit still carries an entity key,
+`d<NN>`, but only as a label. The stream needs a shard for every district, and
+the sim refuses to start on one that has fewer.
 
 One sim task steps all districts of a city in lockstep. Each tick it commits one
 record per district, in parallel, and waits for all of them before the next
@@ -175,18 +175,18 @@ guess.
 A car's position every tick would cost around 4 MB/s for 10,000 cars. The sim
 writes decisions instead, and the client works out positions:
 
-| Event                  | Fields                                                                         | Meaning                                    |
-| ---------------------- | ------------------------------------------------------------------------------ | ------------------------------------------ |
-| `trip`                 | resident, vehicle kind, depart tick, route (segment ids with a speed each)     | Leaves now along this route                |
-| `replan`               | resident, from segment, new route                                              | A jam or a closed road changed the route   |
-| `arrived`              | resident, lot                                                                  | Reached a building                         |
-| `activity`             | resident, kind (sleep, work, shop, ...), until tick                            | What they are doing inside                 |
-| `left` / `entered`     | resident, other district; `entered` adds the vehicle state with the route left | Crossed into another district              |
-| `built` / `demolished` | lot, building kind, rotation                                                   | A building changed                         |
-| `road`                 | segment, change (closed, opened, added, removed)                               | A road changed                             |
-| `command`              | principal hash, builder name, command id, result                               | A builder's command was applied or refused |
-| `speed`                | ticks per second                                                               | The city's speed changed; 0 is paused      |
-| `author`               | lot, tick it was built, principal hash, builder name                           | Who built the building on a lot            |
+| Event                  | Fields                                                                           | Meaning                                    |
+| ---------------------- | -------------------------------------------------------------------------------- | ------------------------------------------ |
+| `trip`                 | resident, vehicle kind, depart tick, route (segment ids with a speed each)       | Leaves now along this route                |
+| `replan`               | resident, from segment, new route                                                | A jam or a closed road changed the route   |
+| `arrived`              | resident, lot                                                                    | Reached a building                         |
+| `activity`             | resident, kind (sleep, work, shop, ...), until tick                              | What they are doing inside                 |
+| `left` / `entered`     | resident, other district; `entered` adds the vehicle state with the route left   | Crossed into another district              |
+| `built` / `demolished` | lot, building kind, rotation                                                     | A building changed                         |
+| `road`                 | segment, change (closed, opened, added, removed)                                 | A road changed                             |
+| `command`              | principal hash, builder name, command id, result                                 | A builder's command was applied or refused |
+| `speed`                | ticks per second                                                                 | The city's speed changed; 0 is paused      |
+| `author`               | principal hash, builder name, and each lot they built with the tick it was built | Who built the buildings on some lots       |
 
 A route is its segment ids from the road graph and one speed byte per segment,
 a percentage of the segment class's speed. A trip of 12 segments is under 40
@@ -254,25 +254,27 @@ delta from the record's own `tick`, so a time near now is a byte or two. An
 entry is usually one event. `events` counts entries, including ones a reader
 skips.
 
-| Tag | Event            | Fields                                                           |
-| --- | ---------------- | ---------------------------------------------------------------- |
-| 1   | `trip`           | resident, vehicle `u8`, depart, route                            |
-| 2   | `replan`         | resident, from segment, route                                    |
-| 3   | `arrived`        | resident, lot                                                    |
-| 4   | `activity`       | resident, kind `u8`, until                                       |
-| 5   | `left`           | resident, district                                               |
-| 6   | `entered`        | resident, district, vehicle state                                |
-| 7   | `built`          | lot `u32`, kind `u16`, rotation `u8`                             |
-| 8   | `demolished`     | lot `u32`, kind `u16`, rotation `u8`                             |
-| 9   | `road`           | segment `u32`, change `u8`                                       |
-| 10  | `command`        | principal `u64`, name, id `u32`, result `u8`                     |
-| 11  | `speed`          | ticks per second `u8`                                            |
-| 12  | `command_cursor` | next command stream offset, varint                               |
-| 13  | `arrival`        | resident, lot, kind `u8`, until: an `arrived` and its `activity` |
-| 14  | `author`         | lot, built tick, principal `u64`, name                           |
+| Tag | Event            | Fields                                                             |
+| --- | ---------------- | ------------------------------------------------------------------ |
+| 1   | `trip`           | resident, vehicle `u8`, depart, route                              |
+| 2   | `replan`         | resident, from segment, route                                      |
+| 3   | `arrived`        | resident, lot                                                      |
+| 4   | `activity`       | resident, kind `u8`, until                                         |
+| 5   | `left`           | resident, district                                                 |
+| 6   | `entered`        | resident, district, vehicle state                                  |
+| 7   | `built`          | lot `u32`, kind `u16`, rotation `u8`                               |
+| 8   | `demolished`     | lot `u32`, kind `u16`, rotation `u8`                               |
+| 9   | `road`           | segment `u32`, change `u8`                                         |
+| 10  | `command`        | principal `u64`, name, id `u32`, result `u8`                       |
+| 11  | `speed`          | ticks per second `u8`                                              |
+| 12  | `command_cursor` | next command stream offset, varint                                 |
+| 13  | `arrival`        | resident, lot, kind `u8`, until: an `arrived` and its `activity`   |
+| 14  | `author`         | principal `u64`, name, count, per lot: lot delta, built tick delta |
 
-`author` is a lot varint, the tick its building was built as a varint, then the
-builder's hash and name laid out like those of `command`.
+`author` is the builder's hash and name laid out like those of `command`, a varint
+count, then per lot the lot as a delta from the one before (the first from 0) and
+the tick its building was built as a delta from the record's tick. One event holds
+every lot one builder built in the district.
 
 The tag is four bits, so only tag 15 remains free for a new event kind. Past
 that, a wider tag would be a new record kind.
@@ -321,10 +323,10 @@ them or when. A page that joins the live city or seeks to a past tick starts fro
 a keyframe, so it could not say who built a lot. The sim writes that as events
 instead of changing the keyframe layout:
 
-- **`author`.** Every district writes one `author` event for each lot in it that a
-  builder built and that still stands, in the record of every keyframe tick. The
-  event holds the lot, the tick of its `built` event, and the hash and display name
-  of the builder from the `command` event that caused it.
+- **`author`.** On every keyframe tick each district writes one `author` event per
+  builder who has a building standing in it. The event holds the hash and display
+  name of the builder, from the `command` events that caused the builds, then every
+  such lot in ascending order with the tick of its `built` event.
 - **Between keyframes** nothing new is written. The `command` event just before a
   `built` already says who built it, and the tick of the record is when.
 - **Demolishing** a lot ends its entry: the next keyframe tick does not list it. A
@@ -341,10 +343,16 @@ it folds one, whether it joined live or seeked there, and the `command` and `bui
 pairs in the records after. A building the table has no builder for reads "Built
 earlier"; with a sim that writes `author` that should not happen.
 
-An `author` event is 22 bytes with a six-letter name, written once a city hour (a minute
-at 4 ticks a second) for each lot a builder put up and that still stands. That is about 0.37 B/s per
-such lot: a city with a thousand built lots adds about 370 B/s. The figures in "Log size"
-are for a city nobody has built in, which writes none.
+The event is written once a city hour (a minute at 4 ticks a second). The builder's hash
+and name are written once per builder and district, and each lot costs 2 to 5 bytes: a
+one-byte delta for lots near each other and one to four bytes for how long ago it was
+built, four only in a log six days old. That is under 0.1 B/s per built lot. The
+evening rush has only about 40 B/s of headroom under the 10 KB/s goal, so a test
+(`authors_for_a_hundred_and_fifty_built_lots_fit_in_the_rushs_headroom`) adds the
+authors of 150 built lots from five builders in a six-day-old log, 16.5 B/s, to the
+extrapolated figures and holds the sum under the goal. The figures in "Log size" are for a
+city nobody has built in, which writes no `author` event; a city with many thousands of
+built lots would leave the goal behind.
 
 ### Log size
 
@@ -521,11 +529,9 @@ lose a record:
 
 1. Subscribe to every district from live and hold what arrives. Each answer
    says the shard's tail.
-2. Read each district's `keyframe` state key. The key is held under the
-   district's entity key, which depends on how the stream hashes keys, and
-   Felix does not report that to a browser, so the page tries both routings
-   and trusts a pointer only when the record it names is that district's
-   keyframe.
+2. Read each district's `keyframe` state key once, with `state_get` naming
+   the district's shard. The page trusts the pointer only when the record it
+   names is that district's keyframe.
 3. Read the keyframe and everything up to the tail, apply it, then the held
    records. A record at or before a district's newest tick is skipped, so a
    reconnect can read from the keyframe again.
@@ -717,8 +723,8 @@ anything is built inside it.
 
 **Felix gaps this design runs into**
 
-1. **No time lookup in the gateway.** `offset_for_time` exists in Felix but felix-gateway does not expose it, so seeking estimates and corrects. Adding it upstream makes a seek one lookup per district.
-2. **Per-shard subscribe through the gateway.** The gateway's `read` takes a shard. Subscribing to one district's shard from a browser needs checking, and adding if missing.
+1. **The page does not use the gateway's time lookup yet.** felix-gateway 0.8.0 exposes `offset_for_time` behind its `time` feature, but the page still estimates and corrects when it seeks. Using it makes a seek one lookup per district.
+2. **Per-shard subscribe through the gateway.** Done: the gateway's `read` and `subscribe` take a shard, and the page subscribes to each district's shard (`live.ts`). Kept here because it was a gap when the design was written.
 3. **Tiered storage has no read path.** Offloaded segments cannot be read back, so history older than local retention is gone.
 4. **A commit is not idempotent.** A retried tick can land twice; readers dedupe on `(epoch, district, tick)`.
 

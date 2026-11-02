@@ -4,7 +4,8 @@ import type { Card } from './attribution';
 
 /** What to say about a lot: the line, and the tick "See it go up" goes to when the building has a start. */
 export interface Say {
-  text: string;
+  /** The line, in three parts so a long name can be cut short without cutting what follows it. */
+  parts: { before: string; name: string; after: string };
   goUp: number | null;
 }
 
@@ -85,7 +86,7 @@ export function createLotHover(o: LotHoverOptions): LotHover {
     lot = found;
     const go = say.goUp;
     o.card.show(
-      say.text,
+      say.parts,
       go === null
         ? null
         : {

@@ -17,7 +17,7 @@ import init, { generate, Metro } from './core/felix_metro_core.js';
 import { parseCity, type City } from './layout';
 import { beforeSignIn, fetchOidc, signIn } from './auth';
 import { CityState, NO_BUILDING, type Building } from './city';
-import { cardText, goUpTick, provenance } from './attribution';
+import { cardParts, goUpTick, provenance } from './attribution';
 import { TICKS_PER_HOUR, TickClock, cityTime } from './clock';
 import { connectLive, onOldLog } from './live';
 import { Gateway, GatewayError, sessionPrincipal } from './gateway';
@@ -1027,7 +1027,11 @@ async function main() {
      */
     const seeItGoUp = async (tick: number) => {
       if (!range) await refreshRange();
-      if (range && tick < range.oldest) return note('That part of the city is no longer kept.');
+      // The history could not be opened, which refreshRange has logged: say so, since go() would do nothing.
+      if (!range) return note('The city cannot go back to that moment right now.');
+      if (tick < range.oldest) return note('That part of the city is no longer kept.');
+      if (hasLive && tick >= tipTick() - LIVE_SNAP_TICKS)
+        return note('It only just went up, so you are already seeing it.');
       go(tick, false);
       await scrubLatest.settled();
       // Landed live (it went up a moment ago), or the seek failed and said so: nothing to play from.
@@ -1054,7 +1058,7 @@ async function main() {
         },
         say(lot) {
           const p = provenance(lot, city!, state!, sessionPrincipal());
-          return p && { text: cardText(p), goUp: goUpTick(p) };
+          return p && { parts: cardParts(p), goUp: goUpTick(p) };
         },
         card,
         goUp: (tick) => void seeItGoUp(tick),

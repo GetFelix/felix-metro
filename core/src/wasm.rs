@@ -57,17 +57,6 @@ pub fn principal_hash(principal: &str) -> String {
     format!("{:016x}", crate::record::principal_hash(principal))
 }
 
-/// [`crate::district_key`]: the entity key that puts a district on its own
-/// shard. `routing` is Felix's name for the stream's mapping, `modulo` or
-/// `jump_hash`. Throws when the stream has no shard for the district.
-#[wasm_bindgen(js_name = districtKey)]
-pub fn district_key(district: u32, shards: u32, routing: &str) -> Result<String, JsError> {
-    let routing =
-        crate::Routing::from_name(routing).ok_or_else(|| JsError::new("unknown routing"))?;
-    crate::district_key(district, shards, routing)
-        .ok_or_else(|| JsError::new("no key puts this district on a shard"))
-}
-
 /// A city and its residents, for turning `trip` events into positions.
 #[wasm_bindgen]
 pub struct Metro {

@@ -11,18 +11,18 @@ function setup(over: { hidden?: boolean } = {}) {
     ['20,20', 8],
   ]);
   const says = new Map<number, Say>([
-    [7, { text: 'Built by Ana · Day 2, 09:12', goUp: 1000 }],
-    [8, { text: 'Here since the start', goUp: null }],
+    [7, { parts: { before: 'Built by ', name: 'Ana', after: ' · Day 2, 09:12' }, goUp: 1000 }],
+    [8, { parts: { before: 'Here since the start', name: '', after: '' }, goUp: null }],
   ]);
   const card = { shown: null as Shown | null, run: null as (() => void) | null, visible: false, hid: 0 };
   const fake: Card = {
     get visible() {
       return card.visible;
     },
-    show(text, link, at) {
+    show(parts, link, at) {
       card.visible = true;
       card.run = link?.run ?? null;
-      card.shown = { text, link: link?.label ?? null, at };
+      card.shown = { text: parts.before + parts.name + parts.after, link: link?.label ?? null, at };
     },
     hide() {
       card.visible = false;

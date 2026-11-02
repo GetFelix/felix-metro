@@ -103,13 +103,18 @@ export function decode(bytes) {
     } else if (tag === 9) {
       out.events.push({ type: "road" });
     } else if (tag === 14) {
-      // lot and tick are varints, then the builder's hash and display name.
-      const inner = { i: start };
-      const lot = varint(bytes, inner);
-      const built = varint(bytes, inner);
-      const nameLength = bytes[inner.i + 8];
-      const name = Buffer.from(bytes.subarray(inner.i + 9, inner.i + 9 + nameLength)).toString("utf8");
-      out.events.push({ type: "author", lot, tick: built, principal: body.getBigUint64(inner.i - start, true), name });
+      // The builder's hash and display name, then a count and, per lot, a lot delta and a delta of its tick from the record's.
+      const principal = body.getBigUint64(0, true);
+      const nameLength = body.getUint8(8);
+      const name = Buffer.from(bytes.subarray(start + 9, start + 9 + nameLength)).toString("utf8");
+      const inner = { i: start + 9 + nameLength };
+      const lots = [];
+      let lot = 0;
+      for (let n = varint(bytes, inner); n > 0; n--) {
+        lot = delta(bytes, inner, lot);
+        lots.push([lot, delta(bytes, inner, tick)]);
+      }
+      out.events.push({ type: "author", principal, name, lots });
     }
   }
   return out;

@@ -1,5 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
-import { GO_UP_TEXT, LEAD_TICKS, cardText, goUpTick, principalHash, provenance, whenText } from './attribution';
+import {
+  GO_UP_TEXT,
+  LEAD_TICKS,
+  builderName,
+  cardText,
+  goUpTick,
+  principalHash,
+  provenance,
+  whenText,
+} from './attribution';
 import { CityState, NO_BUILDING, type TickRecord, type Trips } from './city';
 import type { City } from './layout';
 
@@ -120,6 +129,19 @@ describe('the card', () => {
     for (const line of lines) expect(line, line).not.toMatch(/[–—]/);
   });
 
+  it('puts a builder who calls themselves "you" in quotes, so only the real you reads as you', () => {
+    expect(builderName('you')).toBe('“you”');
+    expect(builderName(' You ')).toBe('“You”');
+    expect(cardText({ kind: 'built', name: 'you', mine: false, tick: 0 })).toBe('Built by “you” · Day 1, 00:00');
+    expect(cardText({ kind: 'built', name: 'you', mine: true, tick: 0 })).toBe('Built by you · Day 1, 00:00');
+  });
+
+  it('does not leave a gap for a builder with no name', () => {
+    expect(builderName('')).toBe('someone');
+    expect(builderName('  ')).toBe('someone');
+    expect(cardText({ kind: 'built', name: '', mine: false, tick: 0 })).toBe('Built by someone · Day 1, 00:00');
+  });
+
   it('counts the clock to the minute', () => {
     expect(whenText(239)).toBe('Day 1, 00:59');
     expect(whenText(240)).toBe('Day 1, 01:00');
@@ -138,7 +160,7 @@ describe('See it go up', () => {
     expect(goUpTick({ kind: 'built', name: 'Ana', mine: false, tick: 1 })).toBe(0);
   });
 
-  it('is offered only where the log holds the start', () => {
+  it('has no tick to go to for a building the log does not date', () => {
     expect(goUpTick({ kind: 'start' })).toBeNull();
     expect(goUpTick({ kind: 'earlier' })).toBeNull();
   });

@@ -3,7 +3,6 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import {
   Metro,
   decodeRecord,
-  districtKey,
   hash as cityHash,
   initSync,
   principalHash as wasmPrincipalHash,
@@ -92,17 +91,6 @@ describe('trips in WebAssembly', () => {
   });
 });
 
-describe('district keys in WebAssembly', () => {
-  it('names a key for each district under either routing', () => {
-    for (const routing of ['modulo', 'jump_hash']) {
-      for (let district = 0; district < 4; district++) {
-        expect(districtKey(district, 4, routing)).toMatch(new RegExp(`^d0${district}`));
-      }
-    }
-    expect(() => districtKey(4, 4, 'modulo')).toThrow();
-  });
-});
-
 describe('records in WebAssembly', () => {
   it('decodes every native record to the same JSON text', () => {
     const names = fixture.records.map((r) => r.name);
@@ -122,16 +110,18 @@ describe('records in WebAssembly', () => {
     expect(key.keyframe.counts).toEqual({ home: 120, atWork: 80, onRoad: 14, asleep: 6 });
   });
 
-  it('reads an author event with the lot, the tick it went up and who built it', () => {
+  it('reads an author event with who built which lots and when', () => {
     const events = fixture.records.flatMap((r) => JSON.parse(decodeRecord(bytes(r.record))).events ?? []) as {
       type: string;
     }[];
     expect(events.find((e) => e.type === 'author')).toEqual({
       type: 'author',
-      lot: 17,
-      tick: 31000,
       principal: 'deadbeef01234567',
       name: 'Ana "the" Builder',
+      lots: [
+        [17, 31000],
+        [18, 99],
+      ],
     });
   });
 

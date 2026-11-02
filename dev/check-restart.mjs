@@ -112,7 +112,9 @@ console.log(`${city}: the keyframes after the restart list the builds`);
 // The same keyframe ticks say who built each lot and at which tick, and say nothing of the one that came down.
 for (const { lot: l, district, tick } of state.taken) {
   const frame = byDistrict(district).find((r) => r.keyframe && r.tick > noted);
-  const author = frame.events.find((e) => e.type === "author" && e.lot === l);
+  const author = frame.events
+    .filter((e) => e.type === "author")
+    .flatMap((e) => e.lots.filter(([lot]) => lot === l).map(([, built]) => ({ name: e.name, tick: built })))[0];
   if (l === lot) {
     if (author) fail(`the keyframe at tick ${frame.tick} still names ${author.name} as the author of lot ${l}, which came down`);
   } else if (!author || author.name !== NAME || author.tick !== tick) {

@@ -238,10 +238,9 @@ describe('CityState', () => {
     const built = (lot: number): TickEvent => ({ type: 'built', lot, kind: 7, rotation: 2 });
     const author = (lot: number, tick: number, name: string): TickEvent => ({
       type: 'author',
-      lot,
-      tick,
       principal: `00000000000000${name.length}${name.length}`,
       name,
+      lots: [[lot, tick]],
     });
 
     it('credits the sender of the command just before a built event, at that tick', () => {
@@ -273,6 +272,33 @@ describe('CityState', () => {
       const state = new CityState(city, trips, 2);
       state.apply(record(0, 240, [author(1, 9, 'Ana')], { buildings: [[1, 7, 2]], roads: [] }), true);
       expect(state.authors.get(1)).toEqual({ tick: 9, principal: '0000000000000033', name: 'Ana' });
+    });
+
+    it('takes every lot a builder’s author event lists', () => {
+      const state = new CityState(city, trips, 2);
+      const both: TickEvent = {
+        type: 'author',
+        principal: 'aa',
+        name: 'Ana',
+        lots: [
+          [0, 7],
+          [1, 9],
+        ],
+      };
+      state.apply(
+        record(0, 240, [both], {
+          buildings: [
+            [0, 7, 0],
+            [1, 7, 0],
+          ],
+          roads: [],
+        }),
+        true,
+      );
+      expect([...state.authors].map(([lot, a]) => [lot, a.tick])).toEqual([
+        [0, 7],
+        [1, 9],
+      ]);
     });
 
     it('is the same from a keyframe as from following the events', () => {

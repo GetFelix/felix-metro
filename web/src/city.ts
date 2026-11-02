@@ -42,13 +42,12 @@ interface CommandEvent {
   id: number;
   result: number;
 }
-/** Who built the building on `lot`, and the tick of its `built` event; every keyframe tick repeats it. */
+/** The lots one builder built that still stand, each with the tick of its `built` event; every keyframe tick repeats it. */
 interface AuthorEvent {
   type: 'author';
-  lot: number;
-  tick: number;
   principal: string;
   name: string;
+  lots: [lot: number, tick: number][];
 }
 /** The events this page acts on; the rest of what a record carries is ignored. */
 export type TickEvent =
@@ -233,7 +232,7 @@ export class CityState {
       } else if (e.type === 'command') {
         by = e.result === APPLIED ? { principal: e.principal, name: e.name } : null;
       } else if (e.type === 'author') {
-        this.authors.set(e.lot, { tick: e.tick, principal: e.principal, name: e.name });
+        for (const [lot, tick] of e.lots) this.authors.set(lot, { tick, principal: e.principal, name: e.name });
       } else if (e.type === 'road') {
         this.road(d, e.segment, e.change);
       } else if (e.type === 'speed') {

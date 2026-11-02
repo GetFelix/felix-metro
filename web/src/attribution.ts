@@ -68,16 +68,36 @@ export function whenText(tick: number): string {
   return `Day ${day}, ${hh}:${mm}`;
 }
 
-/** The line on the card, without the link. */
-export function cardText(p: Provenance): string {
+/**
+ * A builder's name as the card shows it. A name is whatever the builder chose, so an empty one has no gap on the card
+ * and one that says "you" cannot pass for the real thing, which is not in quotes.
+ */
+export function builderName(name: string): string {
+  const shown = name.trim();
+  if (shown === '') return 'someone';
+  return shown.toLowerCase() === 'you' ? `“${shown}”` : shown;
+}
+
+/** The line on the card in three parts, so a long name can be the one that is cut short. */
+export function cardParts(p: Provenance): { before: string; name: string; after: string } {
   switch (p.kind) {
     case 'built':
-      return `Built by ${p.mine ? 'you' : p.name} · ${whenText(p.tick)}`;
+      return {
+        before: 'Built by ',
+        name: p.mine ? 'you' : builderName(p.name),
+        after: ` · ${whenText(p.tick)}`,
+      };
     case 'start':
-      return 'Here since the start';
+      return { before: 'Here since the start', name: '', after: '' };
     case 'earlier':
-      return 'Built earlier';
+      return { before: 'Built earlier', name: '', after: '' };
   }
+}
+
+/** The line on the card, without the link. */
+export function cardText(p: Provenance): string {
+  const { before, name, after } = cardParts(p);
+  return before + name + after;
 }
 
 /** The link after the line, for a building whose rise the log holds. */

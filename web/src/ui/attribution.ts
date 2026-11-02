@@ -1,8 +1,15 @@
 // The card that says who built the building under the pointer, with a link that shows it going up. Plain DOM, built once.
 
+/** The line on the card; a long `name` is cut short with an ellipsis and the rest stays whole. */
+export interface Line {
+  before: string;
+  name: string;
+  after: string;
+}
+
 export interface Card {
-  /** Show `text`, and `link` after it when there is one, near the viewport point `at`. */
-  show(text: string, link: { label: string; run: () => void } | null, at: { x: number; y: number }): void;
+  /** Show `line`, and `link` after it when there is one, near the viewport point `at`. */
+  show(line: Line, link: { label: string; run: () => void } | null, at: { x: number; y: number }): void;
   hide(): void;
   readonly visible: boolean;
 }
@@ -19,16 +26,23 @@ export function createCard(parent: HTMLElement, over: () => void, out: () => voi
   const el = document.createElement('div');
   el.className = 'attribution';
   el.id = 'attribution';
-  el.setAttribute('role', 'status');
   el.hidden = true;
-  const text = document.createElement('span');
-  const dot = document.createElement('span');
-  dot.className = 'attribution-dot';
+  const part = (className: string) => {
+    const span = document.createElement('span');
+    span.className = className;
+    return span;
+  };
+  const line = part('attribution-line');
+  const before = part('attribution-before');
+  const name = part('attribution-name');
+  const after = part('attribution-after');
+  line.append(before, name, after);
+  const dot = part('attribution-dot');
   dot.setAttribute('aria-hidden', 'true');
   const link = document.createElement('button');
   link.type = 'button';
   link.className = 'attribution-link';
-  el.append(text, dot, link);
+  el.append(line, dot, link);
   parent.append(el);
   el.addEventListener('pointerenter', over);
   el.addEventListener('pointerleave', out);
@@ -38,16 +52,23 @@ export function createCard(parent: HTMLElement, over: () => void, out: () => voi
     get visible() {
       return !el.hidden;
     },
-    show(line, action, at) {
-      text.textContent = line;
+    show(text, action, at) {
+      before.textContent = text.before;
+      name.textContent = text.name;
+      // The whole name is in the tooltip, since the card may show only the start of it.
+      name.title = text.name;
+      after.textContent = text.after;
       run = action?.run ?? null;
-      link.textContent = action?.label ?? '';
       // Both stay out of the card's text when there is no link, so the text is the line alone.
       dot.textContent = action ? ' · ' : '';
+      link.textContent = action?.label ?? '';
       link.hidden = action === null;
       el.hidden = false;
-      // Placed below and to the right of the pointer, or the other side of it where that would leave the screen.
+      // Measured from the corner, so where the card was last does not squeeze it.
+      el.style.left = '0px';
+      el.style.top = '0px';
       const { width, height } = el.getBoundingClientRect();
+      // Placed below and to the right of the pointer, or the other side of it where that would leave the screen.
       const left = at.x + OFFSET + width > innerWidth - MARGIN ? at.x - OFFSET - width : at.x + OFFSET;
       const top = at.y + OFFSET + height > innerHeight - MARGIN ? at.y - OFFSET - height : at.y + OFFSET;
       el.style.left = `${Math.max(MARGIN, left)}px`;

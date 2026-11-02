@@ -15,10 +15,28 @@
   white-space: nowrap;
   animation: lift var(--quick) var(--ease);
 }
+/* Only the builder's name gives way, so the time and the link stay whole and on screen. */
+.attribution-line {
+  display: flex;
+  min-width: 0;
+}
+.attribution-before,
+.attribution-after,
+.attribution-dot,
+.attribution-link {
+  flex: none;
+}
+.attribution-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .attribution[hidden] {
   display: none;
 }
 /* Flex items drop the spaces at the edges of their text; these are the card's. */
+.attribution-before,
+.attribution-after,
 .attribution-dot {
   white-space: pre;
 }

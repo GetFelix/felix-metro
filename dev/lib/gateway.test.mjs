@@ -56,11 +56,12 @@ test("reads the header and the events whatever size the varints are", () => {
   }
 });
 
-test("reads an author event: the lot, the tick it went up, who built it", () => {
+test("reads an author event: who built which lots, and when", () => {
   const name = [...Buffer.from("Ana")];
-  const author = event(14, [...varint(300), ...varint(70_000), ...u64(99), name.length, ...name]);
+  // Lot 300 built at tick 200 and lot 295 at 70 (a delta of -5 from 300), in a record at tick 240.
+  const author = event(14, [...u64(99), name.length, ...name, ...varint(2), ...zigzag(300), ...zigzag(200 - 240), ...zigzag(-5), ...zigzag(70 - 240)]);
   const out = decode(tick({ district: 1, tick: 240, events: [author, event(11, [8])] }));
-  assert.deepEqual(out.events, [{ type: "author", lot: 300, tick: 70_000, principal: 99n, name: "Ana" }]);
+  assert.deepEqual(out.events, [{ type: "author", principal: 99n, name: "Ana", lots: [[300, 200], [295, 70]] }]);
 });
 
 test("reads a keyframe's building diff and steps over the rest of it", () => {

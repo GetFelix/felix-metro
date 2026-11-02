@@ -8,6 +8,7 @@
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { chromium } from 'playwright';
+import { APPLIED, IDP, build, demolish, joined, sleep } from '../../dev/lib/gateway.mjs';
 import { withTrace } from './url.mjs';
 
 const [pageUrl, out] = process.argv.slice(2);
@@ -166,7 +167,47 @@ console.log(`See it go up: from tick ${start.past} (bare) to tick ${samples.at(-
 await page.screenshot({ path: join(out, 'go-up.png') });
 if (errors.length > 0) await fail(`errors on the page: ${errors.join('; ')}`);
 
-// 6. On a phone a tap opens the card and a tap elsewhere closes it.
+// 6. Signed in as the builder, the same building reads "Built by you". The page takes the token it finds in the tab.
+const mayorToken = (await (await fetch(`${IDP}/token?sub=mayor&aud=felix-metro`)).json()).id_token;
+const mine = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+await mine.addInitScript((token) => sessionStorage.setItem('metro.token', token), mayorToken);
+const own = await mine.newPage();
+await own.goto(`${appUrl}#${city}`, { waitUntil: 'load', timeout: 5 * MINUTE });
+await own.waitForFunction(() => Number.isFinite(window.__live?.tick) && window.__lots, null, {
+  polling: 250,
+  timeout: 5 * MINUTE,
+});
+await own.waitForTimeout(3000);
+await own
+  .evaluate((l) => window.__lots.aim(l), target.lot)
+  .then(async (at) => {
+    await own.mouse.move(at.x - 30, at.y - 30);
+    await own.mouse.move(at.x, at.y, { steps: 3 });
+  });
+const youText = await own
+  .waitForFunction(() => window.__lots.card(), null, { polling: 50, timeout: 4000 })
+  .then(() => own.evaluate(() => window.__lots.card()))
+  .catch(() => null);
+const wantYou = `Built by you · ${expectedWhen(target.tick)} · See it go up`;
+if (youText !== wantYou)
+  await fail(`signed in as the builder the card reads ${JSON.stringify(youText)}, expected "${wantYou}"`);
+console.log(`signed in as the builder: "${youText}"`);
+await mine.close();
+
+// 7. On a phone a tap opens the card and a tap elsewhere closes it, and a builder with the longest name there can be
+// gets a card that still fits the screen with its link whole.
+const LONG = 'Bartholomew-Maximilian-Featherstonehaugh-of-the-Upper-Marsh-District-x'.slice(0, 64);
+const writer = await joined(city, 'mayor', { name: LONG });
+writer.follow();
+while (writer.newest < 0) await sleep(200);
+await writer.ready();
+let longLot = null;
+for (let first = 0; first < 400 && longLot === null; first += 8) {
+  const lots = Array.from({ length: 8 }, (_, i) => first + i);
+  const seen = await writer.send(lots.map((lot) => [9000 + lot, build(lot)]));
+  longLot = lots.find((lot) => seen.get(9000 + lot).result === APPLIED) ?? null;
+}
+if (longLot === null) await fail('no lot took a build for the long name');
 const phone = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
 const touch = await phone.newPage();
 await touch.goto(`${appUrl}#${city}`, { waitUntil: 'load', timeout: 5 * MINUTE });
@@ -174,25 +215,58 @@ await touch.waitForFunction(() => Number.isFinite(window.__live?.tick) && window
   polling: 250,
   timeout: 5 * MINUTE,
 });
+await touch.waitForFunction((l) => window.__lots.built().some((b) => b.lot === l), longLot, {
+  polling: 100,
+  timeout: 60_000,
+});
 await touch.waitForTimeout(3000);
-const tapAt = await touch.evaluate((l) => window.__lots.aim(l), target.lot);
-if ((await touch.evaluate(([x, y]) => window.__lots.pick(x, y), [tapAt.x, tapAt.y])) !== target.lot) {
-  await fail('the building is not under the tap');
+async function tap(lot) {
+  const at = await touch.evaluate((l) => window.__lots.aim(l), lot);
+  if ((await touch.evaluate(([x, y]) => window.__lots.pick(x, y), [at.x, at.y])) !== lot)
+    await fail(`lot ${lot} is not under the tap`);
+  await touch.touchscreen.tap(at.x, at.y);
+  return touch
+    .waitForFunction(() => window.__lots.card(), null, { polling: 50, timeout: 3000 })
+    .then(() => touch.evaluate(() => window.__lots.card()))
+    .catch(() => null);
 }
-await touch.touchscreen.tap(tapAt.x, tapAt.y);
-const tapped = await touch
-  .waitForFunction(() => window.__lots.card(), null, { polling: 50, timeout: 3000 })
-  .then(() => touch.evaluate(() => window.__lots.card()))
-  .catch(() => null);
+const tapped = await tap(target.lot);
 if (!tapped?.startsWith('Built by ')) await fail(`a tap on a building shows ${JSON.stringify(tapped)}`);
 await touch.touchscreen.tap(5, 300);
 await touch
   .waitForFunction(() => window.__lots.card() === null, null, { polling: 50, timeout: 3000 })
   .catch(() => fail('a tap elsewhere did not close the card'));
 console.log(`a tap shows "${tapped}", and a tap elsewhere closes it`);
+const wide = await tap(longLot);
+if (!wide?.startsWith(`Built by ${LONG} \u00b7 Day `) || !wide.endsWith(' \u00b7 See it go up')) {
+  await fail(`the long name's card reads ${JSON.stringify(wide)}`);
+}
+const fit = await touch.evaluate(() => {
+  const box = (selector) => document.querySelector(selector).getBoundingClientRect();
+  const card = box('.attribution');
+  const link = box('.attribution-link');
+  const name = document.querySelector('.attribution-name');
+  return {
+    card: [card.left, card.right],
+    link: [link.left, link.right],
+    cut: name.scrollWidth > name.clientWidth,
+    width: innerWidth,
+    after: document.querySelector('.attribution-after').getBoundingClientRect().width > 0,
+  };
+});
+if (fit.card[0] < 0 || fit.card[1] > fit.width)
+  await fail(`the long name's card is off the screen: ${JSON.stringify(fit)}`);
+if (fit.link[0] < fit.card[0] || fit.link[1] > fit.card[1])
+  await fail(`the link is outside the card: ${JSON.stringify(fit)}`);
+if (!fit.cut) await fail(`the long name was not cut short: ${JSON.stringify(fit)}`);
+await touch.screenshot({ path: join(out, 'long-name.png') });
+console.log('a 64 character name is cut short and the card stays on a 390 px screen');
 await phone.close();
+const gone = await writer.send([[9500 + longLot, demolish(longLot)]], 1_000_000);
+if (gone.get(9500 + longLot).result !== APPLIED) await fail(`demolishing lot ${longLot} was refused`);
+writer.close();
 
-// 7. With ?ui=0 there is no card.
+// 8. With ?ui=0 there is no card.
 const bare = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 const url = new URL(appUrl);
 url.searchParams.set('ui', '0');
