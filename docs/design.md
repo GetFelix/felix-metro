@@ -172,19 +172,20 @@ guess.
 A car's position every tick would cost around 4 MB/s for 10,000 cars. The sim
 writes decisions instead, and the client works out positions:
 
-| Event                  | Fields                                                                         | Meaning                                             |
-| ---------------------- | ------------------------------------------------------------------------------ | --------------------------------------------------- |
-| `trip`                 | resident, vehicle kind, depart tick, route (segment ids with a speed each)     | Leaves now along this route                         |
-| `replan`               | resident, from segment, new route                                              | A jam or a closed road changed the route            |
-| `arrived`              | resident, lot                                                                  | Reached a building                                  |
-| `activity`             | resident, kind (sleep, work, shop, ...), until tick                            | What they are doing inside                          |
-| `left` / `entered`     | resident, other district; `entered` adds the vehicle state with the route left | Crossed into another district                       |
-| `built` / `demolished` | lot, building kind, rotation                                                   | A building changed                                  |
-| `road`                 | segment, change (closed, opened, added, removed)                               | A road changed                                      |
-| `command`              | principal hash, builder name, command id, result                               | A builder's command was applied or refused          |
-| `speed`                | ticks per second                                                               | The city's speed changed; 0 is paused               |
-| `ledger`               | reason (day, build, demolish), earned, spent                                   | Money moved in or out of the city's funds           |
-| `balance`              | amount                                                                         | A district's share of the funds, each keyframe tick |
+| Event                  | Fields                                                                               | Meaning                                             |
+| ---------------------- | ------------------------------------------------------------------------------------ | --------------------------------------------------- |
+| `trip`                 | resident, vehicle kind, depart tick, route (segment ids with a speed each)           | Leaves now along this route                         |
+| `replan`               | resident, from segment, new route                                                    | A jam or a closed road changed the route            |
+| `arrived`              | resident, lot                                                                        | Reached a building                                  |
+| `activity`             | resident, kind (sleep, work, shop, ...), until tick                                  | What they are doing inside                          |
+| `left` / `entered`     | resident, other district; `entered` adds the vehicle state with the route left       | Crossed into another district                       |
+| `built` / `demolished` | lot, building kind, rotation                                                         | A building changed                                  |
+| `road`                 | segment, change (closed, opened, added, removed)                                     | A road changed                                      |
+| `command`              | principal hash, builder name, command id, result                                     | A builder's command was applied or refused          |
+| `speed`                | ticks per second                                                                     | The city's speed changed; 0 is paused               |
+| `ledger`               | reason (day, build, demolish), earned, spent                                         | Money moved in or out of the city's funds           |
+| `balance`              | amount                                                                               | A district's share of the funds, each keyframe tick |
+| `council`              | days scored, patience, each faction's demand, measure, satisfaction and unhappy days | How the council's factions feel, each keyframe tick |
 
 A route is its segment ids from the road graph and one speed byte per segment,
 a percentage of the segment class's speed. A trip of 12 segments is under 40
@@ -273,10 +274,11 @@ The tag is four bits, so only tag 14 is free for a new event kind. Tag 15,
 `extended`, holds the rare events: its body starts with a kind varint, then the
 fields.
 
-| Kind | Event     | Fields                                                                |
-| ---- | --------- | --------------------------------------------------------------------- |
-| 1    | `ledger`  | reason `u8` (0 day, 1 build, 2 demolish), earned varint, spent varint |
-| 2    | `balance` | amount, a zigzag varint (may be negative)                             |
+| Kind | Event     | Fields                                                                                                                                                                                                    |
+| ---- | --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1    | `ledger`  | reason `u8` (0 day, 1 build, 2 demolish), earned varint, spent varint                                                                                                                                     |
+| 2    | `balance` | amount, a zigzag varint (may be negative)                                                                                                                                                                 |
+| 4    | `council` | days varint, patience `u8`, then for each of three factions demand varint, measure varint, satisfaction `u8`, unhappy days `u8`; then the open day's commutes varint, commute ticks varint, visits varint |
 
 A reader skips an extended kind it does not know.
 
@@ -407,6 +409,43 @@ run a few ticks ahead of the tick on screen, and after a scrub they are the fund
 
 Cost to the log: one small event per district per city day, one per build, and a `balance` of a few bytes per district per
 city hour. `report_load` on the harbor city moves the day mean from 656.4 to 656.7 B/s.
+
+### The council
+
+Three factions judge the city. Once a city day they are scored from what the city did, and each one asks for something
+it states up front, so a player knows what to fix before looking for it.
+
+| Faction          | Asks for                                                                           | Measured from                                                                                          |
+| ---------------- | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| Commuters        | A trip to work or school that takes 12 city minutes (48 ticks) or less, on average | Ticks from `trip` to arrival, for every trip to work or school that day                                |
+| Harbor residents | 80% of residents with no factory within 3 tiles of home                            | The buildings, for residents of the districts along the shore (all districts if the city has no shore) |
+| Shops            | 5 visits a day for each shop                                                       | Arrivals to shop, divided by the shops residents go to that are still shops                            |
+
+These numbers are placeholders until the city has been played. On the harbor city with no changes, commuters average
+about 15 minutes, 71% of the shore's residents live away from factories and a shop gets 5 visits.
+
+- **Satisfaction.** 0 to 100. A faction scores 100 when the day gave it what it asked for, and less in proportion to
+  how far short it fell: a 24 minute commute against a 12 minute demand scores 50. Below 60 the faction is unhappy for
+  the day.
+- **Recall.** A faction unhappy for 3 days in a row recalls the mayor. A day it is not unhappy sets its count back to
+  zero. The sim only records this: the city keeps running, and a chapter decides what a recall costs. A day with
+  nothing to judge (nobody commuted, or no shops) upsets no one.
+- **The event.** District 0 writes one `council` event on every keyframe tick, holding the last scored day's demands,
+  measures, satisfaction and unhappy-day counts, and the open day's running totals. `days` says how many days have been
+  scored; until it is 1 the standings are only the demands. A city day ends on a keyframe tick, so the event written
+  then carries the new score. The page reads the newest one, so scrubbing shows the council as it stood.
+- **Restart.** The restart takes the council from its newest keyframe tick, including the running totals of the day in
+  progress, then steps on. A log written before the council existed starts it fresh, so its first score covers only
+  the part of the day after the restart.
+
+The page folds the council to one line below the funds: the lowest score, or the recall warning when a faction has been
+unhappy, naming the faction closest to a recall and the days left. Opening it lists a bar for each satisfaction, what the
+faction wants and how the last day went. It starts open on a tall screen and folded on a short one, follows the window
+if it is resized until the player opens or folds it, and then stays as the player leaves it. Before the first day is
+scored it says so instead of drawing empty bars.
+
+Cost to the log: one `council` event of about 30 bytes per keyframe tick, which is a city hour. `report_load` on the
+harbor city moves the day mean from 656.7 to 657.1 B/s.
 
 ### Commands and the registry
 

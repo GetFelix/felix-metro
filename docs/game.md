@@ -159,6 +159,9 @@ The numbers are placeholders until the economy is in the sim and measured.
 - **Money.** Done: the account, the `ledger` and `balance` events and the refusal when the city cannot pay are in the
   sim and shown as a number beside the clock (see Money in design.md); the timeline does not draw it yet. Parks cost
   upkeep as land; transit, fares and paid services are not built.
+- **Factions.** Done: the sim scores three factions once a city day, writes a `council` event on every keyframe tick
+  and counts the days a faction stays unhappy; the page shows them with the recall countdown (see The council in
+  design.md). A recall changes nothing yet; a chapter will give it a cost.
 - **Persistence across a restart.** Done: a restarted sim resumes from the newest keyframe
   and the records after it (see Restart in design.md). The new state below has to be
   rebuilt the same way, so each new piece of state is restored in `sim/src/world/restore.rs`. The account is written as
@@ -179,7 +182,7 @@ The numbers are placeholders until the economy is in the sim and measured.
 1. Persistence across a restart (done).
 2. Money and the `ledger` event, shown as one number on the page (done; the timeline does not draw it yet).
 3. Factions: three satisfaction numbers from the log, their demands, and the recall
-   warning with its countdown.
+   warning with its countdown (done).
 4. Policy commands, two of them, with a cooldown.
 5. Goals and the first chapter, without forks: the player commits changes for real.
 6. Investigations, one or two, checked as a batch.
