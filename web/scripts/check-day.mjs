@@ -169,10 +169,15 @@ await page
       `clicking the trip at tick ${target.tick} left the city at ${JSON.stringify(await page.evaluate(() => window.__metro.shown().past))}`,
     ),
   );
-await page.waitForTimeout(500);
-const marked = await page.locator('#follow [data-log] li[aria-current]').getAttribute('data-tick');
-if (Number(marked) !== target.tick)
-  await fail(`after seeking to tick ${target.tick} the card marks the entry at ${marked}`);
+// The card is repainted with the next frame, which a slow runner draws well after the seek is shown.
+const markedTick = () => page.locator('#follow [data-log] li[aria-current]').getAttribute('data-tick');
+await page
+  .waitForFunction(
+    (t) => document.querySelector('#follow [data-log] li[aria-current]')?.dataset.tick === String(t),
+    target.tick,
+    { polling: 250, timeout: MINUTE },
+  )
+  .catch(async () => fail(`after seeking to tick ${target.tick} the card marks the entry at ${await markedTick()}`));
 console.log(`a click on the trip at tick ${target.tick} seeked there`);
 await page.screenshot({ path: join(out, 'day-seeked.png') });
 
