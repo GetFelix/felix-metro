@@ -37,6 +37,7 @@ import { createBuildBar } from './ui/build-bar';
 import { Placement, type CommandLink } from './placement';
 import { createPlacementView } from './placement-view';
 import { note, toast } from './ui/toast';
+import { money } from './money';
 import { displayName } from './registry';
 import { Traffic } from './traffic';
 import { sample, type Path } from './capture';
@@ -540,6 +541,9 @@ async function main() {
   let smoothed = 60;
   let shownHour = NaN;
   const day = document.getElementById('day')!;
+  const fundsChip = document.getElementById('funds-chip')!;
+  const fundsText = document.getElementById('funds')!;
+  let fundsShown: number | null = null;
   let liveInfo: NonNullable<Window['__live']> | null = null;
   if (state && traffic) {
     liveInfo = {
@@ -1270,6 +1274,13 @@ async function main() {
           soundscape.setHour(hour);
           setTime(hour, post!.bloom);
           day.textContent = `Day ${time.day}`;
+        }
+        const funds = state.funds;
+        if (funds !== fundsShown) {
+          fundsShown = funds;
+          fundsChip.classList.toggle('hidden', funds === null);
+          fundsChip.classList.toggle('short', funds !== null && funds < 0);
+          if (funds !== null) fundsText.textContent = money(funds);
         }
         timelineFrame?.(tick);
         Object.assign(liveInfo, {
