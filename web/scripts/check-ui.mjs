@@ -1,5 +1,6 @@
 // Checks the overlay's controls with the keyboard and takes screenshots of them, day and night, at a desktop and a
-// phone width: the settings sheet and its quality options, the key list, the first-visit tip and the rolling clock.
+// phone width: the settings sheet and its quality options, the key list, the first-visit tip and the rolling clock, and
+// that the sound button makes no audio until it is used and says so quietly when audio is blocked.
 // Usage: node scripts/check-ui.mjs <app url> <out dir>. The page must already be served; no gateway is needed.
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -23,10 +24,14 @@ const check = (ok, what) => {
 };
 
 // A fresh context each time, so local storage starts empty.
-async function open(query, size, options = {}) {
+// `init` runs in the page before any of its own code.
+async function open(query, size, options = {}, init = null) {
   const context = await browser.newContext({ viewport: size, ...options });
   const page = await context.newPage();
   page.on('pageerror', (e) => problems.push(`page error: ${e}`));
+  page.consoleErrors = [];
+  page.on('console', (m) => m.type() === 'error' && page.consoleErrors.push(m.text()));
+  if (init) await page.addInitScript(init);
   await page.goto(url(query), { waitUntil: 'load', timeout: 300_000 });
   await page.waitForFunction(() => window.__ready === true, null, { polling: 100, timeout: 180_000 });
   await page.evaluate(() => document.fonts.ready.then(() => true));
@@ -148,6 +153,7 @@ for (const [query, what] of [
   const { context, page } = await open(query, DESKTOP);
   check(await page.evaluate(() => window.__ui === undefined), `no controls and no tip under ${what}`);
   check((await page.locator('#settings-button').count()) === 0, `no settings button under ${what}`);
+  check((await page.locator('#sound-button').count()) === 0, `no sound button under ${what}`);
   if (query.includes('ui=0'))
     for (const [selector, name] of [
       ['.brand', 'the Felix Metro chip'],
@@ -155,6 +161,100 @@ for (const [query, what] of [
       ['#timeline', 'the timeline'],
     ])
       check(!(await visible(page, selector)), `${name} is hidden under ${what}`);
+  await context.close();
+}
+
+// 3b. Sound: nothing is made before the button is used, the button and the M key toggle it, the choice is kept, and a
+// browser that blocks audio gets a short word and no console error.
+const countAudio = () => {
+  const Real = window.AudioContext;
+  window.__audio = { made: 0 };
+  window.AudioContext = class extends Real {
+    constructor(...args) {
+      super(...args);
+      window.__audio.made++;
+    }
+  };
+};
+const blockAudio = () => {
+  window.__audio = { made: 0 };
+  window.AudioContext = function () {
+    window.__audio.made++;
+    throw new DOMException('Audio is blocked here', 'NotAllowedError');
+  };
+  delete window.webkitAudioContext;
+};
+const pressed = (page) => page.getAttribute('#sound-button', 'aria-pressed');
+const made = (page) => page.evaluate(() => window.__audio.made);
+{
+  const { context, page } = await open('tier=low&still&t=12', DESKTOP, {}, countAudio);
+  check(await visible(page, '#sound-button'), 'the sound button is on screen');
+  check((await pressed(page)) === 'false', 'sound starts off');
+  await page.mouse.click(300, 300);
+  await page.keyboard.press('Shift');
+  await page.keyboard.press('j');
+  await settle(page, 200);
+  check((await made(page)) === 0, 'no audio context exists until the sound button is used');
+  for (let i = 0; i < 6 && (await active(page)) !== 'sound-button'; i++) await page.keyboard.press('Tab');
+  check((await active(page)) === 'sound-button', 'Tab reaches the sound button');
+  await page.keyboard.press('Enter');
+  check((await pressed(page)) === 'true', 'Enter turns the sound on and the button says so');
+  check((await made(page)) === 1, 'the first use makes the audio context');
+  await page.screenshot({ path: join(out, 'sound-on-1280.png') });
+  await page.keyboard.press('m');
+  check((await pressed(page)) === 'false', 'M turns the sound off');
+  await page.keyboard.press('m');
+  check((await pressed(page)) === 'true', 'M turns the sound on');
+  check((await made(page)) === 1, 'turning it on again reuses the audio context');
+  await page.evaluate(() => window.__ui.openSettings());
+  await page.keyboard.press('m');
+  check((await pressed(page)) === 'true', 'M does nothing while the settings sheet is open');
+  await page.keyboard.press('Escape');
+  check(page.consoleErrors.length === 0, 'using the sound makes no console error');
+  // The choice is kept; the sound itself starts at the first click, since the browser allows nothing before one.
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForFunction(() => window.__ready === true, null, { polling: 100, timeout: 180_000 });
+  check((await pressed(page)) === 'true', 'sound left on shows as on after a reload');
+  check((await made(page)) === 0, 'sound left on makes no audio context before a click');
+  await page.mouse.click(300, 300);
+  check((await made(page)) === 1, 'the first click starts the sound left on');
+  await page.click('#sound-button');
+  check((await pressed(page)) === 'false', 'the button turns it off');
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForFunction(() => window.__ready === true, null, { polling: 100, timeout: 180_000 });
+  check((await pressed(page)) === 'false', 'sound turned off stays off after a reload');
+  await page.keyboard.press('h');
+  check(!(await visible(page, '#sound-button')), 'photo mode hides the sound button');
+  await page.keyboard.press('m');
+  check((await pressed(page)) === 'true', 'M still switches the sound in photo mode');
+  await page.keyboard.press('h');
+  check(await visible(page, '#sound-button'), 'the sound button is back after photo mode');
+  await context.close();
+}
+{
+  const { context, page } = await open('tier=low&still&t=12', DESKTOP, {}, blockAudio);
+  const before = page.consoleErrors.length;
+  await page.click('#sound-button');
+  await settle(page, 200);
+  check((await made(page)) === 1, 'a blocked audio context was tried once');
+  check((await pressed(page)) === 'false', 'the button stays off when audio is blocked');
+  check(
+    (await page.locator('.toast').allInnerTexts()).some((t) => /not available/.test(t)),
+    'a blocked browser gets a short word',
+  );
+  await page.keyboard.press('m');
+  check(page.consoleErrors.length === before, 'blocked audio makes no console error');
+  await context.close();
+}
+{
+  const { context, page } = await open('tier=low&still&t=12', DESKTOP, {}, () => {
+    delete window.AudioContext;
+    delete window.webkitAudioContext;
+  });
+  const before = page.consoleErrors.length;
+  await page.click('#sound-button');
+  check((await pressed(page)) === 'false', 'the button stays off with no AudioContext at all');
+  check(page.consoleErrors.length === before, 'no AudioContext makes no console error');
   await context.close();
 }
 
@@ -175,8 +275,9 @@ for (const reduce of [false, true]) {
   const rolling = await page.locator('#clock .digit.roll').count();
   check((await page.locator('#clock').textContent()) === '13:00', 'the clock text stays plain HH:MM');
   check(reduce ? rolling === 0 : rolling > 0, reduce ? 'no digit rolls with reduced motion' : 'a changed digit rolls');
+  // The roll is 160 ms, but it ends on a frame, and a software-rendered frame of the city takes seconds on a busy runner.
   const ended = await page
-    .waitForFunction(() => !document.querySelector('#clock .digit.roll'), null, { timeout: 5000 })
+    .waitForFunction(() => !document.querySelector('#clock .digit.roll'), null, { timeout: 120_000 })
     .then(
       () => true,
       () => false,
@@ -301,9 +402,14 @@ for (const [size, tag] of [
   // The opening drift ends on its own; wait it out, then see whether the camera holds.
   await settle(page, 2500);
   const first = await azimuth();
-  await settle(page, 1500);
-  const second = await azimuth();
-  check(second !== first, `the camera turns after the quiet (${first} to ${second})`);
+  // The camera moves on a frame, and a software-rendered frame takes seconds on a busy runner, so wait for the turn.
+  const turned = await page
+    .waitForFunction((was) => window.__camera.state().azimuth !== was, first, { polling: 100, timeout: 120_000 })
+    .then(
+      () => true,
+      () => false,
+    );
+  check(turned, `the camera turns after the quiet (from ${first})`);
   await page.mouse.move(400, 300);
   await settle(page, 400);
   const held = await azimuth();
