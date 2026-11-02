@@ -102,12 +102,13 @@ export function decode(bytes) {
       out.events.push({ type: "command", principal: body.getBigUint64(0, true), id, result: body.getUint8(13 + nameLength) });
     } else if (tag === 9) {
       out.events.push({ type: "road" });
-    } else if (tag === 14) {
-      // The builder's hash and display name, then a count and, per lot, a lot delta and a delta of its tick from the record's.
-      const principal = body.getBigUint64(0, true);
-      const nameLength = body.getUint8(8);
-      const name = Buffer.from(bytes.subarray(start + 9, start + 9 + nameLength)).toString("utf8");
-      const inner = { i: start + 9 + nameLength };
+    } else if (tag === 15 && bytes[start] === 3) {
+      // Extended kind 3 (the single kind byte is a varint). The builder's hash and display name, then a count and,
+      // per lot, a lot delta and a delta of its tick from the record's.
+      const principal = body.getBigUint64(1, true);
+      const nameLength = body.getUint8(9);
+      const name = Buffer.from(bytes.subarray(start + 10, start + 10 + nameLength)).toString("utf8");
+      const inner = { i: start + 10 + nameLength };
       const lots = [];
       let lot = 0;
       for (let n = varint(bytes, inner); n > 0; n--) {

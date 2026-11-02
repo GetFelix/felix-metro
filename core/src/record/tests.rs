@@ -762,6 +762,28 @@ fn an_author_event_round_trips_and_has_its_json() {
 }
 
 #[test]
+fn an_author_event_is_an_extended_event_of_kind_3() {
+    let author = Event::Author {
+        principal: 1,
+        name: "A".into(),
+        lots: vec![Authored { lot: 7, built: 3 }],
+    };
+    let bytes = plain_tick(vec![author.clone()]).encode().unwrap();
+    // Kind 3, the principal, the name (length, bytes), a count of 1, then a lot delta and a tick delta (zigzag).
+    let body = [3, 1, 0, 0, 0, 0, 0, 0, 0, 1, b'A', 1, 14, 3];
+    // The frame head is a varint: the length above four bits of tag 15.
+    let mut raw = vec![0xef, 0x01];
+    raw.extend_from_slice(&body);
+    assert_eq!(&bytes[PLAIN_HEADER..], &raw);
+    assert_eq!(
+        TickRecord::decode(&raw_tick(false, 1, &raw))
+            .unwrap()
+            .events,
+        [author]
+    );
+}
+
+#[test]
 fn an_author_event_costs_the_name_once_and_a_few_bytes_a_lot() {
     // The cost design.md quotes, in the worst case: a log six days old (ticks of 2^21), builds from the first day,
     // and lots a few apart. A lot is a one-byte delta and a four-byte tick delta.

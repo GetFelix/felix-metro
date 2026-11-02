@@ -271,21 +271,22 @@ skips.
 | 11  | `speed`          | ticks per second `u8`                                              |
 | 12  | `command_cursor` | next command stream offset, varint                                 |
 | 13  | `arrival`        | resident, lot, kind `u8`, until: an `arrived` and its `activity`   |
-| 14  | `author`         | principal `u64`, name, count, per lot: lot delta, built tick delta |
 
-`author` is the builder's hash and name laid out like those of `command`, a varint
-count, then per lot the lot as a delta from the one before (the first from 0) and
-the tick its building was built as a delta from the record's tick. One event holds
-every lot one builder built in the district.
-
-The tag is four bits, so no bare tag is free for a new event kind. Tag 15,
-`extended`, holds the rare events: its body starts with a kind varint, then the
-fields.
+The tag is four bits, and the bare tags stay for events a tick writes in bulk. Tag 14
+is free. Tag 15, `extended`, holds the rare events: its body starts with a kind
+varint, then the fields.
 
 | Kind | Event     | Fields                                                                |
 | ---- | --------- | --------------------------------------------------------------------- |
 | 1    | `ledger`  | reason `u8` (0 day, 1 build, 2 demolish), earned varint, spent varint |
 | 2    | `balance` | amount, a zigzag varint (may be negative)                             |
+| 3    | `author`  | principal `u64`, name, count, per lot: lot delta, built tick delta    |
+
+`author` is the builder's hash and name laid out like those of `command`, a varint
+count, then per lot the lot as a delta from the one before (the first from 0) and
+the tick its building was built as a delta from the record's tick. One event holds
+every lot one builder built in the district. A builder is written about once a city
+hour, so it takes the extended tag and its one extra kind byte.
 
 A reader skips an extended kind it does not know.
 

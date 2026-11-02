@@ -391,6 +391,8 @@ async function main() {
   let scrubSettled: () => Promise<void> = async () => {};
   /** Moves a playback on and says which tick it draws, or null when nothing is playing. */
   let playFrame: ((dt: number) => number | null) | null = null;
+  /** Keeps the attribution card true to the scene it describes; set where the card is built. */
+  let refreshCard: (() => void) | null = null;
   /** Called after each timer step of a playback, to notice its failure or its arrival at the tip. */
   let playbackTimer: (() => void) | null = null;
   /** Told the frame after the city changed has been drawn. */
@@ -1106,6 +1108,7 @@ async function main() {
         goUp: (tick) => void seeItGoUp(tick),
         hidden: () => document.body.classList.contains('photo'),
       });
+      refreshCard = () => hover?.refresh();
       if (hooks) {
         const half = (city!.tiles - 1) / 2;
         const ground = new THREE.Vector3();
@@ -1291,6 +1294,7 @@ async function main() {
     traffic?.sync();
     if (paint) post!.render(controls.target);
     for (const done of frameWaiters.splice(0)) done();
+    refreshCard?.();
     // A live state the page has left keeps taking records; let its finished trips go.
     if (liveState && liveState !== state) liveState.retire(liveState.latest);
     if (window.__quality && memory[memory.length - 1]?.tier !== quality.tier) {

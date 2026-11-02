@@ -61,11 +61,13 @@ principal itself.
 Commands are read in stream order and applied before the next tick is stepped, up to 256
 a tick, so that tick's records carry them and its keyframe shows the result. Each is
 recorded as a `command` event (hash, builder name, id, result) in the district it touched,
-followed by `built` or `demolished` and the `ledger` event that paid for it. The sim remembers who built each lot. A keyframe lists
-buildings but not who built them, so every keyframe tick each district writes an `author` event per
-builder: their hash and name, and the lots they built there with the tick of each. A refusal has a result code and nothing else, and the
+followed by `built` or `demolished` and the `ledger` event that paid for it. A refusal has a result code and nothing else, and the
 city steps exactly as if it had not been sent. A command with no district, such as a
 malformed record or an unknown lot, is recorded in district 0.
+
+The sim also remembers who built each lot. A keyframe lists buildings but not who built them, so every
+keyframe tick each district writes an `author` event per builder: their hash and name, and the lots they
+built there with the tick of each.
 
 | Command | Applied when | Refused with |
 |---|---|---|

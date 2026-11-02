@@ -23,6 +23,12 @@ export interface LotHoverOptions {
 }
 
 export interface LotHover {
+  /**
+   * Call as often as the scene can change under the card, such as once a frame: a demolition, a seek or a camera move
+   * that no pointer event announced. The card is redrawn if its text changed, and hidden if the lot is gone or the
+   * pointer no longer points at it.
+   */
+  refresh(): void;
   /** The card was entered or left; keeps the hover alive while the pointer is on the card. */
   onCard(inside: boolean): void;
   dispose(): void;
@@ -48,6 +54,10 @@ export function createLotHover(o: LotHoverOptions): LotHover {
   let lot: number | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let lastPick = -Infinity;
+  /** Where the pointer was at the last pick, and what the card shows, so a refresh can tell what changed. */
+  let lastAt = { x: 0, y: 0 };
+  let shownKey = '';
+  let lastRefresh = -Infinity;
   let trailing: ReturnType<typeof setTimeout> | null = null;
   let onCard = false;
   /** The touches down now, so a second finger makes the gesture a pinch and not a tap. */
@@ -84,7 +94,12 @@ export function createLotHover(o: LotHoverOptions): LotHover {
       return hideSoon();
     }
     lot = found;
+    lastAt = { x, y };
+    present(say, lastAt);
+  };
+  const present = (say: Say, at: { x: number; y: number }) => {
     const go = say.goUp;
+    shownKey = JSON.stringify([say.parts, go]);
     o.card.show(
       say.parts,
       go === null
@@ -96,7 +111,7 @@ export function createLotHover(o: LotHoverOptions): LotHover {
               o.goUp(go);
             },
           },
-      { x, y },
+      at,
     );
   };
 
@@ -155,6 +170,18 @@ export function createLotHover(o: LotHoverOptions): LotHover {
   o.canvas.addEventListener('wheel', away, { passive: true } as AddEventListenerOptions);
 
   return {
+    refresh() {
+      if (lot === null || !o.card.visible) return;
+      const now = performance.now();
+      if (now - lastRefresh < PICK_EVERY_MS) return;
+      lastRefresh = now;
+      if (o.hidden()) return hideNow();
+      // The pointer on the card is not over the city, so only the lot itself is checked.
+      if (!onCard && o.pick(lastAt.x, lastAt.y) !== lot) return hideNow();
+      const say = o.say(lot);
+      if (!say) return hideNow();
+      if (JSON.stringify([say.parts, say.goUp]) !== shownKey) present(say, lastAt);
+    },
     onCard(inside) {
       onCard = inside;
       if (inside) cancelHide();

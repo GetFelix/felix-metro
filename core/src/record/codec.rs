@@ -27,12 +27,12 @@ const EV_COMMAND_CURSOR: u8 = 12;
 /// An `arrived` and the same resident's `activity` that follows it, which is every arrival the sim makes.
 const EV_ARRIVAL: u8 = 13;
 /// A rare event goes under this tag with a kind varint ahead of its fields, so the few tags that fit
-/// [`EVENT_TAG_BITS`] stay for events a tick writes in bulk. Tag 14 is `author`.
+/// [`EVENT_TAG_BITS`] stay for events a tick writes in bulk. Tag 14 is still free.
 const EV_EXTENDED: u8 = 15;
 const EXT_LEDGER: u64 = 1;
 const EXT_BALANCE: u64 = 2;
-/// The tag `author` is written under. The only place that says so, so it can move to an extended kind.
-const EV_AUTHOR: u8 = 14;
+/// Written about once a city hour per builder, so it does not need a bare tag.
+const EXT_AUTHOR: u64 = 3;
 
 const CMD_PLACE_ROAD: u8 = 1;
 const CMD_ZONE: u8 = 2;
@@ -347,7 +347,8 @@ fn put_event(w: &mut Writer, e: &Event, tick: u32) -> Result<(), EncodeError> {
             principal,
             name,
             lots,
-        } => w.framed(EV_AUTHOR, EVENT_TAG_BITS, |b| {
+        } => w.framed(EV_EXTENDED, EVENT_TAG_BITS, |b| {
+            b.varint(EXT_AUTHOR);
             b.u64(*principal);
             b.str(name)?;
             b.varint(lots.len() as u64);
@@ -449,26 +450,6 @@ fn get_entry(r: &mut Reader, tick: u32, out: &mut Vec<Event>) -> Result<(), Deco
             ticks_per_second: r.u8()?,
         },
         EV_COMMAND_CURSOR => Event::CommandCursor { next: r.varint()? },
-        EV_AUTHOR => {
-            let principal = r.u64()?;
-            let name = r.str()?;
-            // Each lot is two bytes at least, so a count that cannot fit is cut off early.
-            let n = r.count()?;
-            let mut prev = 0;
-            let mut lots = Vec::with_capacity(n);
-            for _ in 0..n {
-                prev = r.delta(prev)?;
-                lots.push(Authored {
-                    lot: prev,
-                    built: r.delta(tick)?,
-                });
-            }
-            Event::Author {
-                principal,
-                name,
-                lots,
-            }
-        }
         EV_EXTENDED => match r.varint()? {
             EXT_LEDGER => Event::Ledger {
                 reason: r.u8()?,
@@ -478,6 +459,26 @@ fn get_entry(r: &mut Reader, tick: u32, out: &mut Vec<Event>) -> Result<(), Deco
             EXT_BALANCE => Event::Balance {
                 amount: r.svarint()?,
             },
+            EXT_AUTHOR => {
+                let principal = r.u64()?;
+                let name = r.str()?;
+                // Each lot is two bytes at least, so a count that cannot fit is cut off early.
+                let n = r.count()?;
+                let mut prev = 0;
+                let mut lots = Vec::with_capacity(n);
+                for _ in 0..n {
+                    prev = r.delta(prev)?;
+                    lots.push(Authored {
+                        lot: prev,
+                        built: r.delta(tick)?,
+                    });
+                }
+                Event::Author {
+                    principal,
+                    name,
+                    lots,
+                }
+            }
             _ => return Ok(()),
         },
         _ => return Ok(()),

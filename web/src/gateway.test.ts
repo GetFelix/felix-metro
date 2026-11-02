@@ -107,6 +107,20 @@ describe('Gateway', () => {
     expect(sessionPrincipal()).toBe('6d9e57ad');
   });
 
+  it('forgets a principal when the next gateway it joins does not name one', async () => {
+    const connect = async (hello: Record<string, unknown>) => {
+      const connecting = Gateway.connect('ws://x/ws', 'harbor', 'token');
+      await Promise.resolve();
+      await Promise.resolve();
+      FakeSocket.last.say({ type: 'hello', features: ['binary_events', 'slots', 'shards', 'state', 'read'], ...hello });
+      await connecting;
+    };
+    await connect({ principal: '6d9e57ad' });
+    expect(sessionPrincipal()).toBe('6d9e57ad');
+    await connect({});
+    expect(sessionPrincipal()).toBeNull();
+  });
+
   it('refuses a gateway without a feature it needs', async () => {
     const connecting = Gateway.connect('ws://x/ws', 'harbor', 'token');
     await Promise.resolve();

@@ -51,7 +51,7 @@ function setup(over: { hidden?: boolean } = {}) {
     canvas.dispatchEvent(e);
     return e;
   };
-  return { fire, card, hover, state, went, lots };
+  return { fire, card, hover, state, went, lots, says };
 }
 
 beforeEach(() => vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] }));
@@ -181,5 +181,62 @@ describe('tapping', () => {
     vi.advanceTimersByTime(900);
     fire('pointerup', { ...touch, clientX: 10, clientY: 10 });
     expect(card.visible).toBe(false);
+  });
+});
+
+describe('a scene that changes under a card', () => {
+  const show = (t: ReturnType<typeof setup>) => {
+    t.fire('pointermove', { clientX: 10, clientY: 10 });
+    expect(t.card.visible).toBe(true);
+    vi.advanceTimersByTime(100);
+  };
+
+  it('hides the card when its building is demolished', () => {
+    const t = setup();
+    show(t);
+    t.says.delete(7);
+    t.hover.refresh();
+    expect(t.card.visible).toBe(false);
+  });
+
+  it('rewrites the card when a seek changes who built the lot or when', () => {
+    const t = setup();
+    show(t);
+    t.says.set(7, { parts: { before: 'Built by ', name: 'Bo', after: ' · Day 1, 08:00' }, goUp: 500 });
+    t.hover.refresh();
+    expect(t.card.shown).toEqual({ text: 'Built by Bo · Day 1, 08:00', link: 'See it go up', at: { x: 10, y: 10 } });
+    t.card.run?.();
+    expect(t.went).toEqual([500]);
+  });
+
+  it('hides the card when the camera moves the building from under the pointer', () => {
+    const t = setup();
+    show(t);
+    t.lots.delete('10,10');
+    t.hover.refresh();
+    expect(t.card.visible).toBe(false);
+  });
+
+  it('keeps the card while the pointer is on it, since it is not over the city then', () => {
+    const t = setup();
+    show(t);
+    t.hover.onCard(true);
+    t.lots.delete('10,10');
+    t.hover.refresh();
+    expect(t.card.visible).toBe(true);
+    t.says.delete(7);
+    vi.advanceTimersByTime(100);
+    t.hover.refresh();
+    expect(t.card.visible).toBe(false);
+  });
+
+  it('leaves an unchanged card alone', () => {
+    const t = setup();
+    show(t);
+    const shown = t.card.shown;
+    vi.advanceTimersByTime(100);
+    t.hover.refresh();
+    expect(t.card.shown).toBe(shown);
+    expect(t.card.visible).toBe(true);
   });
 });

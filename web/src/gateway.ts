@@ -188,7 +188,8 @@ export class Gateway {
           const features = hello.features as string[];
           const missing = FEATURES.filter((feature) => !features.includes(feature));
           if (missing.length > 0) return fail(new Error(`the gateway lacks ${missing.join(', ')}`));
-          if (typeof hello.principal === 'string') ownPrincipal = hello.principal;
+          // A gateway without the feature must not leave the last one's principal behind.
+          ownPrincipal = typeof hello.principal === 'string' ? hello.principal : null;
           resolve(new Gateway(socket, (hello.missing as string[] | undefined) ?? []));
         },
         { once: true },
