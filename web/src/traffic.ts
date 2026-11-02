@@ -1,6 +1,4 @@
-// Cars and walkers for the voyages the log describes: where each one is at a fractional tick, and a pool of models to
-// stand in for them.
-import type * as THREE from 'three';
+// Cars and walkers for the voyages the log describes: where each one is at a fractional tick, handed to a fleet to draw.
 import type { Voyage } from './city';
 
 /** Tiles from the road's centre line to a car's lane and to a walker's pavement. */
@@ -56,31 +54,36 @@ export function poseBetween(
   return out;
 }
 
-/** A model standing in for a voyage. */
-export interface Figure {
-  o: THREE.Object3D;
-  /** Walking animation, for people. */
-  mixer?: THREE.AnimationMixer;
-}
-
-/** What the scene makes figures from. */
+/**
+ * What draws the voyages. Each update places every car and walker once between `begin` and `end`; the fleet draws
+ * what was placed, with nothing kept from the update before.
+ */
 export interface Fleet {
-  car(kind: number): Figure;
-  person(resident: number): Figure;
+  /** Start a round of placements. `dt` seconds is how far the walkers' legs move on. */
+  begin(dt: number): void;
+  /** Place a car of vehicle kind `kind` (1 to 6). `size` is 1 at full size and 0 at nothing. */
+  car(kind: number, x: number, y: number, z: number, heading: number, size: number): void;
+  /** Place the walker `resident` is. */
+  person(resident: number, x: number, y: number, z: number, heading: number, size: number): void;
+  end(): void;
 }
 
 interface Slot {
-  figure: Figure;
-  kind: string;
+  car: boolean;
+  /** Where the voyage was drawn last: the road pose, or the turn into a lot. */
+  x: number;
+  y: number;
+  z: number;
   heading: number;
+  size: number;
+  /** The heading on the road, kept for when the trip stands still. */
+  road: number;
+  vehicle: number;
   voyage: Voyage;
-  /** The scale the scene made the model at, which a turn into a lot shrinks from. */
-  scale: number;
 }
 
 export class Traffic {
   private readonly slots = new Map<number, Slot>();
-  private readonly free = new Map<string, Figure[]>();
   private readonly a = new Uint32Array(2);
   private readonly b = new Uint32Array(2);
   private readonly ends = new Uint32Array(2);
@@ -88,63 +91,44 @@ export class Traffic {
   private readonly to = [0, 0];
   private readonly pose: Pose = { x: 0, z: 0, heading: 0 };
 
-  /** Voyages left without a model by the last update, because it had made its share of new ones. */
-  waiting = 0;
-  /** Voyages left undrawn by the last update because `cap` models were already in use. */
+  /** Voyages left undrawn by the last update because `cap` were already drawn. */
   capped = 0;
-  /** Most models in use at once. Models already drawn stay until their voyage ends, so lowering it drains. */
+  /** Most voyages drawn at once. Ones already drawn stay until their voyage ends, so lowering it drains. */
   cap = Infinity;
-  private made = 0;
 
   /**
-   * `half` is how far tile 0 sits from the middle of the map, in tiles. An update makes at most `newPerUpdate` models
-   * the pool cannot supply: a seek into a busy hour can ask for hundreds at once, and making them all would hold the
-   * frame for seconds. The rest are made by the updates after it.
+   * `half` is how far tile 0 sits from the middle of the map, in tiles.
    */
   constructor(
     private readonly fleet: Fleet,
     private readonly half: number,
-    private readonly newPerUpdate = 16,
     /** The city's lots by id, for turning into the one a trip starts or ends at. */
     private readonly lots: readonly LotAt[] = [],
   ) {}
 
-  /** Models in use right now. */
+  /** Voyages drawn right now. */
   get drawn(): number {
     return this.slots.size;
   }
 
-  /** Where each model in use stands, in tiles from the middle of the map. */
+  /** Where each voyage drawn stands, in tiles from the middle of the map. */
   where(): { resident: number; car: boolean; x: number; z: number; heading: number }[] {
-    return [...this.slots].map(([resident, { figure, kind }]) => ({
-      resident,
-      car: kind !== 'walk',
-      x: figure.o.position.x,
-      z: figure.o.position.z,
-      heading: figure.o.rotation.y,
-    }));
+    return [...this.slots].map(([resident, { car, x, z, heading }]) => ({ resident, car, x, z, heading }));
   }
 
-  /** Give a voyage's model back, such as when it arrives. */
+  /** Stop drawing a voyage, such as when it arrives. */
   release(voyage: Voyage): void {
     const slot = this.slots.get(voyage.resident);
     // A resident's next trip can be asked to stand down while the one before it is still drawn.
     if (!slot || slot.voyage !== voyage) return;
     this.slots.delete(voyage.resident);
-    slot.figure.o.visible = false;
-    slot.figure.o.scale.setScalar(slot.scale);
-    const pool = this.free.get(slot.kind) ?? [];
-    pool.push(slot.figure);
-    this.free.set(slot.kind, pool);
   }
 
   /** Place every voyage under way at tick `tick`, a fraction, and move walkers' legs on by `dt` seconds. */
   update(tick: number, dt: number, voyages: Iterable<Voyage>): void {
     const whole = Math.floor(tick);
     const f = tick - whole;
-    this.waiting = 0;
     this.capped = 0;
-    this.made = 0;
     for (const v of voyages) {
       if (tick < v.depart || tick >= v.journey.arrive()) {
         this.release(v);
@@ -160,12 +144,8 @@ export class Traffic {
           this.capped++;
           continue;
         }
-        const taken = this.take(v);
-        if (!taken) {
-          this.waiting++;
-          continue;
-        }
-        slot = taken;
+        slot = { car: v.vehicle !== 0, x: 0, y: 0, z: 0, heading: 0, size: 1, road: 0, vehicle: v.vehicle, voyage: v };
+        this.slots.set(v.resident, slot);
       }
       const on = v.vehicle === 0;
       this.from[0] = this.a[0]! / 1000 - this.half;
@@ -173,8 +153,8 @@ export class Traffic {
       this.to[0] = this.b[0]! / 1000 - this.half;
       this.to[1] = this.b[1]! / 1000 - this.half;
       const arrive = v.journey.arrive();
-      const pose = poseBetween(this.from, this.to, f, on ? PAVEMENT : LANE, slot.heading, this.pose);
-      slot.heading = pose.heading;
+      const pose = poseBetween(this.from, this.to, f, on ? PAVEMENT : LANE, slot.road, this.pose);
+      slot.road = pose.heading;
       let into = doorEase(tick, v.depart, arrive);
       let heading = pose.heading;
       if (into > 0) {
@@ -191,24 +171,17 @@ export class Traffic {
           pose.z += into * (tz - pose.z);
         } else into = 0;
       }
-      slot.figure.o.scale.setScalar(slot.scale * (1 - into));
-      slot.figure.o.position.set(pose.x, on ? 0 : 0.036, pose.z);
-      slot.figure.o.rotation.y = heading;
-      slot.figure.mixer?.update(dt);
+      slot.size = 1 - into;
+      slot.x = pose.x;
+      slot.y = on ? 0 : 0.036;
+      slot.z = pose.z;
+      slot.heading = heading;
     }
-  }
-
-  private take(v: Voyage): Slot | null {
-    const kind = v.vehicle === 0 ? 'walk' : `car${v.vehicle}`;
-    let figure = this.free.get(kind)?.pop();
-    if (!figure) {
-      if (this.made >= this.newPerUpdate) return null;
-      this.made++;
-      figure = v.vehicle === 0 ? this.fleet.person(v.resident) : this.fleet.car(v.vehicle);
+    this.fleet.begin(dt);
+    for (const [resident, s] of this.slots) {
+      if (s.car) this.fleet.car(s.vehicle, s.x, s.y, s.z, s.heading, s.size);
+      else this.fleet.person(resident, s.x, s.y, s.z, s.heading, s.size);
     }
-    figure.o.visible = true;
-    const slot = { figure, kind, heading: 0, voyage: v, scale: figure.o.scale.x };
-    this.slots.set(v.resident, slot);
-    return slot;
+    this.fleet.end();
   }
 }

@@ -10,7 +10,7 @@ export interface TierSettings {
   pixelRatioCap: number;
   /** Skinned pedestrian rigs. Nothing reads this yet; the pedestrian work in #6 will. */
   rigs: boolean;
-  /** Most cars and walkers drawn at once; the rest of the voyages wait for one to arrive. */
+  /** Most cars and walkers drawn at once; the rest of the voyages are left out until one arrives. */
   movers: number;
 }
 
@@ -23,7 +23,7 @@ export function settingsFor(tier: Tier): TierSettings {
     shadowMapSize: tier === 'high' ? 4096 : 2048,
     pixelRatioCap: tier === 'low' ? 1 : 2,
     rigs: tier === 'high',
-    movers: tier === 'high' ? Infinity : tier === 'medium' ? 80 : 40,
+    movers: tier === 'high' ? Infinity : tier === 'medium' ? 160 : 80,
   };
 }
 

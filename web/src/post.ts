@@ -37,6 +37,7 @@ export function createPost(
   scene: THREE.Scene,
   camera: THREE.PerspectiveCamera,
   passes: readonly PassName[],
+  /** Hidden while the occlusion and depth passes draw the scene with one material: additive glows and the instanced walkers. */
   glows: THREE.Object3D[],
 ) {
   const composer = new EffectComposer(renderer);

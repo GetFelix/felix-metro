@@ -13,7 +13,7 @@ import { clockwise, facingAngle, lotLook, roadModel, type City } from './layout'
 import { KINDS } from './kinds';
 const TREE_FIRST = 38; // kinds from here are trees and plaza props: no building
 import { NO_BUILDING, type Building } from './city';
-import type { Fleet } from './traffic';
+import { createFleet, type InstancedFleet } from './fleet';
 import { ConstructionFx, type LotAccess } from './construction-fx';
 
 // Seeded so the frame is identical on every load.
@@ -688,6 +688,7 @@ export async function createCity(
   }
 
   // ---------- time of day ----------
+  let crowd: InstancedFleet | null = null;
   const groundColor = new THREE.Color();
   const nightGround = new THREE.Color(GROUND_NIGHT);
   const lampColor = new THREE.Color(PALETTE.lamp);
@@ -718,6 +719,7 @@ export async function createCity(
     headMat.opacity = d.headlight;
     tailMat.opacity = d.taillight;
     beamMat.opacity = d.beam;
+    crowd?.setLights(d.headlight, d.taillight, d.beam);
     if (bloom) bloom.strength = d.bloom;
     crownMat.emissiveIntensity = d.crown;
     signMat.emissiveIntensity = d.signEmissive;
@@ -746,17 +748,25 @@ export async function createCity(
     });
   }
 
-  // Models for the voyages a live city draws: every kind loaded once, a copy per figure.
-  const fleet: Fleet | null = live
-    ? await (async () => {
-        const carModels = await Promise.all(CAR_KINDS.map((name) => loadModel('cars', name)));
-        const personModels = await Promise.all(PEOPLE.map((name) => loadModel('mini-characters', name)));
-        return {
-          car: (kind) => ({ o: buildCar(carModels[(kind - 1) % carModels.length]!) }),
-          person: (resident) => buildPerson(personModels[resident % personModels.length]!),
-        };
-      })()
-    : null;
+  // A live city draws its voyages as instances of the models, loaded once each.
+  if (live) {
+    const [cars, people] = await Promise.all([
+      Promise.all(CAR_KINDS.map((name) => loadModel('cars', name))),
+      Promise.all(PEOPLE.map((name) => loadModel('mini-characters', name))),
+    ]);
+    crowd = createFleet(scene, {
+      cars,
+      people,
+      carScale: CAR_SCALE,
+      personScale: city ? 0.22 : 0.17,
+      carMaterial: (src) => materials.materialFor('cars', src, 0),
+      personMaterial: (src) => materials.materialFor('mini-characters', src, 0),
+      headMap: headMat.map!,
+      tailMap: tailMat.map!,
+      beam: beamMat,
+    });
+    glows.push(...crowd.glows);
+  }
 
   // Scaffolds and dust are left out on the low tier; buildings still rise and fall.
   const construction = new ConstructionFx(scene, lots, tier !== 'low');
@@ -770,7 +780,7 @@ export async function createCity(
     glows,
     setTime,
     setShadows,
-    fleet,
+    fleet: crowd?.fleet ?? null,
     setLot: (id: number, b: Building | null) => setLotDrawn(id, b),
   };
 }

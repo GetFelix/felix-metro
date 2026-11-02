@@ -55,7 +55,7 @@ there. [docs/design.md](docs/design.md) has the details.
 
 | M   | Milestone           | State                                                                                                                                                                                                                                                                         |
 | --- | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 0   | The look, locked    | In progress: style frame, assets, daylight, post-processing, quality tiers and camera controls done; instanced traffic and the UI shell open                                                                                                                                  |
+| 0   | The look, locked    | In progress: style frame, assets, daylight, post-processing, quality tiers, camera controls and instanced traffic done; the UI shell open                                                                                                                                     |
 | 1   | A live city         | Done                                                                                                                                                                                                                                                                          |
 | 2   | Time travel         | In progress: keyframes, seeking, the timeline scrubber and rewind then follow done                                                                                                                                                                                            |
 | 3   | Follow a life       | Planned                                                                                                                                                                                                                                                                       |
@@ -65,7 +65,7 @@ there. [docs/design.md](docs/design.md) has the details.
 | 7   | Self-hosting        | Planned                                                                                                                                                                                                                                                                       |
 
 What runs today: the sim, the dev stack and a browser page that shows a city live, with
-cars and walkers moving in time with the sim and the sun following the tick. The page
+cars and walkers moving in time with the sim and the sun following the tick. Cars and walkers are drawn as instances of their models, so the number of draw calls does not grow with the number on the road ([how](docs/art.md#cars-and-walkers)). The page
 opens on a loading screen that fills in district by district, then drifts down onto the
 city. If the connection drops, a `Reconnecting…` pill shows, the city keeps moving, and
 the page reads what it missed from the log and carries on in order. If retention has

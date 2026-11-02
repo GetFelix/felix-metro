@@ -8,6 +8,17 @@
 
 ### The page
 
+- Cars and walkers are drawn as instances (#91). One draw call covers every car of a kind's mesh, one every walker of a
+  model's mesh, and three more cover all the car lights, so a frame costs about 110 draw calls on the high tier
+  whether 100 or 800 are on the road, where it used to cost about 18 for each. Walkers no longer carry bones: the walk
+  clip is baked into a texture per model and a shared clock, offset for each resident, picks the pose
+  (`web/src/walk.ts`). The tier caps on cars and walkers drawn at once go from 40 to 80 on low and from 80 to 160 on
+  medium; high is still unlimited. `web/traffic-load.html` and `web/scripts/check-traffic.mjs` count the draw calls
+  for N movers, and CI checks they stay flat. [docs/art.md](docs/art.md#cars-and-walkers) has the details and the
+  numbers.
+- Car headlights, taillights and the light on the road ahead show at night on the high and medium tiers. They were
+  made after the first frame, so the pass that hides the glows for ambient occlusion and the distance blur left them
+  hidden for good.
 - Camera controls. Left-drag turns and tilts, right-drag or Shift-drag slides, the wheel and a pinch zoom toward the
   point under the pointer, one finger turns and two fingers slide on a touch screen, and `W` `A` `S` `D`, `Q` `E`,
   `+` `-` and `0` do the same from the keyboard (`0` goes back to the opening view). The point the camera looks at

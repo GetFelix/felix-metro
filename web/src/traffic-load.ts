@@ -2,6 +2,7 @@
 // drawn through the real post chain, with the draw calls and frame times of the frames it drew. Read by
 // scripts/check-traffic.mjs.
 //   ?n=200 movers (half cars, half walkers)  ?tier=high|medium|low  ?t=12 hour  ?frames=30  ?shadows=0
+//   ?close=car|walker puts the camera beside one, to look at it
 import * as THREE from 'three';
 import init, { generate } from './core/felix_metro_core.js';
 import { parseCity } from './layout';
@@ -79,7 +80,7 @@ async function main() {
   const post = createPost(renderer, scene, camera, passesFor(tier), glows);
   setTime(Number(params.get('t') ?? '12'), post.bloom);
   const half = (city.tiles - 1) / 2;
-  const traffic = new Traffic(fleet!, half, undefined, city.lots);
+  const traffic = new Traffic(fleet!, half, city.lots);
   // The tier's cap is what this page measures the cost of, so it does not apply here.
   traffic.cap = Infinity;
 
@@ -101,16 +102,25 @@ async function main() {
 
   const target = controls.target;
   camera.lookAt(target);
+  const close = params.get('close');
   let tick = 100;
   const step = () => {
     tick += 0.25;
     traffic.update(tick, 1 / 60, voyages);
   };
-  // The old pool made models a share an update; wait for them all.
-  const pending = traffic as unknown as { waiting?: number };
-  for (let i = 0; i < 2000; i++) {
-    step();
-    if (!pending.waiting) break;
+  step();
+
+  if (close) {
+    const one = traffic
+      .where()
+      .filter((w) => w.car === (close === 'car'))
+      .sort((a, b) => Math.hypot(a.x, a.z) - Math.hypot(b.x, b.z))[0];
+    if (one) {
+      target.set(one.x, 0.1, one.z);
+      const d = close === 'car' ? 1.6 : 0.9;
+      camera.position.set(one.x + 0.45 * d, 0.8 * d, one.z + 0.45 * d);
+      camera.lookAt(target);
+    }
   }
 
   const gl = renderer.getContext();

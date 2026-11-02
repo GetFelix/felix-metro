@@ -79,8 +79,8 @@ describe('settingsFor', () => {
 
   it('caps the cars and walkers drawn by tier', () => {
     expect(settingsFor('high').movers).toBe(Infinity);
-    expect(settingsFor('medium').movers).toBe(80);
-    expect(settingsFor('low').movers).toBe(40);
+    expect(settingsFor('medium').movers).toBe(160);
+    expect(settingsFor('low').movers).toBe(80);
   });
 
   it('allows pedestrian rigs only on high', () => {

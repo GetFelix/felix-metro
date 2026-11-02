@@ -79,7 +79,7 @@ declare global {
         ms: number;
         /** The part of `ms` spent finding and folding, before the city was drawn. */
         seekMs: number;
-        /** The ms until every car and walker of the moment has a model, which is after the first frame. */
+        /** The ms until the first frame is drawn with every car and walker of the moment placed. */
         settledMs: number;
         reads: number;
         stats: { readMs: number; slowestMs: number; pageSize: number };
@@ -427,8 +427,7 @@ async function main() {
   };
   /** The state the live connection feeds, which keeps taking records while the page is held in the past. */
   const liveState = state;
-  const traffic =
-    state && fleet ? new Traffic(fleet, city ? (city.tiles - 1) / 2 : 0, undefined, city?.lots ?? []) : null;
+  const traffic = state && fleet ? new Traffic(fleet, city ? (city.tiles - 1) / 2 : 0, city?.lots ?? []) : null;
   if (traffic) traffic.cap = settingsFor(quality.tier).movers;
   if (state && traffic) {
     // The sun follows the tick the page draws, so the slider is only a readout.
@@ -950,9 +949,6 @@ async function main() {
           if (!draw) return report(seekMs);
           await new Promise<void>((done) => frameWaiters.push(done));
           const drawnMs = performance.now() - started;
-          // Cars and walkers are made a share a frame, so the city fills in over the frames after the first.
-          let frames = 0;
-          while (traffic.waiting > 0 && frames++ < 600) await new Promise<void>((done) => frameWaiters.push(done));
           return report(drawnMs);
         } catch (err) {
           if (!(err instanceof DOMException && err.name === 'AbortError')) note(whyNot(err));
@@ -1123,8 +1119,6 @@ async function main() {
         lastMs = tMs;
         captureDt = dt;
         draw(performance.now(), 1000 / 30, dt, false);
-        // Cars and walkers get their models a share a frame; update on, without drawing, until all of them have one.
-        for (let i = 0; i < 600 && traffic && traffic.waiting > 0; i++) draw(performance.now(), 0, 0, false);
         draw(performance.now(), 0, 0);
         // With ?picture the canvas is read out now and shown as a picture under the overlay, for a machine whose GL is
         // software and too slow to screenshot.
