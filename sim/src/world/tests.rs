@@ -777,3 +777,267 @@ fn the_stats_fixture_for_the_page_is_current() {
         "web/src/stats-fixture.json is out of date; rewrite it with METRO_WRITE_FIXTURE=1 cargo test -p felix-metro-sim the_stats_fixture"
     );
 }
+
+/// Where the page's tests read a recorded day from.
+const DAY_FIXTURE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../web/src/day-fixture.json");
+
+/// What the page shows for a resident: the trips and stays their events and keyframes add up to.
+struct Entry {
+    trip: bool,
+    /// The tick it began; before the window for an entry that was already going on.
+    start: i64,
+    /// A trip's arrival, or the tick a stay ends with the next trip.
+    end: Option<u32>,
+    car: bool,
+    lot: Option<u32>,
+    activity: Option<u8>,
+}
+
+fn history(opening: &Doing, facts: &[(u32, &Event)]) -> Vec<Entry> {
+    let mut entries = Vec::new();
+    let (mut stay, mut trip, mut arrived) = (None, None, None);
+    if let Doing::Activity { kind, lot, .. } = opening {
+        entries.push(Entry {
+            trip: false,
+            start: -1,
+            end: None,
+            car: false,
+            lot: Some(*lot),
+            activity: Some(*kind),
+        });
+        stay = Some(0);
+    }
+    for (tick, event) in facts {
+        match event {
+            Event::Trip { vehicle, .. } => {
+                if let Some(s) = stay.take() {
+                    let s: &mut Entry = &mut entries[s];
+                    s.end = Some(*tick);
+                }
+                entries.push(Entry {
+                    trip: true,
+                    start: i64::from(*tick),
+                    end: None,
+                    car: *vehicle != 0,
+                    lot: None,
+                    activity: None,
+                });
+                trip = Some(entries.len() - 1);
+            }
+            Event::Arrived { lot, .. } => {
+                arrived = trip.take();
+                if let Some(t) = arrived {
+                    entries[t].end = Some(*tick);
+                    entries[t].lot = Some(*lot);
+                }
+                entries.push(Entry {
+                    trip: false,
+                    start: i64::from(*tick),
+                    end: None,
+                    car: false,
+                    lot: Some(*lot),
+                    activity: None,
+                });
+                stay = Some(entries.len() - 1);
+            }
+            Event::Activity { kind, .. } => {
+                if let Some(s) = stay {
+                    entries[s].activity = Some(*kind);
+                }
+                if let Some(t) = arrived.take() {
+                    entries[t].activity = Some(*kind);
+                }
+            }
+            _ => {}
+        }
+    }
+    entries
+}
+
+/// The entries of the day `[from, to)` as JSON, in the form the page's panel produces.
+fn day_json(entries: &[Entry], from: u32, to: u32) -> String {
+    let opt = |v: Option<u32>| v.map_or("null".to_string(), |v| v.to_string());
+    let kind = |v: Option<u8>| v.map_or("null".to_string(), |v| v.to_string());
+    let mut out = Vec::new();
+    for e in entries {
+        let carried = e.start < i64::from(from);
+        // A trip or stay that ended at `from` or earlier is not part of this day.
+        if carried && e.end.is_some_and(|end| end <= from) {
+            continue;
+        }
+        if !carried && e.start >= i64::from(to) {
+            continue;
+        }
+        let tick = if carried { from } else { e.start as u32 };
+        out.push(if e.trip {
+            format!(
+                "{{\"kind\":\"trip\",\"tick\":{tick},\"carried\":{carried},\"car\":{},\"arrived\":{},\"lot\":{},\"activity\":{}}}",
+                e.car,
+                opt(e.end),
+                opt(e.lot),
+                kind(e.activity)
+            )
+        } else {
+            format!(
+                "{{\"kind\":\"stay\",\"tick\":{tick},\"carried\":{carried},\"lot\":{},\"activity\":{},\"left\":{}}}",
+                opt(e.lot),
+                kind(e.activity),
+                opt(e.end)
+            )
+        });
+    }
+    format!("[{}]", out.join(","))
+}
+
+/// A recorded day for three residents: a busy one, one who crosses districts and a night worker, as the
+/// records the sim wrote for them (events and keyframe entries of other residents left out), with what the
+/// page's panel must show for each of the two days it covers.
+fn residents_day_fixture() -> String {
+    let mut world = World::new(City::generate("harbor", 2).unwrap());
+    // The first city hour of the second day too, so a day that starts mid-stay is covered.
+    let end = TICKS_PER_DAY + TICKS_PER_HOUR;
+    let ticks: Vec<Vec<DistrictTick>> = (0..end).map(|_| world.step()).collect();
+    let events = |id: u32| {
+        let mut out = Vec::new();
+        for (tick, step) in ticks.iter().enumerate() {
+            for e in step.iter().flat_map(|d| &d.events) {
+                let who = match e {
+                    Event::Trip { resident, .. }
+                    | Event::Replan { resident, .. }
+                    | Event::Arrived { resident, .. }
+                    | Event::Activity { resident, .. }
+                    | Event::Left { resident, .. }
+                    | Event::Entered { resident, .. } => *resident,
+                    _ => continue,
+                };
+                if who == id {
+                    out.push((tick as u32, e));
+                }
+            }
+        }
+        out
+    };
+    let trips = |id: u32| {
+        events(id)
+            .iter()
+            .filter(|(_, e)| matches!(e, Event::Trip { .. }))
+            .count()
+    };
+    let busiest = world
+        .people
+        .iter()
+        .map(|p| p.resident.id)
+        .max_by_key(|id| (trips(*id), std::cmp::Reverse(*id)))
+        .unwrap();
+    let crosser = world
+        .people
+        .iter()
+        .map(|p| p.resident.id)
+        .find(|id| {
+            events(*id)
+                .iter()
+                .any(|(_, e)| matches!(e, Event::Left { .. }))
+        })
+        .unwrap();
+    let night = world
+        .people
+        .iter()
+        .find(|p| p.resident.archetype.name() == "night")
+        .map(|p| p.resident.id)
+        .unwrap();
+    let mut chosen = vec![busiest, crosser, night];
+    chosen.sort_unstable();
+    chosen.dedup();
+
+    let mut records = Vec::new();
+    for (tick, step) in ticks.iter().enumerate() {
+        for (district, d) in step.iter().enumerate() {
+            let mine: Vec<Event> = d
+                .events
+                .iter()
+                .filter(|e| match e {
+                    Event::Trip { resident, .. }
+                    | Event::Replan { resident, .. }
+                    | Event::Arrived { resident, .. }
+                    | Event::Activity { resident, .. }
+                    | Event::Left { resident, .. }
+                    | Event::Entered { resident, .. } => chosen.contains(resident),
+                    _ => false,
+                })
+                .cloned()
+                .collect();
+            let keyframe = d.keyframe.as_ref().map(|k| Keyframe {
+                residents: k
+                    .residents
+                    .iter()
+                    .filter(|r| chosen.contains(&r.id))
+                    .cloned()
+                    .collect(),
+                ..k.clone()
+            });
+            if mine.is_empty() && keyframe.is_none() {
+                continue;
+            }
+            let record = TickRecord {
+                header: Header {
+                    epoch: 1,
+                    district: district as u16,
+                    tick: tick as u32,
+                    speed: 4,
+                    keyframe_offset: 0,
+                    wall_us: tick as u64 * 15_000_000,
+                },
+                keyframe,
+                events: mine,
+            };
+            let hex: String = record
+                .encode()
+                .unwrap()
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect();
+            records.push(format!(
+                "    {{\"district\":{district},\"tick\":{tick},\"hex\":\"{hex}\"}}"
+            ));
+        }
+    }
+
+    let mut residents = Vec::new();
+    for id in &chosen {
+        let facts = events(*id);
+        let opening = ticks[0]
+            .iter()
+            .filter_map(|d| d.keyframe.as_ref())
+            .flat_map(|k| &k.residents)
+            .find(|r| r.id == *id)
+            .unwrap();
+        let entries = history(&opening.doing, &facts);
+        let days: Vec<String> = [(0, TICKS_PER_DAY), (TICKS_PER_DAY, end)]
+            .iter()
+            .map(|(from, to)| day_json(&entries, *from, *to))
+            .collect();
+        residents.push(format!("    {{\"id\":{id},\"days\":[{}]}}", days.join(",")));
+    }
+    format!(
+        "{{\n  \"seed\": \"harbor\",\n  \"districts\": 2,\n  \"through\": {},\n  \"residents\": [\n{}\n  ],\n  \"records\": [\n{}\n  ]\n}}\n",
+        end - 1,
+        residents.join(",\n"),
+        records.join(",\n")
+    )
+}
+
+/// `web/src/day-fixture.json` is what the page's tests read a resident's day from. Rewrite it with
+/// `METRO_WRITE_FIXTURE=1 cargo test -p felix-metro-sim the_residents_day_fixture`.
+#[test]
+fn the_residents_day_fixture_is_the_day_the_sim_writes() {
+    let now = residents_day_fixture();
+    if std::env::var_os("METRO_WRITE_FIXTURE").is_some() {
+        std::fs::write(DAY_FIXTURE, &now).unwrap();
+        return;
+    }
+    let stored = std::fs::read_to_string(DAY_FIXTURE).unwrap_or_default();
+    assert!(
+        stored == now,
+        "web/src/day-fixture.json is not what the sim writes; rewrite it with METRO_WRITE_FIXTURE=1"
+    );
+}
