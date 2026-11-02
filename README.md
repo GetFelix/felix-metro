@@ -344,6 +344,9 @@ When Felix publishes a release, a bot opens a "chore: use Felix <version>" PR
 that moves every pin listed in [`.github/felix-bump.sh`](.github/felix-bump.sh)
 and the lockfiles, and merges it once CI passes. Prereleases are skipped.
 
+The gateway is pinned on its own, by image tag in [`dev/compose.yml`](dev/compose.yml) (0.8.0 today). Move that tag
+when a gateway release adds something the page needs.
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md).
