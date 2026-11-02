@@ -90,6 +90,14 @@ function writeStored(tier: Tier) {
   }
 }
 
+function clearStored() {
+  try {
+    localStorage.removeItem(KEY);
+  } catch {
+    // Nothing was saved if storage is blocked.
+  }
+}
+
 export interface QualityOptions {
   /** The ?tier value. */
   url: Tier | null;
@@ -106,6 +114,8 @@ export interface Quality {
   readonly mode: 'auto' | 'forced' | 'still';
   /** Choose a tier by hand. Persists it and stops the automatic choice. */
   setTier(tier: Tier): void;
+  /** Go back to choosing from frame times: forget the saved tier and judge again from high, as on a first visit. */
+  setAutomatic(): void;
   /** Every tier the page has run, first to last. */
   readonly history: readonly Tier[];
   /** Feed one frame time in ms after the city is ready. */
@@ -152,6 +162,17 @@ export function createQuality(opts: QualityOptions): Quality {
       writeStored(next);
       if (next === tier) return;
       tier = next;
+      history.push(tier);
+      opts.onChange(tier);
+    },
+    setAutomatic() {
+      clearStored();
+      forced = false;
+      // A frozen scene still never chooses on its own.
+      done = opts.still;
+      restart(FIRST_WINDOW_MS);
+      if (tier === 'high') return;
+      tier = 'high';
       history.push(tier);
       opts.onChange(tier);
     },

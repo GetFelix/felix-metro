@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { passesFor } from './passes';
 import { MIN_SAMPLES, createQuality, decideTier, displayInterval, median, settingsFor, stepDown } from './quality';
 import type { Tier } from './params';
@@ -191,5 +191,65 @@ describe('createQuality', () => {
     q.setTier('low');
     run(q, 4, 1000);
     expect([q.tier, q.mode, changes]).toEqual(['low', 'forced', ['low']]);
+  });
+
+  describe('setAutomatic', () => {
+    afterEach(() => vi.unstubAllGlobals());
+
+    it('judges frames again from high after a tier was chosen by hand', () => {
+      const { q, changes } = make(null);
+      q.setTier('low');
+      q.setAutomatic();
+      expect([q.tier, q.mode, changes]).toEqual(['high', 'auto', ['low', 'high']]);
+      runSlow(q, 40, 100);
+      expect([q.tier, changes]).toEqual(['medium', ['low', 'high', 'medium']]);
+    });
+
+    it('overrides a tier from the URL', () => {
+      const { q } = make('low');
+      q.setAutomatic();
+      expect([q.tier, q.mode]).toEqual(['high', 'auto']);
+    });
+
+    it('forgets the saved tier, so the next visit is automatic too', () => {
+      const saved = new Map<string, string>();
+      vi.stubGlobal('localStorage', {
+        getItem: (k: string) => saved.get(k) ?? null,
+        setItem: (k: string, v: string) => void saved.set(k, v),
+        removeItem: (k: string) => void saved.delete(k),
+      });
+      const { q } = make(null);
+      q.setTier('medium');
+      expect([...saved.values()]).toEqual(['medium']);
+      q.setAutomatic();
+      expect(saved.size).toBe(0);
+      expect(make(null).q.mode).toBe('auto');
+    });
+
+    it('does not throw when storage is blocked', () => {
+      vi.stubGlobal('localStorage', {
+        getItem: () => {
+          throw new Error('blocked');
+        },
+        setItem: () => {
+          throw new Error('blocked');
+        },
+        removeItem: () => {
+          throw new Error('blocked');
+        },
+      });
+      const { q } = make(null);
+      q.setTier('low');
+      expect(() => q.setAutomatic()).not.toThrow();
+      expect(q.mode).toBe('auto');
+    });
+
+    it('leaves a frozen scene frozen', () => {
+      const { q, changes } = make(null, true);
+      q.setTier('low');
+      q.setAutomatic();
+      run(q, 80, 1000);
+      expect([q.tier, q.mode, changes]).toEqual(['high', 'still', ['low', 'high']]);
+    });
   });
 });

@@ -1,0 +1,55 @@
+.loader {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  background: var(--void);
+  transition: opacity 0.6s ease;
+}
+.loader.done {
+  opacity: 0;
+  pointer-events: none;
+}
+.notice {
+  position: fixed;
+  inset: 42% 24px auto;
+  z-index: 5;
+  margin: 0;
+  text-align: center;
+  color: var(--muted);
+  font-size: 18px;
+  text-shadow: 0 1px 12px var(--void);
+  pointer-events: none;
+}
+.loader p {
+  margin: 0;
+  color: var(--muted);
+}
+.loader-grid {
+  display: grid;
+  grid-template-columns: repeat(var(--side, 2), 28px);
+  gap: 6px;
+}
+.loader-grid i {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.07);
+  transition:
+    background 0.35s ease,
+    box-shadow 0.35s ease;
+}
+.loader-grid i.on {
+  background: var(--cyan);
+  box-shadow: 0 0 14px var(--cyan-glow);
+}
+@media (prefers-reduced-motion: reduce) {
+  .loader,
+  .loader-grid i {
+    transition: none;
+  }
+}

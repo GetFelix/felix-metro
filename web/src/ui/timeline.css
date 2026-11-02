@@ -1,0 +1,165 @@
+.timeline[data-live] input {
+  pointer-events: none;
+}
+.timeline {
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  width: min(720px, calc(100vw - 32px));
+  box-sizing: border-box;
+  padding: 12px 16px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+}
+.track {
+  position: relative;
+  height: 22px;
+}
+.track input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.rail {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 9px;
+  height: 4px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--coral) var(--p), var(--violet) var(--p));
+  box-shadow: 0 0 12px var(--violet-glow);
+}
+.knob {
+  position: absolute;
+  top: 3px;
+  left: var(--p);
+  width: 16px;
+  height: 16px;
+  margin-left: -8px;
+  border-radius: 50%;
+  background: var(--amber);
+  box-shadow: 0 0 14px var(--amber);
+  pointer-events: none;
+}
+.ticks {
+  display: flex;
+  justify-content: space-between;
+  color: var(--muted);
+  font:
+    500 11px 'JetBrains Mono',
+    monospace;
+}
+.timeline[data-scrub] .track,
+.timeline[data-scrub] .ticks {
+  display: none;
+}
+.scrub:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
+}
+.scrub {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  touch-action: none;
+  user-select: none;
+  cursor: pointer;
+  border-radius: 8px;
+}
+.bands {
+  position: relative;
+  height: 18px;
+  overflow: hidden;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+}
+.band {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc((var(--from) - var(--oldest)) / var(--span) * 100%);
+  width: calc((var(--to) - var(--from)) / var(--span) * 100%);
+  box-sizing: border-box;
+  border-left: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.06);
+}
+.band:nth-child(even) {
+  background: rgba(255, 255, 255, 0.12);
+}
+.day {
+  position: absolute;
+  top: 3px;
+  left: max(6px, calc((var(--from) - var(--oldest)) / var(--span) * 100% + 6px));
+  color: var(--muted);
+  font:
+    500 11px 'JetBrains Mono',
+    monospace;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.strip {
+  position: relative;
+  height: 22px;
+}
+.strip .rail {
+  /* Past the live head is time that has not happened yet. */
+  background: linear-gradient(
+    90deg,
+    var(--violet) var(--p),
+    rgba(255, 255, 255, 0.14) var(--p),
+    rgba(255, 255, 255, 0.14) var(--live, 100%),
+    rgba(255, 255, 255, 0.04) var(--live, 100%)
+  );
+}
+.marks {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.mark {
+  position: absolute;
+  top: 6px;
+  height: 10px;
+  width: 1px;
+  left: calc((var(--t) - var(--oldest)) / var(--span) * 100%);
+  background: rgba(255, 255, 255, 0.28);
+}
+.mark.major {
+  top: 2px;
+  height: 18px;
+  background: rgba(255, 255, 255, 0.5);
+}
+.strip .knob {
+  top: 3px;
+}
+.scrub[data-mode='past'] .knob {
+  background: var(--amber);
+}
+.scrub[data-mode='live'] .knob {
+  background: var(--coral);
+  box-shadow: 0 0 14px var(--coral);
+}
+.tip {
+  position: absolute;
+  left: var(--live, 100%);
+  margin-left: -6px;
+  top: 5px;
+  width: 12px;
+  height: 12px;
+  padding: 0;
+  border: 2px solid var(--coral);
+  border-radius: 50%;
+  background: var(--void);
+  cursor: pointer;
+}
+/* The slider's own input is invisible, so the keyboard ring goes round the knob. */
+.track:has(input:focus-visible) .knob {
+  outline: 2px solid var(--cyan);
+  outline-offset: 3px;
+}

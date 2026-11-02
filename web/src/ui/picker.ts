@@ -1,5 +1,5 @@
 // The city picker in the brand chip: the chip opens a list of the registry's cities, each a link to its page.
-import { citySize, displayName, type CityEntry } from './registry';
+import { citySize, displayName, type CityEntry } from '../registry';
 
 export interface Picker {
   update(cities: CityEntry[]): void;

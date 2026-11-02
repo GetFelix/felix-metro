@@ -1,0 +1,174 @@
+/* The settings sheet and the key list: one glass panel over the page, with a scrim behind it to catch outside clicks. */
+.scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+}
+.sheet {
+  position: fixed;
+  z-index: 21;
+  top: 112px;
+  right: var(--space-4);
+  box-sizing: border-box;
+  width: min(400px, calc(100vw - 32px));
+  max-height: calc(100vh - 128px);
+  max-height: calc(100dvh - 128px);
+  overflow-y: auto;
+  padding: var(--space-4);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-l);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  color-scheme: dark;
+}
+.sheet header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+.sheet h2 {
+  flex: 1;
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+}
+.sheet h3 {
+  margin: var(--space-4) 0 var(--space-1);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.choices {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.choices legend {
+  margin-bottom: var(--space-2);
+  padding: 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.choice {
+  display: flex;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius-m);
+  cursor: pointer;
+}
+.choice:hover {
+  background: var(--hover);
+}
+.choice:has(input:checked) {
+  background: var(--cyan-wash);
+  border-color: var(--cyan);
+}
+.choice input {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin: 2px 0 0;
+  accent-color: var(--cyan);
+}
+.choice span {
+  display: grid;
+  gap: 2px;
+}
+.choice small {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+.running {
+  margin: var(--space-2) var(--space-3) 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+.text-button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  margin-top: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-m);
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.text-button:hover {
+  background: var(--hover);
+}
+kbd {
+  display: inline-block;
+  min-width: 1.4em;
+  box-sizing: border-box;
+  padding: 2px 6px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--hover);
+  color: var(--text);
+  font:
+    500 12px/1.2 'JetBrains Mono',
+    monospace;
+  text-align: center;
+}
+.keys section:first-child h3 {
+  margin-top: 0;
+}
+.keys .when {
+  margin: 0 0 var(--space-2);
+  color: var(--muted);
+  font-size: 12px;
+}
+.keys table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+}
+.keys td {
+  padding: 5px 0;
+  vertical-align: baseline;
+  border-top: 1px solid var(--line);
+}
+.keys .combo {
+  width: 54%;
+  padding-right: var(--space-3);
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: 12px;
+}
+.keys .combo kbd + kbd {
+  margin-left: 2px;
+}
+@media (max-width: 600px) {
+  .keys .combo {
+    width: 50%;
+    white-space: normal;
+  }
+  .scrim {
+    background: color-mix(in srgb, var(--void) 55%, transparent);
+  }
+  .sheet {
+    top: auto;
+    right: var(--space-4);
+    bottom: var(--space-4);
+    left: var(--space-4);
+    width: auto;
+    max-height: calc(100vh - 96px);
+    max-height: calc(100dvh - 96px);
+  }
+}

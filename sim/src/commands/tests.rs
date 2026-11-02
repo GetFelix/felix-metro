@@ -63,6 +63,7 @@ pub(crate) fn command(principal: &str, id: u32, command: Command) -> Incoming {
             name: principal.to_owned(),
             command,
         }),
+        offset: None,
     }
 }
 
@@ -90,22 +91,24 @@ fn a_stamped_command_is_read_with_the_hash_of_its_sender() {
         name: "Mayor".into(),
         command: Command::Demolish { lot: 3 },
     };
-    let got = Incoming::from_payload(&stamped("mayor", &record.encode().unwrap())).unwrap();
+    let got =
+        Incoming::from_payload(&stamped("mayor", &record.encode().unwrap()), Some(5)).unwrap();
     assert_eq!(got.principal, principal_hash("mayor"));
     assert_eq!(got.command, Some(record));
+    assert_eq!(got.offset, Some(5));
 }
 
 #[test]
 fn a_payload_that_is_not_a_command_keeps_its_sender_and_loses_the_command() {
-    let got = Incoming::from_payload(&stamped("mayor", b"\xff\xff")).unwrap();
+    let got = Incoming::from_payload(&stamped("mayor", b"\xff\xff"), None).unwrap();
     assert_eq!(got.principal, principal_hash("mayor"));
     assert_eq!(got.command, None);
 }
 
 #[test]
 fn a_payload_with_no_stamp_has_nobody_to_blame_and_is_dropped() {
-    assert_eq!(Incoming::from_payload(b""), None);
-    assert_eq!(Incoming::from_payload(b"\x00\x09abc"), None);
+    assert_eq!(Incoming::from_payload(b"", None), None);
+    assert_eq!(Incoming::from_payload(b"\x00\x09abc", None), None);
 }
 
 #[test]
@@ -276,6 +279,7 @@ fn bytes_that_are_not_a_command_are_refused_in_district_zero() {
     let bad = Incoming {
         principal: principal_hash("mayor"),
         command: None,
+        offset: None,
     };
     let out = apply_all(&mut world, vec![bad], &mut speed);
     assert_eq!(results(&out[0]), vec![REFUSED_MALFORMED]);

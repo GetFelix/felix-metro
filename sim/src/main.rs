@@ -8,7 +8,7 @@ use anyhow::{Context, Result};
 use felix_metro_core::City;
 use felix_metro_sim::{
     Connection, FelixLog, Settings, StartRequest, announce_later, connect, follow_commands,
-    run_city_with, serve_speed_control,
+    load_history, run_with_history, serve_speed_control,
 };
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinSet;
@@ -79,9 +79,28 @@ async fn main() -> Result<()> {
                     }
                 },
             };
-            let commands =
-                follow_commands(Arc::clone(&client), connection.clone(), spec.name.clone());
-            if warmup_ticks > 0 {
+            let settings = Settings {
+                warmup_ticks,
+                warming: Some(warming.clone()),
+                ticks_per_second,
+                speed: Some(speed),
+                speed_out: Some(control),
+                ..Settings::default()
+            };
+            // A city with history carries on from it, and its commands from where the sim last read them. A new
+            // one reads its command stream from the start.
+            let history = load_history(&log, city.districts.len(), &settings).await?;
+            let from = match &history {
+                Some(history) => history.commands_from(),
+                None => Some(0),
+            };
+            let commands = follow_commands(
+                Arc::clone(&client),
+                connection.clone(),
+                spec.name.clone(),
+                from,
+            );
+            if warmup_ticks > 0 && history.is_none() {
                 warming.send_replace(true);
             }
             // Listed once the districts are level in the log, not while warm-up has them apart.
@@ -96,15 +115,7 @@ async fn main() -> Result<()> {
                     announce_later(listed, connection, name, side);
                 }
             });
-            let settings = Settings {
-                warmup_ticks,
-                warming: Some(warming),
-                ticks_per_second,
-                speed: Some(speed),
-                speed_out: Some(control),
-                ..Settings::default()
-            };
-            run_city_with(&spec.name, city, settings, log, Some(commands))
+            run_with_history(&spec.name, city, settings, log, Some(commands), history)
                 .await
                 .map(|_| spec.name)
         });
