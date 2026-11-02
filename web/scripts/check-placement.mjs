@@ -39,7 +39,9 @@ const pages = [];
 const fail = async (message) => {
   console.error(message);
   for (const [i, page] of pages.entries())
-    await page.screenshot({ path: join(out, `failure-${i}.png`), timeout: 5000 }).catch(() => {});
+    await page
+      .screenshot({ path: join(out, `failure-${i}-${page.label.replace(/\W+/g, '-')}.png`), timeout: 5000 })
+      .catch(() => {});
   await browser.close();
   process.exit(1);
 };
@@ -49,7 +51,7 @@ const fail = async (message) => {
  * there in READY_MS is thrown away and opened again, in case its renderer is stuck; a page that is really broken fails
  * every try, and the failure says what the page was doing.
  */
-const READY_MS = 150_000;
+const READY_MS = 120_000;
 const OPEN_TRIES = 3;
 async function open(name, who, options = {}) {
   for (let attempt = 1; ; attempt++) {
@@ -62,20 +64,20 @@ async function open(name, who, options = {}) {
     page.on('pageerror', (e) => problems.push(`${name}: page error: ${e}`));
     page.on('console', (m) => m.type() === 'error' && console.log(`${name} console: ${m.text()}`));
     const started = Date.now();
-    const ready = await page
+    const why = await page
       .goto(appUrl, { waitUntil: 'load', timeout: READY_MS })
       .then(() =>
         page.waitForFunction(
           () => window.__ready === true && window.__build && Number.isFinite(window.__live?.tick),
           null,
-          { polling: 250, timeout: READY_MS },
+          { polling: 250, timeout: Math.max(1000, READY_MS - (Date.now() - started)) },
         ),
       )
       .then(
-        () => true,
-        () => false,
+        () => null,
+        (e) => String(e.message).split('\n')[0],
       );
-    if (ready) {
+    if (why === null) {
       console.log(`opened ${name} in ${Date.now() - started} ms${attempt > 1 ? ` (try ${attempt})` : ''}`);
       pages.push(page);
       return { context, page };
@@ -86,13 +88,13 @@ async function open(name, who, options = {}) {
       new Promise((resolve) => setTimeout(resolve, 5000, 'no answer from the page')),
     ]).catch((e) => String(e));
     console.log(
-      `${name}: not drawn after ${READY_MS / 1000} s (try ${attempt}): crashed=${page.crashed} ${JSON.stringify(seen)}`,
+      `${name}: not drawn within ${READY_MS / 1000} s (try ${attempt}): ${why}; crashed=${page.crashed} ${JSON.stringify(seen)}`,
     );
     if (attempt === OPEN_TRIES) {
       pages.push(page);
       await fail(`${name}: the city was never drawn`);
     }
-    await context.close().catch(() => {});
+    await Promise.race([context.close().catch(() => {}), new Promise((resolve) => setTimeout(resolve, 10_000))]);
   }
 }
 
@@ -173,7 +175,7 @@ async function answer(page, before) {
 }
 
 // 2. Two builders. Pick two bare lots in the development area from what A sees.
-// Opened together: a page that is already drawing starves one still loading (50 s against 10 s on a quiet machine).
+// Opened together: a page that is already drawing starves one still loading (50 s against about 10 s).
 const [a, b] = await Promise.all([
   open('A (mayor, mouse)', mayor),
   open('B (architect, touch)', architect, { hasTouch: true }),
