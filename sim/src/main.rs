@@ -93,7 +93,7 @@ async fn main() -> Result<()> {
             &shared,
             spec.clone(),
             None,
-            warmup_ticks > 0,
+            warmup_ticks > 0 && felix_metro_core::chapter_for(&spec.name).is_none(),
             true,
         );
     }
@@ -190,6 +190,12 @@ async fn run_city(
         forks,
         ..
     } = shared;
+    // A chapter's clock starts when the city does, so it has no day and a half of history behind it.
+    let warmup_ticks = if felix_metro_core::chapter_for(&spec.name).is_some() {
+        0
+    } else {
+        warmup_ticks
+    };
     // A city held back starts when something asks for it, at its first tick like any other. One whose
     // streams will not open fails that request and waits to be asked again.
     let (city, log) = match held {

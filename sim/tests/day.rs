@@ -20,7 +20,7 @@ use felix_metro_core::{City, TICKS_PER_DAY};
 use felix_metro_sim::{
     Connection, FelixLog, Settings, connect, events_stream, load_history, run_city, state_at,
 };
-use felix_metro_sim::{Log, Write};
+use felix_metro_sim::{Log, Marked, Write};
 use std::time::Duration;
 use tokio::sync::watch;
 
@@ -276,10 +276,11 @@ impl Log for Steered {
         expected: u64,
         record: Vec<u8>,
         keyframe: bool,
+        markers: Option<&Marked>,
     ) -> anyhow::Result<Write> {
         let written = self
             .inner
-            .commit(district, expected, record, keyframe)
+            .commit(district, expected, record, keyframe, markers)
             .await?;
         if district == 0 && written == Write::Written {
             for (_, to) in self.changes.iter().filter(|(at, _)| *at == expected) {
@@ -295,6 +296,10 @@ impl Log for Steered {
             }
         }
         Ok(written)
+    }
+
+    async fn markers(&self, day: u32) -> anyhow::Result<Option<Vec<u8>>> {
+        self.inner.markers(day).await
     }
 
     async fn read(&self, district: u16, offset: u64) -> anyhow::Result<Option<Vec<u8>>> {

@@ -3,11 +3,12 @@
 use super::wire::{Reader, Writer};
 use super::{
     BuildingDiff, Command, CommandRecord, Counts, DecodeError, Doing, EncodeError, Event, FACTIONS,
-    FLAG_KEYFRAME, Header, KIND_COMMAND, KIND_REGISTRY, KIND_TICK, Keyframe, Leg, MAX_PROGRESS,
-    POLICIES, PolicySetting, RegistryRecord, ResidentState, RoadDiff, Standing, Tally, TickRecord,
-    Vehicle,
+    FLAG_KEYFRAME, Header, KIND_COMMAND, KIND_MARKERS, KIND_REGISTRY, KIND_TICK, Keyframe, Leg,
+    MARK_BUILT, MARK_DEMOLISHED, MARK_ROAD, MAX_PROGRESS, Marker, MarkersRecord, POLICIES,
+    PolicySetting, RegistryRecord, ResidentState, RoadDiff, Standing, Tally, TickRecord, Vehicle,
 };
 use crate::city::City;
+use crate::schedule::TICKS_PER_DAY;
 
 /// Bits of tag in the framing of an event and of a keyframe's resident entry. A tag has to fit.
 const EVENT_TAG_BITS: u32 = 4;
@@ -812,4 +813,57 @@ pub(super) fn decode_registry(bytes: &[u8]) -> Result<RegistryRecord, DecodeErro
     };
     r.finish()?;
     Ok(rec)
+}
+
+/// A day's markers: the day, a count, then each marker framed (its length, then the body), so a reader skips a
+/// marker of a type it does not know and keeps the rest. A body is the tick as a delta from the marker before (the
+/// first from the day's start), the type, subject, detail and builder; bytes appended to it are ignored.
+pub(super) fn encode_markers(m: &MarkersRecord) -> Result<Vec<u8>, EncodeError> {
+    let mut w = Writer(Vec::with_capacity(8 + m.markers.len() * 16));
+    w.u8(KIND_MARKERS);
+    w.varint(u64::from(m.day));
+    w.varint(m.markers.len() as u64);
+    let mut prev = m.day.saturating_mul(TICKS_PER_DAY);
+    for mark in &m.markers {
+        w.framed(0, 0, |b| {
+            b.delta(prev, mark.tick);
+            b.u8(mark.kind);
+            b.varint(u64::from(mark.subject));
+            b.varint(u64::from(mark.what));
+            b.str(&mark.by)
+        })?;
+        prev = mark.tick;
+    }
+    Ok(w.0)
+}
+
+pub(super) fn decode_markers(bytes: &[u8]) -> Result<MarkersRecord, DecodeError> {
+    let mut r = Reader::new(bytes);
+    expect_kind(&mut r, KIND_MARKERS)?;
+    let day = r.varint_u32()?;
+    let n = r.count()?;
+    let mut prev = day.saturating_mul(TICKS_PER_DAY);
+    let mut markers = Vec::with_capacity(n);
+    for _ in 0..n {
+        let (_, mut b) = r.framed(0)?;
+        let tick = b.delta(prev)?;
+        prev = tick;
+        let kind = b.u8()?;
+        if !matches!(kind, MARK_BUILT | MARK_DEMOLISHED | MARK_ROAD) {
+            continue;
+        }
+        let subject = b.varint_u32()?;
+        let what = u16::try_from(b.varint()?)
+            .map_err(|_| DecodeError::Invalid("marker detail overflows u16"))?;
+        let by = b.str()?;
+        markers.push(Marker {
+            tick,
+            kind,
+            subject,
+            what,
+            by,
+        });
+    }
+    r.finish()?;
+    Ok(MarkersRecord { day, markers })
 }

@@ -332,7 +332,7 @@ async fn copy_district<L: Log>(
                 .retain(|event| !matches!(event, Event::Forked { .. }));
             let keyframe = record.keyframe.is_some();
             let bytes = record.encode().context("encode a copied record")?;
-            commit_until_written(child, district, next, bytes, keyframe, retry).await?;
+            commit_until_written(child, district, next, bytes, (keyframe, None), retry).await?;
             next += 1;
         }
     }

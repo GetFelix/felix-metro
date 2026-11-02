@@ -8,7 +8,8 @@ use felix_metro_core::{
     City, Congestion, Mode, Places, Resident, day_hash,
     record::{
         BuildingDiff, Command, CommandRecord, Counts, Doing, Event, Header, Keyframe, Leg,
-        RegistryRecord, ResidentState, RoadDiff, TickRecord, Vehicle, decode_json,
+        MARK_BUILT, MARK_ROAD, Marker, MarkersRecord, ROAD_CLOSED, RegistryRecord, ResidentState,
+        RoadDiff, TickRecord, Vehicle, decode_json,
     },
 };
 
@@ -219,6 +220,26 @@ fn records() -> Vec<(&'static str, Vec<u8>)> {
     ];
     out.extend(commands.iter().map(|c| ("command", c.encode().unwrap())));
     out.extend(registry.iter().map(|r| ("registry", r.encode().unwrap())));
+    let markers = MarkersRecord {
+        day: 1,
+        markers: vec![
+            Marker {
+                tick: 5_900,
+                kind: MARK_BUILT,
+                subject: 412,
+                what: 17,
+                by: "Mara".into(),
+            },
+            Marker {
+                tick: 7_100,
+                kind: MARK_ROAD,
+                subject: 9,
+                what: u16::from(ROAD_CLOSED),
+                by: String::new(),
+            },
+        ],
+    };
+    out.push(("markers", markers.encode().unwrap()));
     out
 }
 

@@ -6,6 +6,7 @@ pub mod control;
 pub mod felix;
 pub mod fork;
 mod latency;
+pub mod markers;
 pub mod registry;
 mod resume;
 pub mod runner;
@@ -18,6 +19,7 @@ pub use control::{
 pub use felix::{Connection, FelixLog, connect, events_stream};
 pub use fork::make::{Started as ForksStarted, start as start_forks};
 pub use fork::{Forks, Request as ForkRequest, felix_name, root_of};
+pub use markers::Marked;
 pub use registry::{REGISTRY_STREAM, announce, announce_later};
 pub use resume::History;
 pub use runner::{

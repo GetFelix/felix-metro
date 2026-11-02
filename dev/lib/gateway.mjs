@@ -188,6 +188,30 @@ export function decode(bytes) {
   return out;
 }
 
+/** A day's timeline markers (kind 5): the day and the changes builders made in it, in order. Each is framed by its length. */
+export function decodeMarkers(bytes) {
+  if (bytes[0] !== 5) return null;
+  const at = { i: 1 };
+  const day = varint(bytes, at);
+  let tick = day * 5760;
+  const markers = [];
+  for (let n = varint(bytes, at); n > 0; n--) {
+    const length = varint(bytes, at);
+    const end = at.i + length;
+    tick = delta(bytes, at, tick);
+    const type = bytes[at.i++];
+    if (type >= 1 && type <= 3) {
+      const subject = varint(bytes, at);
+      const what = varint(bytes, at);
+      const size = bytes[at.i++];
+      const by = Buffer.from(bytes.subarray(at.i, at.i + size)).toString("utf8");
+      markers.push({ tick, type, subject, what, by });
+    }
+    at.i = end;
+  }
+  return { day, markers };
+}
+
 export function commandBytes(name, id, command) {
   const display = Buffer.from(name);
   const head = Buffer.alloc(5);
@@ -267,7 +291,7 @@ export class Session {
         else this.onFatal(err);
       };
     });
-    this.ws.onopen = () => this.ws.send(JSON.stringify({ type: "join", protocol: 1, features: ["slots", "shards"], city: this.city, token: jwt }));
+    this.ws.onopen = () => this.ws.send(JSON.stringify({ type: "join", protocol: 1, features: ["slots", "shards", "state"], city: this.city, token: jwt }));
     this.ws.onmessage = ({ data }) => this.message(JSON.parse(data));
     await hello;
     this.onHello = null;
@@ -291,7 +315,7 @@ export class Session {
         this.results.set(e.id, result);
         this.waiting.get(e.id)?.(result);
       }
-    } else if (m.type === "ack" || m.type === "error") {
+    } else if (m.type === "ack" || m.type === "state_value" || m.type === "error") {
       this.acks.get(m.id)?.(m);
     }
   }
@@ -315,6 +339,16 @@ export class Session {
     const answer = new Promise((resolve) => this.acks.set(id, resolve));
     this.ws.send(JSON.stringify({ type: "publish", stream: "commands", payload: payload.toString("base64"), ack: true, id }));
     return Promise.race([answer, sleep(10_000).then(() => ({ type: "error", code: "timeout" }))]).finally(() => this.acks.delete(id));
+  }
+
+  /** One key of the events stream's state in `shard`, as bytes, or null when nothing is set. */
+  async stateGet(key, shard = 0) {
+    const id = this.nextId++;
+    const answer = new Promise((resolve) => this.acks.set(id, resolve));
+    this.ws.send(JSON.stringify({ type: "state_get", stream: "events", key, shard, id }));
+    const m = await Promise.race([answer, sleep(10_000).then(() => ({ type: "error", code: "timeout" }))]).finally(() => this.acks.delete(id));
+    if (m.type === "error") throw new Error(`reading ${key} failed: ${m.code} ${m.message ?? ""}`);
+    return m.payload === null ? null : Buffer.from(m.payload, "base64");
   }
 
   /** Resolves with the `command` event of command `id`, or null when none shows within `ms`. */

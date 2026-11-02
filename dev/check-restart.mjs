@@ -14,7 +14,7 @@
 import { readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { APPLIED, DISTRICTS, build, commandBytes, demolish, joined, sleep } from "./lib/gateway.mjs";
+import { APPLIED, DISTRICTS, build, commandBytes, decodeMarkers, demolish, joined, sleep } from "./lib/gateway.mjs";
 
 const NO_BUILDING = 65535;
 const NAME = "check-restart";
@@ -41,7 +41,7 @@ if (phase === "before") {
     const seen = await mayor.send(lots.map((lot) => [1000 + lot, build(lot)]));
     for (const lot of lots) {
       const command = seen.get(1000 + lot);
-      if (command.result === APPLIED) taken.push({ lot, district: command.record.district });
+      if (command.result === APPLIED) taken.push({ lot, district: command.record.district, tick: command.record.tick });
     }
   }
   if (taken.length < 2) fail(`only ${taken.length} lots took a build`);
@@ -108,6 +108,23 @@ for (const { lot: l, district } of state.taken) {
   if (standing === (l === lot)) fail(`the keyframe at tick ${frame.tick} has lot ${l} as ${kind}`);
 }
 console.log(`${city}: the keyframes after the restart list the builds`);
+
+// The timeline's markers outlive the restart: each build is still listed, once, and the demolish sent while the sim
+// was down was added to the day's list.
+for (const { lot: l, tick } of state.taken) {
+  const bytes = await mayor.stateGet(`markers.${Math.floor(tick / 5760)}`);
+  const marks = bytes ? decodeMarkers(bytes).markers : [];
+  // The same lot may have been built before in the day, so look at the build's own tick.
+  const builds = marks.filter((m) => m.tick === tick && m.type === 1 && m.subject === l);
+  if (builds.length !== 1 || builds[0].tick !== tick) fail(`the markers list lot ${l}'s build ${builds.length} times, wanted once at tick ${tick}`);
+}
+{
+  const ticks = mayor.records.find((r) => r.events.some((e) => e.type === "command" && e.id === OFFLINE_ID)).tick;
+  const bytes = await mayor.stateGet(`markers.${Math.floor(ticks / 5760)}`);
+  const down = (bytes ? decodeMarkers(bytes).markers : []).filter((m) => m.tick === ticks && m.type === 2 && m.subject === lot);
+  if (down.length !== 1) fail(`the markers list the demolish of lot ${lot} ${down.length} times, wanted once`);
+}
+console.log(`${city}: the markers survived the restart`);
 
 // Leave the city as the next check expects.
 const rest = state.taken.filter((t) => t.lot !== lot);

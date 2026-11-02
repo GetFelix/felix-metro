@@ -84,3 +84,21 @@
   color: var(--muted);
   font-size: 11px;
 }
+.council .goals li.met > div:first-child::before,
+.council .goals li.failed > div:first-child::before {
+  margin-right: 6px;
+}
+.council .goals li.met > div:first-child::before {
+  content: '\2713';
+  color: var(--cyan);
+}
+.council .goals li.failed > div:first-child::before {
+  content: '\00d7';
+  color: var(--coral);
+}
+.council .goals .faction-head span.won {
+  color: var(--cyan);
+}
+.council .goals .faction-head span.lost {
+  color: var(--coral);
+}

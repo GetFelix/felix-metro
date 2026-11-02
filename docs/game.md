@@ -40,11 +40,11 @@ A turn of the loop takes a few minutes of play and a city day or two of city tim
 The city has one account. Every change to it is an event in the district that caused
 it, so the budget is a ledger you can scrub like everything else.
 
-| In | Out |
-|---|---|
-| Residents' tax, per resident per day at home | Upkeep per road tile and per public building, per day |
+| In                                                            | Out                                                      |
+| ------------------------------------------------------------- | -------------------------------------------------------- |
+| Residents' tax, per resident per day at home                  | Upkeep per road tile and per public building, per day    |
 | Business tax, per shop, office and factory per day it is open | Building and demolishing, once, when the command applies |
-| Fares, if transit exists | Services (parks, transit) per day |
+| Fares, if transit exists                                      | Services (parks, transit) per day                        |
 
 Paying daily rather than per tick keeps the log cost to one `ledger` event per
 district per city day plus one per command, which is noise next to trips.
@@ -138,21 +138,29 @@ works.
 
 ## A first chapter
 
-**Harbor, day 1.** The council says the morning commute into the centre has got
-worse, and the harbor district is losing residents.
+**Pier, day 1.** The city opens with its avenues limited to 40% of their speed and its streets to 60%. Trips to work
+or school average 24 city minutes, the commuters are unhappy, and the council recalls the mayor in 3 days.
 
-Goals, by the end of day 3:
+Goals, judged when day 3 has been scored:
 
-1. Median morning commute into the centre under 12 city minutes (today about 16).
-2. Harbor keeps at least 480 residents (today 522 and falling).
-3. The account is positive at the end of each day.
+1. Trips to work or school average 16 city minutes or less.
+2. No faction has recalled the mayor.
+3. The account stays above $0.
 
-The player has the timeline, follow, building, two policies (shop hours and speed
-limits) and one fork. The cause is planted: one bridge carries most of the morning
-traffic, and an industrial lot beside it makes the homes near it worth little. There
-are several fixes, and each costs something else.
+The player has the council, the policies, the timeline and the resident's day. The cause is in the policies: the
+speed limits are the only thing that moves the commute, and a limit can be changed once a city day. Reading the
+council to see what commuters want, finding the limits under it and sending the change is the whole chapter. Until the page has
+a control for policies, `node dev/policy.mjs pier avenue 100` sends one. Raising
+both limits meets the goals; raising one does not, because the avenue limit alone brings the commute to 17.5 minutes
+and the street limit alone to 20.
 
-The numbers are placeholders until the economy is in the sim and measured.
+This is a first chapter, so it is easy. The limits cost nothing, so the choice is not yet a trade-off. A
+chapter that sets the commute against money or against another faction needs a lever that costs something, such as
+roads, zones or transit.
+
+Pier starts at its first tick, without the day and a half of history other cities commit before anyone looks, so
+the three days are the player's. At the usual four ticks a second they take 72 minutes; `dev/speed.sh pier 16` runs them
+in 18.
 
 ## What this needs from the sim and the log
 
@@ -161,7 +169,7 @@ The numbers are placeholders until the economy is in the sim and measured.
   upkeep as land; transit, fares and paid services are not built.
 - **Factions.** Done: the sim scores three factions once a city day, writes a `council` event on every keyframe tick
   and counts the days a faction stays unhappy; the page shows them with the recall countdown (see The council in
-  design.md). A recall changes nothing yet; a chapter will give it a cost.
+  design.md). A recall changes nothing in the sim; a chapter's page treats it as a loss.
 - **Persistence across a restart.** Done: a restarted sim resumes from the newest keyframe
   and the records after it (see Restart in design.md). The new state below has to be
   rebuilt the same way, so each new piece of state is restored in `sim/src/world/restore.rs`. The account is written as
