@@ -1,7 +1,8 @@
 use felix_metro_core::City;
 use felix_metro_core::record::{
     Authored, LEDGER_BUILD, NO_BUILDING, REFUSED_BAD_KIND, REFUSED_BAD_SPEED, REFUSED_EMPTY,
-    REFUSED_IN_USE, REFUSED_MALFORMED, REFUSED_OCCUPIED, REFUSED_UNKNOWN, REFUSED_UNSUPPORTED,
+    REFUSED_IN_USE, REFUSED_MALFORMED, REFUSED_NOT_BUILT, REFUSED_OCCUPIED, REFUSED_UNKNOWN,
+    REFUSED_UNSUPPORTED,
 };
 use felix_metro_core::{BuildingKind, KINDS};
 
@@ -334,7 +335,7 @@ fn one_builder_is_one_event_in_a_district_with_all_their_lots_in_order() {
 fn a_restart_reads_the_author_back_from_the_command_and_built_pair() {
     let mut world = World::new(city());
     let lot = free_lot(&world);
-    let mine = vec![
+    let mine = [
         Event::Command {
             principal: principal_hash("mayor"),
             name: "mayor".into(),
@@ -347,7 +348,9 @@ fn a_restart_reads_the_author_back_from_the_command_and_built_pair() {
             rotation: 0,
         },
     ];
-    world.apply_logged(0, 7, &mine);
+    world
+        .apply_logged_at(7, mine.iter().map(|e| (0, e)))
+        .unwrap();
     assert_eq!(world.building(lot), Some((3, 0)));
     assert_eq!(world.authors[&lot].tick, 7);
     assert_eq!(world.authors[&lot].name, "mayor");
@@ -360,7 +363,7 @@ fn a_restart_reads_the_author_back_from_the_command_and_built_pair() {
                     .is_some_and(|(k, _)| k >= u16::from(BuildingKind::TREE_FIRST))
         })
         .unwrap();
-    let refused = vec![
+    let refused = [
         Event::Command {
             principal: principal_hash("viewer"),
             name: "viewer".into(),
@@ -373,25 +376,26 @@ fn a_restart_reads_the_author_back_from_the_command_and_built_pair() {
             rotation: 0,
         },
     ];
-    world.apply_logged(0, 8, &refused);
+    world
+        .apply_logged_at(8, refused.iter().map(|e| (0, e)))
+        .unwrap();
     assert!(!world.authors.contains_key(&other));
-    world.apply_logged(
-        0,
-        9,
-        &[
-            Event::Command {
-                principal: 1,
-                name: "x".into(),
-                id: 3,
-                result: RESULT_APPLIED,
-            },
-            Event::Demolished {
-                lot,
-                kind: 3,
-                rotation: 0,
-            },
-        ],
-    );
+    let gone = [
+        Event::Command {
+            principal: 1,
+            name: "x".into(),
+            id: 3,
+            result: RESULT_APPLIED,
+        },
+        Event::Demolished {
+            lot,
+            kind: 3,
+            rotation: 0,
+        },
+    ];
+    world
+        .apply_logged_at(9, gone.iter().map(|e| (0, e)))
+        .unwrap();
     assert!(!world.authors.contains_key(&lot));
 }
 
@@ -455,7 +459,7 @@ fn each_refusal_says_why_and_leaves_the_city_as_it_was() {
             },
             REFUSED_IN_USE,
         ),
-        (Command::PlaceRoad { a: 0, b: 1 }, REFUSED_UNSUPPORTED),
+        (Command::RemoveRoad { segment: 0 }, REFUSED_NOT_BUILT),
         (Command::Zone { lot: free, zone: 1 }, REFUSED_UNSUPPORTED),
         (
             Command::Speed {

@@ -1,9 +1,9 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { GO_UP_TEXT, cardText } from '../attribution';
-import { families, refusal } from '../build';
+import { canRemoveRoad, families, refusal, roadRefusal } from '../build';
 import { whyNot } from '../placement';
-import { BUILD_LABEL, DEMOLISH_LABEL, HINTS } from './build-bar';
+import { BUILD_LABEL, DEMOLISH_LABEL, HINTS, ROAD_LABEL, ROAD_SECOND } from './build-bar';
 import { HINT_TEXT } from './hint';
 import { SHORTCUTS } from './keys';
 import { archetypeLabel, doing, type Activity, type Archetype } from '../follow';
@@ -49,8 +49,13 @@ const words = [
   SHARE_NONE,
   BUILD_LABEL,
   DEMOLISH_LABEL,
+  ROAD_LABEL,
+  ROAD_SECOND,
   ...Object.values(HINTS),
-  ...[1, 2, 3, 4, 5, 7, 8, 9, 99].map(refusal),
+  ...[2, 20, 21, 22, 23].map((code) => roadRefusal(code)),
+  refusal(23, 'build'),
+  (canRemoveRoad({ city: { lots: [], development: [] }, built: new Map() }, null) as { why: string }).why,
+  ...[1, 2, 3, 4, 5, 7, 8, 9, 10, 20, 21, 22, 23, 24, 99].map((code) => refusal(code)),
   ...families().flatMap((f) => [f.title, ...f.choices.map((c) => c.label)]),
   whyNot({ link: null, atTip: () => true, wantsLive: true }) ?? '',
   ...GROUPS.map((g) => g.label),

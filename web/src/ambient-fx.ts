@@ -23,8 +23,10 @@ import {
   signalAt,
   smokeLevel,
   type Light,
+  type LotTile,
   type Placed,
   type Roads,
+  type RoadTile,
   TRUCK_KIND,
   type Round,
 } from './ambient';
@@ -177,7 +179,9 @@ interface Crossing {
 
 export class Ambient {
   private readonly seed: number;
-  private readonly roads: Roads;
+  private roads: Roads;
+  /** The lots as the vans' rounds see them, kept to plan the rounds again when the roads change. */
+  private readonly lotTiles: LotTile[];
   private readonly half: number;
   private readonly shops = new Map<number, Shop>();
   private readonly stacks = new Map<number, Stack>();
@@ -230,21 +234,19 @@ export class Ambient {
       return true;
     };
     const commercial = (zone: string) => zone === 'commercial' || zone === 'downtown';
-    this.roads = buildRoads(
-      city.roads,
-      city.lots.map((l) => {
-        const info = KINDS[l.kind];
-        const look = info ? lotLook(info.pack, info.model) : null;
-        const building = look === 'skyscraper' || look === 'commercial' || look === 'house' || look === 'factory';
-        return {
-          id: l.id,
-          x: l.x,
-          z: l.z,
-          building: building && l.id !== city.tower,
-          commercial: building && commercial(l.zone),
-        };
-      }),
-    );
+    this.lotTiles = city.lots.map((l) => {
+      const info = KINDS[l.kind];
+      const look = info ? lotLook(info.pack, info.model) : null;
+      const building = look === 'skyscraper' || look === 'commercial' || look === 'house' || look === 'factory';
+      return {
+        id: l.id,
+        x: l.x,
+        z: l.z,
+        building: building && l.id !== city.tower,
+        commercial: building && commercial(l.zone),
+      };
+    });
+    this.roads = buildRoads(city.roads, this.lotTiles);
     this.roads.x.forEach((_, i) => {
       if (city.roads[i]!.piece === 3)
         this.crossings.push({ node: i, x: this.roads.x[i]! - this.half, z: this.roads.z[i]! - this.half });
@@ -288,6 +290,15 @@ export class Ambient {
 
     this.buildPosts(post, own);
     this.setTier(settings);
+  }
+
+  /**
+   * The road tiles changed: a builder laid a road or took one away. The vans plan the day again on the new streets. The
+   * crossings keep their lights, since only the generated city has them.
+   */
+  setRoads(roads: readonly RoadTile[]): void {
+    this.roads = buildRoads(roads, this.lotTiles);
+    this.plan = null;
   }
 
   /** Change what is drawn, as the quality tier changes. */

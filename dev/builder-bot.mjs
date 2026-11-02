@@ -27,7 +27,7 @@
 // the old kind back and logs it as an `orphan` line. A demolish that gets no answer counts as applied, since the sim
 // may have applied it and the answer been lost.
 // SIGINT or SIGTERM stops after the command in flight and writes the end line; a second one exits at once, still
-// writing it. Exit 1 when a command got no result or nothing was built. Roads are not placed: the sim refuses them.
+// writing it. Exit 1 when a command got no result or nothing was built. It lays no roads; dev/check-commands.mjs does.
 import { execFileSync } from "node:child_process";
 import { createWriteStream, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";

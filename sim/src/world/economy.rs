@@ -24,6 +24,10 @@ const UPKEEP_PER_ROAD_TILE: u64 = 1;
 const UPKEEP_PER_PARK: u64 = 20;
 /// The price of a demolition.
 pub(crate) const DEMOLISH_COST: u64 = 100;
+/// The price of each tile of a new road.
+pub(crate) const ROAD_COST_PER_TILE: u64 = 100;
+/// The price of removing a road.
+pub(crate) const REMOVE_ROAD_COST: u64 = 100;
 
 /// A district's share of the opening funds. The odd units go to district 0.
 pub(crate) fn opening_share(districts: usize, district: usize) -> i64 {
@@ -53,7 +57,7 @@ fn is_business(kind: u16) -> bool {
 pub(super) fn upkeep_base(city: &City) -> Vec<u64> {
     let side = u32::from(city.districts_per_side);
     let mut base = vec![0u64; city.districts.len()];
-    for segment in &city.segments {
+    for segment in city.segments.iter().filter(|s| !s.removed) {
         let (x, z) = city.nodes[segment.a as usize];
         let column = (u32::from(x) / 12).min(side - 1);
         let row = (u32::from(z) / 12).min(side - 1);
@@ -99,8 +103,11 @@ impl World {
                     0
                 };
                 day[usize::from(lot.district)].0 += TAX_PER_BUSINESS + late;
-            } else if lot.zone == Zone::Park && kind >= u16::from(BuildingKind::TREE_FIRST) {
-                // Park land costs upkeep until something is built on it.
+            } else if lot.zone == Zone::Park
+                && kind >= u16::from(BuildingKind::TREE_FIRST)
+                && !self.city.is_road(lot.x, lot.z)
+            {
+                // Park land costs upkeep until something is built on it or a road covers it.
                 day[usize::from(lot.district)].1 += UPKEEP_PER_PARK;
             }
         }

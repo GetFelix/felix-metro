@@ -251,6 +251,27 @@ async fn collect<L: Log>(
                                 depart: *depart,
                                 vehicle: *vehicle,
                                 route: route.clone(),
+                                node: None,
+                            },
+                        );
+                    }
+                }
+                // A replanned trip is the one the vehicle is on from the tick of the event.
+                Event::Replan {
+                    resident,
+                    vehicle,
+                    node,
+                    route,
+                } if base.is_some_and(|base| tick <= base) => {
+                    let newer = departures.get(resident).is_none_or(|d| d.depart <= tick);
+                    if newer {
+                        departures.insert(
+                            *resident,
+                            Departure {
+                                depart: tick,
+                                vehicle: *vehicle,
+                                route: route.clone(),
+                                node: Some(*node),
                             },
                         );
                     }
@@ -397,11 +418,18 @@ impl History {
             return Ok(world);
         };
         for tick in self.base.map_or(0, |base| base + 1)..=level {
-            for (district, record) in self.ticks[&tick].iter().enumerate() {
-                if let Some(record) = record {
-                    world.apply_logged(district, tick, &record.events);
-                }
-            }
+            let events = self.ticks[&tick]
+                .iter()
+                .enumerate()
+                .flat_map(|(district, record)| {
+                    record
+                        .iter()
+                        .flat_map(|r| &r.events)
+                        .map(move |e| (district, e))
+                });
+            world
+                .apply_logged_tick(events)
+                .with_context(|| format!("replaying tick {tick}"))?;
             world.step();
         }
         Ok(world)

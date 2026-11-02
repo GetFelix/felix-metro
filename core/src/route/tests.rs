@@ -126,6 +126,8 @@ fn segment(class: SegmentClass) -> Segment {
         length: 4,
         speed: class.speed(),
         street: 0,
+        built: false,
+        removed: false,
     }
 }
 

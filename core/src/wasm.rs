@@ -57,10 +57,18 @@ pub fn principal_hash(principal: &str) -> String {
     format!("{:016x}", crate::record::principal_hash(principal))
 }
 
+/// How many cities with roads laid a [`Metro`] keeps, the generated one included.
+const LAID: usize = 4;
+
 /// A city and its residents, for turning `trip` events into positions.
 #[wasm_bindgen]
 pub struct Metro {
+    /// The city as generated, which the built roads are laid on again each time they change.
+    generated: crate::City,
     city: Rc<crate::City>,
+    /// The last few cities laid, by their road list. The live city and a moment on screen take turns with one
+    /// `Metro`, so going back to a list is a lookup rather than a new copy.
+    laid: Vec<(Vec<u32>, Rc<crate::City>)>,
     places: crate::Places,
     residents: HashMap<u32, Option<crate::Resident>>,
 }
@@ -72,8 +80,11 @@ impl Metro {
     pub fn new(seed: &str, districts_per_side: u16) -> Result<Metro, JsError> {
         let city = city(seed, districts_per_side)?;
         let places = crate::Places::new(&city);
+        let city = Rc::new(city);
         Ok(Metro {
-            city: Rc::new(city),
+            generated: (*city).clone(),
+            laid: vec![(Vec::new(), Rc::clone(&city))],
+            city,
             places,
             residents: HashMap::new(),
         })
@@ -97,6 +108,112 @@ impl Metro {
             })
             .as_ref()
             .map(|r| r.to_json(city))
+    }
+
+    /// Replaces the roads builders added with `roads`: four numbers for each, in
+    /// segment order: segment id, node a, node b, and 1 if it has been removed.
+    /// A trip already made keeps the city it was made in. Throws when the roads
+    /// do not fit the city.
+    #[wasm_bindgen(js_name = setRoads)]
+    pub fn set_roads(&mut self, roads: &[u32]) -> Result<(), JsError> {
+        if let Some((_, city)) = self.laid.iter().find(|(r, _)| r == roads) {
+            self.city = Rc::clone(city);
+            return Ok(());
+        }
+        let built: Vec<crate::BuiltRoad> = roads
+            .chunks_exact(4)
+            .map(|r| crate::BuiltRoad {
+                segment: r[0],
+                a: r[1],
+                b: r[2],
+                removed: r[3] != 0,
+            })
+            .collect();
+        let mut city = self.generated.clone();
+        city.restore_roads(&built)
+            .map_err(|e| JsError::new(&e.to_string()))?;
+        self.city = Rc::new(city);
+        if self.laid.len() == LAID {
+            self.laid.remove(1);
+        }
+        self.laid.push((roads.to_vec(), Rc::clone(&self.city)));
+        Ok(())
+    }
+
+    /// The road tiles as JSON rows in the order the generated city's `roadColumns` name.
+    #[wasm_bindgen(js_name = roadsJson)]
+    pub fn roads_json(&self) -> String {
+        self.city.roads_json()
+    }
+
+    /// Why a road between nodes `a` and `b` is refused on the land and roads alone:
+    /// 0 if it is not, else the `command` result the sim would record
+    /// (see [`crate::RoadError::refusal`]). Whether a resident uses a tile, or a
+    /// building stands on it, is for the caller to check.
+    #[wasm_bindgen(js_name = roadCheck)]
+    pub fn road_check(&self, a: u32, b: u32) -> u8 {
+        self.city.road_tiles(a, b).err().map_or(0, |e| e.refusal())
+    }
+
+    /// The tiles strictly between nodes `a` and `b` that a road would cover, as
+    /// x and z pairs, or nothing if no road may go there.
+    #[wasm_bindgen(js_name = roadTiles)]
+    pub fn road_tiles(&self, a: u32, b: u32) -> Vec<u32> {
+        self.city
+            .road_tiles(a, b)
+            .unwrap_or_default()
+            .into_iter()
+            .flat_map(|(x, z)| [u32::from(x), u32::from(z)])
+            .collect()
+    }
+
+    /// [`crate::City::hash`] of the city with the built roads laid, as 16 hex digits.
+    #[wasm_bindgen(js_name = cityHash)]
+    pub fn city_hash(&self) -> String {
+        format!("{:016x}", self.city.hash())
+    }
+
+    /// The trip a `replan` event describes: the vehicle moved to `node` at
+    /// `depart` and sent on `route`. `undefined` when the resident has no trip
+    /// that ends where the route does. The journey's `lots` leaves the first
+    /// lot as 4294967295, since it starts on the road.
+    pub fn replan(
+        &mut self,
+        resident: u32,
+        vehicle: u8,
+        depart: u32,
+        node: u32,
+        route: &[u32],
+    ) -> Option<Journey> {
+        let legs: Vec<_> = route
+            .chunks_exact(2)
+            .map(|p| crate::record::Leg {
+                segment: p[0],
+                speed: p[1] as u8,
+            })
+            .collect();
+        let (city, places) = (&self.city, &self.places);
+        let known = self.residents.entry(resident).or_insert_with(|| {
+            (resident < places.population())
+                .then(|| crate::Resident::new(city, places, resident))
+                .flatten()
+        });
+        let mode = if vehicle == 0 {
+            crate::Mode::Walk
+        } else {
+            crate::Mode::Drive
+        };
+        if node as usize >= city.nodes.len() {
+            return None;
+        }
+        let (trip, to_lot) = known
+            .as_ref()?
+            .replan_between(city, node, depart, &legs, mode)?;
+        Some(Journey {
+            city: Rc::clone(&self.city),
+            trip,
+            lots: [crate::NO_LOT, to_lot],
+        })
     }
 
     /// The trip a `trip` event describes, or `undefined` when the resident has
