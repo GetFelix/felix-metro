@@ -26,7 +26,8 @@ and play forward from there.
 > - A share button under the settings button copies a link to the moment and view on screen; `H` hides every control for
 >   a clean picture, and a page left alone for a minute turns slowly (see [Moments](#moments)).
 > - Click a car or walker to follow them: the camera tracks them and a card shows their name, what they are doing
->   and their day (see [Following a resident](#following-a-resident)).
+>   and their day, read from the log, a day at a time, with each trip and stay a click away from that moment
+>   (see [Following a resident](#following-a-resident)).
 > - Not built yet: the page's own building tools.
 >
 > The [style frame](prototype/style-frame.html) shows the look. The plan is in
@@ -113,7 +114,7 @@ shown with `?ui=0` or `?capture`. [docs/ui.md](docs/ui.md#sound) explains how it
 | 0   | The look, locked    | In progress: style frame, assets, daylight, post-processing, quality tiers, the UI shell (settings sheet, key list, first-visit hint, rolling clock), camera controls, instanced traffic and ambient life done                                                                |
 | 1   | A live city         | Done                                                                                                                                                                                                                                                                          |
 | 2   | Time travel         | In progress: keyframes, seeking, the timeline scrubber, rewind then follow, and backward playback with speeds built, smoothness not yet measured                                                                                                                              |
-| 3   | Follow a life       | In progress: click a car or walker to follow them, with a card for their day and a `?follow=` link; ambient sound built; markers for notable events are not built yet                                                                                                         |
+| 3   | Follow a life       | In progress: click a car or walker to follow them, with a card for their day read from the log and a `?follow=` link; ambient sound built; markers for notable events are not built yet                                                                                                         |
 | 4   | Build               | In progress: the sim applies build, demolish and speed commands and records who sent them, and the page animates a building going up (scaffold) or coming down (dust) over 8 ticks, backwards when you rewind; placement tools in the page, roads and zones are not built yet |
 | 5   | Branching timelines | Planned                                                                                                                                                                                                                                                                       |
 | 6   | Scale and failover  | In progress: a restarted sim resumes from its log; 20,000 residents, 16 districts and broker loss are open                                                                                                                                                                    |
@@ -190,7 +191,17 @@ walk, and a card under the city name shows who they are:
 
 - their name and kind: office worker, shift worker, shopkeeper, student, retiree or night worker;
 - what they are doing now, such as `Driving to work`, `Walking to the shops`, `At school` or `Asleep at home`;
-- their day, a list of where they spend it and when they leave each place. The block they are in is highlighted.
+- their day, read from the log: every trip they made and every place they stayed, with the times the sim wrote them.
+
+The day is not their schedule played back. It is what the sim did, so a trip that left late, or took longer in traffic,
+shows the time it actually did. A trip reads like `Drove to work` with `07:52 to 08:14` beside it, a stay like `At work` with `08:14 to
+16:58`, and a stay or trip that began before midnight starts the day with `until` and the time it ended. The row they
+are in at the moment on screen is highlighted. The arrows beside the day's name move to the day before or after (the
+first day the log still holds, and today, are the limits), and the day follows the moment on screen until you press
+one. Click a row to go to that moment: it is the same as dragging the timeline there. While the day is today, new trips
+and arrivals appear as the sim writes them.
+
+Reading a day takes the log's records for it from every district, and the card says so while it waits. A page with no log to read (no gateway) shows their usual day from the schedule instead, labelled so.
 
 When they go indoors the camera stays on their building, and the card says what they are doing there. Turning and
 zooming keep the follow. `Esc` (when no menu is open), the card's close button, or moving the view (right-drag, Shift-drag, two fingers,

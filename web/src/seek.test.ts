@@ -726,3 +726,69 @@ describe('seek', () => {
     });
   });
 });
+
+describe('scan', () => {
+  const collect = async (s: InstanceType<typeof Seeker>, from: number, to: number) => {
+    const seen: [number, number][] = [];
+    await s.scan(from, to, (r) => seen.push([r.district, r.tick]));
+    return seen;
+  };
+  const ofDistrict = (seen: [number, number][], d: number) => seen.filter(([x]) => x === d).map(([, t]) => t);
+
+  it('hands over every record of every district from the first tick up to, not including, the last', async () => {
+    const h = new FakeHistory(2, ticks(2000));
+    const seen = await collect(seeker(h), 300, 1100);
+    for (const d of [0, 1]) expect(ofDistrict(seen, d)).toEqual(Array.from({ length: 800 }, (_, i) => 300 + i));
+  });
+
+  it('ends at the newest tick when asked for more than there is', async () => {
+    const h = new FakeHistory(2, ticks(500));
+    const seen = await collect(seeker(h), 400, 5000);
+    expect(ofDistrict(seen, 1)).toEqual(Array.from({ length: 100 }, (_, i) => 400 + i));
+    expect(await collect(seeker(h), 700, 900)).toEqual([]);
+  });
+
+  it('starts at the oldest record left when retention has taken the start of the range', async () => {
+    const h = new FakeHistory(2, ticks(1000));
+    h.oldest = 300;
+    const seen = await collect(seeker(h), 100, 400);
+    expect(ofDistrict(seen, 0)).toEqual(Array.from({ length: 100 }, (_, i) => 300 + i));
+  });
+
+  it('keeps nothing it read, so a day of records does not push out what scrubbing has cached', async () => {
+    const h = new FakeHistory(2, ticks(2000));
+    const s = seeker(h);
+    await s.seek(700);
+    const cached = s['records'].map((m: Map<number, unknown>) => m.size);
+    await collect(s, 0, 2000);
+    // The few probes that find the ends of the range are cached like any; the thousands of records between are not.
+    s['records'].forEach((m: Map<number, unknown>, d: number) => expect(m.size - cached[d]!).toBeLessThan(8));
+    const reads = h.reads.length;
+    await s.seek(700);
+    expect(h.reads.length).toBe(reads);
+  });
+
+  it('reads again from what is left when retention moves up under it', async () => {
+    const h = new FakeHistory(2, ticks(1000));
+    const s = seeker(h);
+    await s.retained();
+    let moved = false;
+    h.onRead = (_shard, from, end) => {
+      if (!moved && end > from + 1) {
+        moved = true;
+        h.oldest = 200;
+      }
+    };
+    const seen = await collect(s, 100, 600);
+    expect(moved).toBe(true);
+    expect(ofDistrict(seen, 0).at(-1)).toBe(599);
+    expect(new Set(ofDistrict(seen, 1)).size).toBe(ofDistrict(seen, 1).length);
+  });
+
+  it('stops when the caller aborts', async () => {
+    const h = new FakeHistory(2, ticks(2000));
+    const stop = new AbortController();
+    stop.abort();
+    await expect(seeker(h).scan(0, 2000, () => {}, { signal: stop.signal })).rejects.toBeDefined();
+  });
+});

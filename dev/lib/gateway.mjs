@@ -91,9 +91,14 @@ export function decode(bytes) {
     const head = varint(bytes, at);
     const tag = head % 16;
     const length = Math.floor(head / 16);
+    const start = at.i;
     const body = new DataView(bytes.buffer, bytes.byteOffset + at.i, length);
     at.i += length;
-    if (tag === 7 || tag === 8) {
+    if (tag === 1 || tag === 2 || tag === 3 || tag === 13) {
+      // A resident's trip, change of route and arrival (alone, or with its activity as tag 13) all start with the resident.
+      const type = tag === 1 ? "trip" : tag === 2 ? "replan" : "arrived";
+      out.events.push({ type, resident: varint(bytes, { i: start }) });
+    } else if (tag === 7 || tag === 8) {
       out.events.push({ type: tag === 7 ? "built" : "demolished", lot: body.getUint32(0, true), kind: body.getUint16(4, true) });
     } else if (tag === 10) {
       const nameLength = body.getUint8(8);

@@ -34,8 +34,45 @@ interface SpeedEvent {
   type: 'speed';
   ticksPerSecond: number;
 }
-/** The events this page acts on; the rest of what a record carries is ignored. */
-export type TickEvent = TripEvent | BuildingEvent | RoadEvent | SpeedEvent | { type: 'other' };
+/** A resident changed their route on the way. */
+interface ReplanEvent {
+  type: 'replan';
+  resident: number;
+  fromSegment: number;
+  route: [number, number][];
+}
+/** A resident reached a building; their `activity` follows in the same tick. */
+interface ArrivedEvent {
+  type: 'arrived';
+  resident: number;
+  lot: number;
+}
+/** What a resident is doing inside, from the tick they arrive until `until`. */
+interface ActivityEvent {
+  type: 'activity';
+  resident: number;
+  kind: number;
+  until: number;
+}
+/** The events the city's state and a resident's day act on; the rest of what a record carries is ignored. */
+export type TickEvent =
+  | TripEvent
+  | ReplanEvent
+  | ArrivedEvent
+  | ActivityEvent
+  | BuildingEvent
+  | RoadEvent
+  | SpeedEvent
+  | { type: 'other' };
+
+/** A resident in a keyframe: indoors (`activity`, `lot`, `until`) or on the road (`vehicle`). */
+export interface KeyframeResident {
+  id: number;
+  activity?: number;
+  lot?: number;
+  until?: number;
+  vehicle?: number;
+}
 
 export interface TickRecord {
   kind: 'tick';
@@ -45,7 +82,11 @@ export interface TickRecord {
   speed: number;
   keyframeOffset: number;
   wallUs: number;
-  keyframe: { buildings: [number, number, number][]; roads?: [number, number][] } | null;
+  keyframe: {
+    buildings: [number, number, number][];
+    roads?: [number, number][];
+    residents?: KeyframeResident[];
+  } | null;
   events: TickEvent[];
 }
 
@@ -122,6 +163,8 @@ export class CityState {
   onVoyageEnd: ((voyage: Voyage) => void) | null = null;
   /** Told what became of every record handed to {@link apply}, for checking the order a district was followed in. */
   onRecord: ((district: number, tick: number, result: 'applied' | 'seen' | 'gap') => void) | null = null;
+  /** Told each record that was applied, for what reads the log's events rather than the city they build. */
+  onApplied: ((record: TickRecord) => void) | null = null;
 
   constructor(
     private readonly city: City,
@@ -150,6 +193,7 @@ export class CityState {
   apply(record: TickRecord, allowGap = false): 'applied' | 'seen' | 'gap' {
     const result = this.fold(record, allowGap);
     this.onRecord?.(record.district, record.tick, result);
+    if (result === 'applied') this.onApplied?.(record);
     return result;
   }
 
