@@ -48,9 +48,6 @@ export const dayOf = (tick: number): number => Math.floor(tick / TICKS_PER_DAY);
 
 type Fact = Extract<TickRecord['events'][number], { type: 'trip' | 'replan' | 'arrived' | 'activity' }>;
 
-const FACTS = new Set(['trip', 'replan', 'arrived', 'activity']);
-const isFact = (e: TickRecord['events'][number]): e is Fact => FACTS.has(e.type);
-
 interface Stored {
   epoch: number;
   tick: number;
@@ -60,11 +57,15 @@ interface Stored {
 
 /**
  * What the log says about one resident. Records are taken in any order and any number of times: a record is kept once
- * per district and tick, the newest epoch winning, so a day read from history and the same records arriving live make
- * one day.
+ * per district and tick, the newest epoch winning. A restarted sim's newer epoch starts again from an earlier tick, so
+ * it also supersedes every older-epoch record at or after its first tick, as a seek's search orders the log by epoch and
+ * then tick. A day read from history and the same records arriving live make one day.
  */
 export class DayLog {
-  private readonly stored = new Map<string, Stored>();
+  /** By district, then tick. */
+  private readonly stored: Map<number, Stored>[] = [];
+  /** The first tick seen of each epoch, in any district: where a newer epoch begins over an older one. */
+  private readonly starts = new Map<number, number>();
   /** Where the resident was at each keyframe tick: their entry in whichever district's keyframe lists them. */
   private readonly frames = new Map<number, { epoch: number; at: KeyframeResident }>();
 
@@ -72,23 +73,40 @@ export class DayLog {
 
   /** Take in a record; whether it told anything new about the resident. */
   add(record: TickRecord): boolean {
+    const { district, epoch, tick } = record;
+    const first = this.starts.get(epoch);
+    if (first === undefined || tick < first) this.starts.set(epoch, tick);
+    const mine = (this.stored[district] ??= new Map());
     let changed = false;
-    const key = `${record.district}:${record.tick}`;
-    const had = this.stored.get(key);
-    if (!had || record.epoch > had.epoch) {
-      const facts = record.events.filter((e): e is Fact => isFact(e) && e.resident === this.resident);
-      if (had || facts.length > 0) {
-        this.stored.set(key, { epoch: record.epoch, tick: record.tick, district: record.district, facts });
+    const had = mine.get(tick);
+    if (!had || epoch > had.epoch) {
+      let facts: Fact[] | null = null;
+      for (const e of record.events) {
+        if (
+          (e.type === 'trip' || e.type === 'replan' || e.type === 'arrived' || e.type === 'activity') &&
+          e.resident === this.resident
+        ) {
+          (facts ??= []).push(e);
+        }
+      }
+      if (had || facts) {
+        mine.set(tick, { epoch, tick, district, facts: facts ?? [] });
         changed = true;
       }
     }
     const at = record.keyframe?.residents?.find((r) => r.id === this.resident);
-    const frame = this.frames.get(record.tick);
-    if (at && (!frame || record.epoch > frame.epoch)) {
-      this.frames.set(record.tick, { epoch: record.epoch, at });
+    const frame = this.frames.get(tick);
+    if (at && (!frame || epoch > frame.epoch)) {
+      this.frames.set(tick, { epoch, at });
       changed = true;
     }
     return changed;
+  }
+
+  /** Whether a newer epoch has begun at or before `tick`, which makes the older one's record not the log's. */
+  private superseded(epoch: number, tick: number): boolean {
+    for (const [e, first] of this.starts) if (e > epoch && first <= tick) return true;
+    return false;
   }
 
   /**
@@ -96,8 +114,9 @@ export class DayLog {
    * the log has after `to` still closes an entry, so a trip that left before midnight shows its arrival.
    */
   entries(from: number, to: number): DayEntry[] {
-    const stored = [...this.stored.values()]
-      .filter((s) => s.tick >= from)
+    const stored = this.stored
+      .flatMap((byTick) => [...byTick.values()])
+      .filter((s) => s.tick >= from && !this.superseded(s.epoch, s.tick))
       .sort((a, b) => a.tick - b.tick || a.district - b.district);
     const out: DayEntry[] = [];
     let stay: StayEntry | null = null;
@@ -108,7 +127,8 @@ export class DayLog {
     const spoken = stored.some(
       (s) => s.tick === from && s.facts.some((f) => f.type === 'trip' || f.type === 'arrived'),
     );
-    const opening = this.frames.get(from)?.at;
+    const frame = this.frames.get(from);
+    const opening = frame && !this.superseded(frame.epoch, from) ? frame.at : null;
     if (opening && !spoken) {
       if (opening.activity !== undefined && opening.lot !== undefined) {
         stay = { kind: 'stay', tick: from, carried: true, lot: opening.lot, activity: opening.activity, left: null };
@@ -180,8 +200,11 @@ export interface DayRow {
   when: string;
 }
 
-/** The entries as the panel words them. `placeName` gives the name of a lot, where it has one. */
-export function rows(entries: readonly DayEntry[], placeName: (lot: number) => string | null): DayRow[] {
+/**
+ * The entries as the panel words them. `placeName` gives the name of a lot, where it has one. A trip with no arrival is
+ * under way only while the day is still going (`live`); in a day that is over the log simply has no arrival for it.
+ */
+export function rows(entries: readonly DayEntry[], placeName: (lot: number) => string | null, live = true): DayRow[] {
   return entries.map((e): DayRow => {
     if (e.kind === 'replan') {
       return {
@@ -205,7 +228,8 @@ export function rows(entries: readonly DayEntry[], placeName: (lot: number) => s
       };
     }
     const done = e.arrived !== null;
-    const verb = e.car ? (done ? 'Drove' : 'Driving') : done ? 'Walked' : 'Walking';
+    const past = done || !live;
+    const verb = e.car ? (past ? 'Drove' : 'Driving') : past ? 'Walked' : 'Walking';
     const to = activityWords(e.activity)?.to;
     return {
       kind: 'trip',
@@ -226,8 +250,9 @@ function span(carried: boolean, from: number, to: number | null): string {
 /** The row they are in at `tick`: the last stay or trip begun by then, or null before the first. */
 export function currentRow(list: readonly DayRow[], tick: number): number | null {
   let at: number | null = null;
-  list.forEach((r, i) => {
+  for (let i = 0; i < list.length; i++) {
+    const r = list[i]!;
     if (r.kind !== 'replan' && r.tick <= tick) at = i;
-  });
+  }
   return at;
 }

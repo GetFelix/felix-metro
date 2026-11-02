@@ -785,6 +785,21 @@ describe('scan', () => {
     expect(new Set(ofDistrict(seen, 1)).size).toBe(ofDistrict(seen, 1).length);
   });
 
+  it('stops the reads the other districts have waiting when one district fails', async () => {
+    const h = new FakeHistory(2, ticks(1000));
+    const s = seeker(h);
+    await s.retained();
+    // The probes that find the ends of the range answer; then district 0's range reads wait and district 1's fail.
+    h.onRead = (shard, from, end) => {
+      if (end <= from + 1) return;
+      if (shard === 1) throw new GatewayError('read_failed', 'boom');
+      h.gate = new Promise<void>(() => {});
+    };
+    await expect(s.scan(0, 1000, () => {})).rejects.toMatchObject({ code: 'read_failed' });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(h.aborted).toBeGreaterThan(0);
+  });
+
   it('stops when the caller aborts', async () => {
     const h = new FakeHistory(2, ticks(2000));
     const stop = new AbortController();

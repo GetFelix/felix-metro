@@ -193,15 +193,21 @@ walk, and a card under the city name shows who they are:
 - what they are doing now, such as `Driving to work`, `Walking to the shops`, `At school` or `Asleep at home`;
 - their day, read from the log: every trip they made and every place they stayed, with the times the sim wrote them.
 
-The day is not their schedule played back. It is what the sim did, so a trip that left late, or took longer in traffic,
-shows the time it actually did. A trip reads like `Drove to work` with `07:52 to 08:14` beside it, a stay like `At work` with `08:14 to
-16:58`, and a stay or trip that began before midnight starts the day with `until` and the time it ended. The row they
-are in at the moment on screen is highlighted. The arrows beside the day's name move to the day before or after (the
-first day the log still holds, and today, are the limits), and the day follows the moment on screen until you press
-one. Click a row to go to that moment: it is the same as dragging the timeline there. While the day is today, new trips
-and arrivals appear as the sim writes them.
+The day is not their schedule played back. It is what the sim did, so a trip that left late, or took longer in
+traffic, shows the time it actually did. A trip reads like `Drove to work`, with `07:52 to 08:14` beside it. A stay
+reads like `At work`, with `08:14 to 16:58`. A stay or trip that began before midnight starts the day with `until` and
+the time it ended. A trip the log has no arrival for yet reads `Driving` or `Walking` while the day is today, and
+`Drove` or `Walked` with no place in a day that is over.
 
-Reading a day takes the log's records for it from every district, and the card says so while it waits. A page with no log to read (no gateway) shows their usual day from the schedule instead, labelled so.
+The row they are in at the moment on screen is highlighted. The arrows beside the day's name move to the day before or
+after; the first day the log still holds and today are the limits. The day follows the moment on screen until you press
+an arrow, and follows it again once you page back to today. Click a row to go to that moment, the same as dragging the
+timeline there. While the day is today, new trips and arrivals appear as the sim writes them.
+
+Reading a day takes the log's records for it from every district, and the card says so while it waits. If the log no
+longer holds the day, the card says so; if the start of the day is gone but the rest is kept, it says that. If the read
+fails, the card says their day could not be read, and the arrows still work. A page with no log to read (no gateway)
+shows their usual day from the schedule instead, labelled so.
 
 When they go indoors the camera stays on their building, and the card says what they are doing there. Turning and
 zooming keep the follow. `Esc` (when no menu is open), the card's close button, or moving the view (right-drag, Shift-drag, two fingers,

@@ -87,6 +87,8 @@ export function createFollowCard(onStop: () => void, day: DayControls): FollowCa
     const row = (e.target as HTMLElement).closest<HTMLElement>('[data-row]');
     if (row) day.pick(Number(row.dataset.row));
   });
+  /** The rows on screen, as text, to tell whether a view changes them. */
+  let drawn = '';
   const planned = at('day');
   const log = at('log');
   /** The schedule is what the card lists until the log has been asked; with no log it stays. */
@@ -102,34 +104,53 @@ export function createFollowCard(onStop: () => void, day: DayControls): FollowCa
         showPlan(true);
         at('label').textContent = 'Their usual day';
         at('note').textContent = '';
+        drawn = '';
         return;
       }
       showPlan(false);
       at('label').textContent = view.label;
-      at('prev').toggleAttribute('disabled', !view.canPrev);
-      at('next').toggleAttribute('disabled', !view.canNext);
+      // aria-disabled, not disabled: a button that disables itself while it has focus drops focus to the page.
+      at('prev').setAttribute('aria-disabled', String(!view.canPrev));
+      at('next').setAttribute('aria-disabled', String(!view.canNext));
       at('note').textContent = view.note ?? '';
-      log.replaceChildren(
-        ...view.rows.map((row, i) => {
-          const li = document.createElement('li');
-          if (i === view.current) li.setAttribute('aria-current', 'true');
-          // What the CI checks read the list by.
-          li.dataset.kind = row.kind;
-          li.dataset.tick = String(row.tick);
-          if (row.carried) li.dataset.carried = '';
-          const button = document.createElement('button');
-          button.type = 'button';
-          button.dataset.row = String(i);
-          button.title = 'Go to this moment';
-          const what = document.createElement('span');
-          what.textContent = row.place ? `${row.text}, ${row.place}` : row.text;
-          const when = document.createElement('time');
-          when.textContent = row.when;
-          button.append(what, when);
-          li.append(button);
-          return li;
-        }),
-      );
+      // The rows are rebuilt only when they change, not when the row they are in moves, and a rebuild puts focus back
+      // on the same entry: a list redrawn under a key press would send the next Esc to the page.
+      const sig = JSON.stringify(view.rows);
+      if (sig !== drawn) {
+        drawn = sig;
+        const focused = log.contains(document.activeElement) ? (document.activeElement as HTMLElement) : null;
+        const keep = focused ? `${focused.closest('li')?.dataset.kind}:${focused.closest('li')?.dataset.tick}` : null;
+        log.replaceChildren(
+          ...view.rows.map((row, i) => {
+            const li = document.createElement('li');
+            // What the CI checks read the list by.
+            li.dataset.kind = row.kind;
+            li.dataset.tick = String(row.tick);
+            if (row.carried) li.dataset.carried = '';
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.dataset.row = String(i);
+            button.title = 'Go to this moment';
+            const what = document.createElement('span');
+            what.textContent = row.place ? `${row.text}, ${row.place}` : row.text;
+            const when = document.createElement('time');
+            when.textContent = row.when;
+            button.append(what, when);
+            li.append(button);
+            return li;
+          }),
+        );
+        if (keep) {
+          const same = [...log.children].find(
+            (li) => `${(li as HTMLElement).dataset.kind}:${(li as HTMLElement).dataset.tick}` === keep,
+          );
+          same?.querySelector('button')?.focus();
+        }
+      }
+      [...log.children].forEach((li, i) => {
+        if (i === view.current) li.setAttribute('aria-current', 'true');
+        else li.removeAttribute('aria-current');
+      });
     },
     show(view) {
       // Taking away a card that holds focus would drop it to the page; the city button is the nearest place to put it.

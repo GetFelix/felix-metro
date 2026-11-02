@@ -270,12 +270,21 @@ export class Seeker {
    * starts at its oldest record; a `to` past the newest tick ends at the newest.
    */
   async scan(from: number, to: number, visit: (record: TickRecord) => void, options: SeekOptions = {}): Promise<void> {
-    const signal = options.signal ?? new AbortController().signal;
-    await this.using(() =>
-      Promise.all(Array.from({ length: this.districts }, (_, d) => this.scanDistrict(d, from, to, visit, signal))).then(
-        () => {},
-      ),
-    );
+    await this.using(async () => {
+      // A district that fails stops the reads the others still have waiting.
+      const attempt = new AbortController();
+      const unlink = link(options.signal, attempt);
+      try {
+        await Promise.all(
+          Array.from({ length: this.districts }, (_, d) => this.scanDistrict(d, from, to, visit, attempt.signal)),
+        );
+      } catch (err) {
+        attempt.abort(err);
+        throw err;
+      } finally {
+        unlink();
+      }
+    });
   }
 
   private async scanDistrict(

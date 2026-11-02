@@ -89,7 +89,7 @@
   height: 28px;
   border-radius: var(--radius-m);
 }
-.follow .day-nav .icon-button[disabled] {
+.follow .day-nav .icon-button[aria-disabled='true'] {
   opacity: 0.35;
   pointer-events: none;
 }

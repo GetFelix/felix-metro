@@ -564,8 +564,10 @@ where they are from the state on screen at the tick on screen:
    uses) and takes the block the tick falls in: the camera goes to that lot, and the card says what they are doing
    there. Home between 22:00 and 06:00 shows as asleep, as the keyframe's counts have it. The page does not read the
    `arrived` and `activity` events for this. A trip that runs late still shows as a trip, so the schedule is only used
-   when none is under way. (The list of their day on the card is read from those events instead; see below.) The exception is a page that opened mid-trip: it does not know that trip (see above), so
+   when none is under way. The exception is a page that opened mid-trip: it does not know that trip (see above), so
    until the resident's next one it puts them at the block they are heading for.
+
+   The card's list of their day is separate: it is read from those events, as the next section describes.
 
 #### A resident's day from the log
 
@@ -582,7 +584,7 @@ districts the resident has no lot in. From those it makes entries:
 
 What was going on at midnight comes from that keyframe's entry for the resident: indoors (activity, lot) or on the road
 (vehicle). A trip or arrival in the keyframe's own tick speaks for itself, since the keyframe is the state after that
-tick's events. Records are kept once per district and tick with the newest epoch winning, so the same tick read from
+tick's events. Records are kept once per district and tick with the newest epoch winning, and a newer epoch also replaces every older-epoch record at or after the tick it began from (a restarted sim begins again from an earlier tick), so the same tick read from
 history and delivered live is one tick. A click on a row seeks the timeline to the entry's tick. While the day is the one
 the live city is in, records the live connection takes in are added as they arrive; the listener is registered before the
 history is read, for the same reason a subscriber is registered before history is read anywhere else.

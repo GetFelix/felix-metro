@@ -547,8 +547,14 @@ const followFrom = async (page, resident) => {
   await page.evaluate((v) => window.__day.show(v), view);
   check(!(await visible(page, `${card} [data-day]`)), 'a day from the log replaces the schedule');
   check((await page.locator(`${card} [data-label]`).textContent()) === 'Day 2, today', 'the card names the day');
-  check(await page.locator(`${card} [data-prev]`).isEnabled(), 'the day before can be chosen');
-  check(!(await page.locator(`${card} [data-next]`).isEnabled()), 'the day after today cannot');
+  check(
+    (await page.locator(`${card} [data-prev]`).getAttribute('aria-disabled')) === 'false',
+    'the day before can be chosen',
+  );
+  check(
+    (await page.locator(`${card} [data-next]`).getAttribute('aria-disabled')) === 'true',
+    'the day after today cannot',
+  );
   const rows = page.locator(`${card} [data-log] li`);
   check((await rows.count()) === 4, 'every entry is listed');
   check(
@@ -573,6 +579,23 @@ const followFrom = async (page, resident) => {
   check(
     JSON.stringify(await page.evaluate(() => window.__picked)) === '[3,1]',
     'a click or Enter on an entry chooses it',
+  );
+  // Focus stays where it is when the list is drawn again: as the row they are in moves, as a row is added, and when the
+  // arrow that has focus is no longer usable. Otherwise a key press would find focus on the page.
+  const focusedTick = () => page.evaluate(() => document.activeElement?.closest('li')?.dataset.tick ?? null);
+  await page.focus(`${card} [data-log] li:nth-child(2) button`);
+  await page.evaluate((v) => window.__day.show({ ...v, current: 3 }), view);
+  check((await focusedTick()) === '6900', 'focus stays on the entry when the one they are in moves');
+  await page.evaluate(
+    (v) => window.__day.show({ ...v, rows: [...v.rows, { ...v.rows[3], tick: 7200, text: 'Shopping' }], current: 3 }),
+    view,
+  );
+  check((await focusedTick()) === '6900', 'focus stays on the entry when a new one is added');
+  await page.focus(`${card} [data-prev]`);
+  await page.evaluate((v) => window.__day.show({ ...v, canPrev: false }), view);
+  check(
+    await page.evaluate(() => document.activeElement?.hasAttribute('data-prev')),
+    'focus stays on an arrow that stops being usable',
   );
   await page.evaluate(
     (v) =>

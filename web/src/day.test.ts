@@ -164,6 +164,33 @@ describe('a day built from the log by hand', () => {
     expect(l.entries(0, TICKS_PER_DAY)[0]).toMatchObject({ car: false });
   });
 
+  it('drops what an older epoch wrote at or after the tick a newer epoch began from', () => {
+    // Epoch 1 ran to tick 200 and arrived at 200. A restart begins epoch 2 at tick 120, goes out at 150 and is still out.
+    const old = [
+      tick(0, 100, [trip(100)], null, 1),
+      tick(0, 150, [trip(150, 0)], null, 1),
+      tick(1, 200, arrive(9, 1), null, 1),
+    ];
+    const fresh = [tick(0, 120, [], null, 2), tick(0, 150, [trip(150)], null, 2)];
+    for (const records of [
+      [...old, ...fresh],
+      [...fresh, ...old],
+      [...old.slice(0, 1), ...fresh, ...old.slice(1)],
+    ]) {
+      const entries = log(...records).entries(0, TICKS_PER_DAY);
+      expect(entries).toEqual([
+        { kind: 'trip', tick: 100, carried: false, car: true, arrived: null, lot: null, activity: null },
+        { kind: 'trip', tick: 150, carried: false, car: true, arrived: null, lot: null, activity: null },
+      ]);
+    }
+  });
+
+  it('words a trip with no arrival as under way only while the day is going', () => {
+    const l = log(tick(0, 100, [trip(100)]));
+    expect(rows(l.entries(0, TICKS_PER_DAY), () => null)[0]!.text).toBe('Driving');
+    expect(rows(l.entries(0, TICKS_PER_DAY), () => null, false)[0]!.text).toBe('Drove');
+  });
+
   it('says when a record added something and when it did not', () => {
     const l = new DayLog(7);
     expect(l.add(tick(0, 100, [{ type: 'speed', ticksPerSecond: 4 }]))).toBe(false);

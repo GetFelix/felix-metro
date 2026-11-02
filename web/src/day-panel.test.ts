@@ -50,7 +50,11 @@ const panelRows = (id: number, which: number, through = day.through) => {
   const log = new DayLog(id);
   for (const r of day.records) if (r.tick <= through) log.add(r);
   const from = which * TICKS_PER_DAY;
-  return rows(log.entries(from, from + TICKS_PER_DAY), (lot) => `lot ${lot}`);
+  return rows(
+    log.entries(from, from + TICKS_PER_DAY),
+    (lot) => `lot ${lot}`,
+    which === Math.floor(through / TICKS_PER_DAY),
+  );
 };
 
 beforeEach(() => vi.useFakeTimers());
@@ -115,14 +119,15 @@ describe('the day panel', () => {
   it('keeps the day the person chose while the tick on screen is somewhere else', async () => {
     const t = setup();
     t.panel.follow(resident!);
-    t.panel.frame(2000);
+    t.panel.frame(TICKS_PER_DAY + 10);
     await t.settled();
-    t.panel.step(1);
+    t.panel.step(-1);
     await t.settled();
-    t.panel.frame(2000);
+    expect(t.last().label).toBe('Day 1');
+    t.panel.frame(TICKS_PER_DAY + 10);
     vi.advanceTimersByTime(2000);
     await t.settled();
-    expect(t.last().label).toBe('Day 2, today');
+    expect(t.last().label).toBe('Day 1');
   });
 
   it('moves to the day the tick on screen is in, once it has stayed there', async () => {
@@ -165,6 +170,50 @@ describe('the day panel', () => {
     expect(t.last().rows).toHaveLength(rowsBefore + 1);
     expect(t.last().rows.at(-1)).toMatchObject({ kind: 'trip', tick: 1001, when: 'from 04:10' });
     expect(t.scans).toHaveLength(1);
+  });
+
+  it('goes back to following the screen once the person pages back to today', async () => {
+    const t = setup();
+    t.panel.follow(resident!);
+    t.panel.frame(2000);
+    await t.settled();
+    t.panel.step(1);
+    await t.settled();
+    t.panel.step(-1);
+    await t.settled();
+    t.panel.step(1);
+    await t.settled();
+    expect(t.last().label).toBe('Day 2, today');
+    // On today, so the screen's tick leads again: a moment in day 1 moves the panel there.
+    t.panel.frame(2000);
+    vi.advanceTimersByTime(1000);
+    await t.settled();
+    expect(t.last().label).toBe('Day 1');
+  });
+
+  it('does not draw a half read day when a live record lands just before the person pages to it', async () => {
+    const t = setup(1000);
+    t.panel.follow(resident!);
+    t.panel.frame(1000);
+    await t.settled();
+    const feed = [...t.listeners][0]!;
+    // In the first hour of day 2, which day 1's view also takes in.
+    feed({
+      kind: 'tick',
+      epoch: 1,
+      district: 0,
+      tick: TICKS_PER_DAY + 50,
+      speed: 4,
+      keyframeOffset: 0,
+      wallUs: 0,
+      keyframe: null,
+      events: [{ type: 'trip', resident, vehicle: 1, depart: TICKS_PER_DAY + 50, route: [[1, 100]] }],
+    } as unknown as TickRecord);
+    t.setTip(TICKS_PER_DAY + 100);
+    t.panel.step(1);
+    const shown = t.views.length;
+    vi.advanceTimersByTime(500);
+    expect(t.views.slice(shown).filter((v) => v!.status === 'loading' && v!.rows.length > 0)).toEqual([]);
   });
 
   it('says so when the page has no log, so the card can show the schedule', async () => {

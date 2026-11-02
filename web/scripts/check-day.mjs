@@ -127,7 +127,7 @@ await page.screenshot({ path: join(out, 'day.png') });
 // The arrows: nothing before the first day, and the day before once there is one.
 const prev = page.locator('#follow [data-prev]');
 if (day === 0) {
-  if (await prev.isEnabled()) await fail('the first day has a day before it');
+  if ((await prev.getAttribute('aria-disabled')) === 'false') await fail('the first day has a day before it');
 } else {
   await prev.click();
   await page.waitForFunction(

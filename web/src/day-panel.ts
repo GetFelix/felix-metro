@@ -109,7 +109,8 @@ export class DayPanel {
     if (this.day === null) return;
     const next = this.day + delta;
     if (next < this.oldestDay() || next > this.today()) return;
-    this.pinned = true;
+    // Back on today the screen's tick is the better guide again, as it was before any arrow was pressed.
+    this.pinned = next !== this.today();
     this.show(next);
   }
 
@@ -146,6 +147,8 @@ export class DayPanel {
   }
 
   private show(day: number): void {
+    if (this.paint) clearTimeout(this.paint);
+    this.paint = null;
     this.day = day;
     this.status = 'loading';
     this.list = [];
@@ -186,6 +189,8 @@ export class DayPanel {
     } catch (err) {
       if (!live() || stop.signal.aborted) return;
       this.status = (err as { reason?: string }).reason === 'unretained' ? 'unretained' : 'failed';
+      this.list = [];
+      this.current = null;
       console.warn('a resident’s day could not be read', err);
     }
     this.emit();
@@ -194,7 +199,7 @@ export class DayPanel {
   private rebuild(): void {
     if (!this.log || this.day === null) return;
     const from = this.day * TICKS_PER_DAY;
-    this.list = rows(this.log.entries(from, from + TICKS_PER_DAY), this.deps.placeName);
+    this.list = rows(this.log.entries(from, from + TICKS_PER_DAY), this.deps.placeName, this.day === this.today());
     this.current = currentRow(this.list, this.tick);
   }
 

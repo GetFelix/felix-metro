@@ -945,6 +945,9 @@ async function main() {
     seekTo = (tick) => {
       void (async () => {
         if (!range) await refreshRange();
+        if (!range) return note('The timeline is not available yet. Try again in a moment.');
+        // An entry from before the oldest moment the log keeps goes to that oldest moment, which the person should be told.
+        if (tick < range.oldest) note('That moment is no longer kept. Showing the oldest one.');
         go(tick, false);
       })();
     };

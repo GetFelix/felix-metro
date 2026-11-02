@@ -232,10 +232,18 @@ flowchart LR
 A day is read from its midnight keyframe, which says where the resident was when it began, up to an hour into the next
 day, so a trip that left just before midnight shows where it arrived. The records are scanned and thrown away except for
 the resident's own events, so a day of them does not push out what scrubbing has cached. `DayLog` keeps one record per
-district and tick, the newest epoch winning, so history and the live feed can overlap without repeating a row. The card
+district and tick, the newest epoch winning, and drops older-epoch records a restarted sim has written again, so history
+and the live feed can overlap without repeating a row. The card
 follows the day of the moment on screen once it has stayed there for a moment, and stops following it when the person
-presses an arrow. Without a log the panel reports `unavailable` and the card keeps listing the schedule, labelled as
-their usual day.
+presses an arrow, and goes back to following it when the person pages to today. The rows are redrawn only when they
+change, and focus stays on the same entry when they are, so a key press never finds focus on the page. The arrows use
+`aria-disabled` rather than `disabled` for the same reason.
+
+The card also says when something is wrong. If the log no longer holds the day, the list is empty and a line beneath
+says so; if only the start of the day is gone, the rest is listed with a line saying that; if the read fails, a line says
+their day could not be read, and the arrows still work. A click on an entry from before the oldest moment the log keeps
+shows a message and goes to that oldest moment. Without a log the panel reports `unavailable` and the card keeps listing
+the schedule, labelled as their usual day.
 
 To change what the card says, edit the phrases in `follow.ts` and `day.ts`; `copy.test.ts` checks them against the same rules as the
 rest of the overlay.
