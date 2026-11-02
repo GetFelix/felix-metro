@@ -526,7 +526,7 @@ export class Seeker {
    * one is building on its start, so retention passing it restarts the round.
    */
   private async read(d: number, from: number, end: number, strict: boolean, signal: AbortSignal): Promise<Page> {
-    for (let closed = 0; ;) {
+    for (let closed = 0; ; ) {
       const start = Math.max(from, this.oldest[d]!);
       if (strict && start > from) throw new Restart();
       try {
