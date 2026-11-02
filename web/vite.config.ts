@@ -55,6 +55,7 @@ export default defineConfig({
         main: fileURLToPath(new URL('index.html', import.meta.url)),
         models: fileURLToPath(new URL('models.html', import.meta.url)),
         construction: fileURLToPath(new URL('construction.html', import.meta.url)),
+        load: fileURLToPath(new URL('traffic-load.html', import.meta.url)),
       },
     },
   },

@@ -70,7 +70,7 @@ there. [docs/design.md](docs/design.md) has the details.
 
 | M   | Milestone           | State                                                                                                                                                                                                                                                                         |
 | --- | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 0   | The look, locked    | In progress: style frame, assets, daylight, post-processing, quality tiers, the UI shell (settings sheet, key list, first-visit hint, rolling clock) and camera controls done; instanced traffic open                                                                         |
+| 0   | The look, locked    | In progress: style frame, assets, daylight, post-processing, quality tiers, the UI shell (settings sheet, key list, first-visit hint, rolling clock), camera controls and instanced traffic done                                                                         |
 | 1   | A live city         | Done                                                                                                                                                                                                                                                                          |
 | 2   | Time travel         | In progress: keyframes, seeking, the timeline scrubber and rewind then follow done                                                                                                                                                                                            |
 | 3   | Follow a life       | Planned                                                                                                                                                                                                                                                                       |
@@ -81,7 +81,8 @@ there. [docs/design.md](docs/design.md) has the details.
 | 8   | A first chapter     | In progress: the sim resumes from its log after a restart (nothing built is lost, no tick repeated or missing, commands run once); money, factions, policy, goals and investigations are planned (see [docs/game.md](docs/game.md))                                                                                  |
 
 What runs today: the sim, which picks up where it left off after a restart, the dev stack and a browser page that shows a city live, with
-cars and walkers moving in time with the sim and the sun following the tick. The page
+cars and walkers moving in time with the sim and the sun following the tick. They are drawn as instances
+of their models, so draw calls do not grow with the number on the road ([how](docs/art.md#cars-and-walkers)). The page
 opens on a loading screen that fills in district by district, then drifts down onto the
 city. If the connection drops, a `Reconnecting…` pill shows, the city keeps moving, and
 the page reads what it missed from the log and carries on in order. If retention has
