@@ -2,6 +2,7 @@
 // ones `built` and `demolished` events and keyframes change; trips are handed on to whatever draws them.
 import { WINDOW, progress } from './construction';
 import type { CouncilEvent } from './council';
+import type { PolicyEvent } from './policy';
 import type { City } from './layout';
 
 /** A building kind that means the lot is empty. */
@@ -59,6 +60,14 @@ interface ActivityEvent {
   kind: number;
   until: number;
 }
+/** What became of a builder's command: `result` 0 is applied, anything else a refusal (core/src/record.rs). */
+export interface CommandEvent {
+  type: 'command';
+  principal: string;
+  name: string;
+  id: number;
+  result: number;
+}
 interface LedgerEvent {
   type: 'ledger';
   reason: number;
@@ -78,9 +87,11 @@ export type TickEvent =
   | BuildingEvent
   | RoadEvent
   | SpeedEvent
+  | CommandEvent
   | LedgerEvent
   | BalanceEvent
   | CouncilEvent
+  | PolicyEvent
   | { type: 'other' };
 
 /** A resident in a keyframe: indoors (`activity`, `lot`, `until`) or on the road (`vehicle`). */
@@ -184,6 +195,8 @@ export class CityState {
   private readonly shares: (number | null)[];
   /** Where the council's factions stand, from the newest `council` event, or `null` before one. */
   council: CouncilEvent | null = null;
+  /** The mayor's policies, from the newest `policy` event, or `null` before one. */
+  policy: PolicyEvent | null = null;
   /** Trips the log described that no record has said arrived, by resident. */
   readonly voyages = new Map<number, Voyage>();
   /** Voyages a resident's next trip replaced before they arrived; still drawn until they do. */
@@ -209,6 +222,8 @@ export class CityState {
   onLot: ((lot: number, building: Building | null) => void) | null = null;
   /** Told when a voyage is replaced or ends, just before its journey is freed. */
   onVoyageEnd: ((voyage: Voyage) => void) | null = null;
+  /** Told of every `command` event the records carry, to answer a command this page sent. Only the live state sets it. */
+  onCommand: ((event: CommandEvent) => void) | null = null;
   /** Told what became of every record handed to {@link apply}, for checking the order a district was followed in. */
   onRecord: ((district: number, tick: number, result: 'applied' | 'seen' | 'gap') => void) | null = null;
   /** Told each record that was applied, for what reads the log's events rather than the city they build. */
@@ -298,6 +313,8 @@ export class CityState {
         this.road(d, e.segment, e.change);
       } else if (e.type === 'speed') {
         this.speed = e.ticksPerSecond;
+      } else if (e.type === 'command') {
+        this.onCommand?.(e);
       } else if (e.type === 'ledger') {
         const share = this.shares[d];
         if (share !== null && share !== undefined) this.shares[d] = share + e.earned - e.spent;
@@ -305,6 +322,8 @@ export class CityState {
         this.shares[d] = e.amount;
       } else if (e.type === 'council') {
         this.council = e;
+      } else if (e.type === 'policy') {
+        this.policy = e;
       }
     }
     this.prune(d);

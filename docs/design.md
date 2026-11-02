@@ -172,20 +172,21 @@ guess.
 A car's position every tick would cost around 4 MB/s for 10,000 cars. The sim
 writes decisions instead, and the client works out positions:
 
-| Event                  | Fields                                                                               | Meaning                                             |
-| ---------------------- | ------------------------------------------------------------------------------------ | --------------------------------------------------- |
-| `trip`                 | resident, vehicle kind, depart tick, route (segment ids with a speed each)           | Leaves now along this route                         |
-| `replan`               | resident, from segment, new route                                                    | A jam or a closed road changed the route            |
-| `arrived`              | resident, lot                                                                        | Reached a building                                  |
-| `activity`             | resident, kind (sleep, work, shop, ...), until tick                                  | What they are doing inside                          |
-| `left` / `entered`     | resident, other district; `entered` adds the vehicle state with the route left       | Crossed into another district                       |
-| `built` / `demolished` | lot, building kind, rotation                                                         | A building changed                                  |
-| `road`                 | segment, change (closed, opened, added, removed)                                     | A road changed                                      |
-| `command`              | principal hash, builder name, command id, result                                     | A builder's command was applied or refused          |
-| `speed`                | ticks per second                                                                     | The city's speed changed; 0 is paused               |
-| `ledger`               | reason (day, build, demolish), earned, spent                                         | Money moved in or out of the city's funds           |
-| `balance`              | amount                                                                               | A district's share of the funds, each keyframe tick |
-| `council`              | days scored, patience, each faction's demand, measure, satisfaction and unhappy days | How the council's factions feel, each keyframe tick |
+| Event                  | Fields                                                                               | Meaning                                                  |
+| ---------------------- | ------------------------------------------------------------------------------------ | -------------------------------------------------------- |
+| `trip`                 | resident, vehicle kind, depart tick, route (segment ids with a speed each)           | Leaves now along this route                              |
+| `replan`               | resident, from segment, new route                                                    | A jam or a closed road changed the route                 |
+| `arrived`              | resident, lot                                                                        | Reached a building                                       |
+| `activity`             | resident, kind (sleep, work, shop, ...), until tick                                  | What they are doing inside                               |
+| `left` / `entered`     | resident, other district; `entered` adds the vehicle state with the route left       | Crossed into another district                            |
+| `built` / `demolished` | lot, building kind, rotation                                                         | A building changed                                       |
+| `road`                 | segment, change (closed, opened, added, removed)                                     | A road changed                                           |
+| `command`              | principal hash, builder name, command id, result                                     | A builder's command was applied or refused               |
+| `speed`                | ticks per second                                                                     | The city's speed changed; 0 is paused                    |
+| `ledger`               | reason (day, build, demolish), earned, spent                                         | Money moved in or out of the city's funds                |
+| `balance`              | amount                                                                               | A district's share of the funds, each keyframe tick      |
+| `council`              | days scored, patience, each faction's demand, measure, satisfaction and unhappy days | How the council's factions feel, each keyframe tick      |
+| `policy`               | for each policy, its value and the tick it last changed                              | The mayor's policies, on a change and each keyframe tick |
 
 A route is its segment ids from the road graph and one speed byte per segment,
 a percentage of the segment class's speed. A trip of 12 segments is under 40
@@ -278,6 +279,7 @@ fields.
 | 1    | `ledger`  | reason `u8` (0 day, 1 build, 2 demolish), earned varint, spent varint                                                                                                                                     |
 | 2    | `balance` | amount, a zigzag varint (may be negative)                                                                                                                                                                 |
 | 4    | `council` | days varint, patience `u8`, then for each of three factions demand varint, measure varint, satisfaction `u8`, unhappy days `u8`; then the open day's commutes varint, commute ticks varint, visits varint |
+| 5    | `policy`  | for each of shop hours, avenue limit and street limit: value `u8`, then the tick of its last change plus one as a varint (0 if it never changed)                                                          |
 
 A reader skips an extended kind it does not know.
 
@@ -446,6 +448,41 @@ scored it says so instead of drawing empty bars.
 Cost to the log: one `council` event of about 30 bytes per keyframe tick, which is a city hour. `report_load` on the
 harbor city moves the day mean from 656.7 to 657.1 B/s.
 
+### Policy
+
+The mayor sets three policies with a `policy` command (kind and value). Each does one thing the log can show, and each
+can change once a city day.
+
+| Policy           | Values                              | What it does                                                                                                                 |
+| ---------------- | ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| Shop hours (0)   | 0 to 3 hours later than usual       | Shopkeepers leave work that much later, so the evening rush spreads. Each shop pays 6 more business tax a day for each hour. |
+| Avenue limit (1) | 30 to 100 percent of the road speed | No car drives an avenue faster than that. A jam can still make it slower.                                                    |
+| Street limit (2) | 30 to 100 percent of the road speed | The same for streets.                                                                                                        |
+
+Everyone's trips are planned and driven at the limited speed, so a lower limit lengthens commutes. The council's commuters
+notice that on the next scored day, which is what makes the limits a trade.
+
+- **Refusals.** A value outside the range is refused as malformed (result 1). The same value as now is refused with result
+  12 and starts no cooldown. A policy that changed less than a city day ago (5,760 ticks) is refused with result 11.
+  The cooldown is per policy, so changing one does not hold the others. A refusal changes nothing.
+- **The event.** A `policy` command that applies records the new settings in a `policy` event in district 0, and every
+  keyframe tick carries the same event once any policy has changed (a city that never changed one writes none). It holds each value and the tick of its last change, so the cooldown survives a
+  restart. The page reads the newest one.
+- **Restart.** The restart takes the policies from the newest keyframe tick, then applies any `policy` event after
+  it before stepping. A log from before policies starts with the usual hours and no limits.
+- **In the schedule.** Shop hours move only the leave tick of a shopkeeper's workday (`Resident::leave_tick`), so the
+  schedules themselves, which come from the seed, are not rewritten. A shopkeeper kept late waits at work; a restart
+  that finds one there recomputes the wait from the policy, not from when the keyframe was taken, so lowering the hours
+  while they wait sends them home on the same tick with or without a restart.
+- **On the road.** The limit caps the speed percent that routing and driving use for a segment of that class
+  (`Congestion::with_limits`). Walking is unaffected, and the search heuristic stays valid because a limit can only
+  slow a road.
+
+The page lists the policies under the factions in the same folded panel, each with its value and the time it can change
+again from.
+
+Cost to the log: nothing until a policy is first changed, then one `policy` event of a few bytes per keyframe tick (one per hour of city time).
+
 ### Commands and the registry
 
 A command record is the kind byte, a command id `u32`, the builder's display
@@ -507,7 +544,7 @@ for every other command.
 | Result | Meaning                                                                                |
 | ------ | -------------------------------------------------------------------------------------- |
 | 0      | applied                                                                                |
-| 1      | not a command record                                                                   |
+| 1      | not a command record, or a value out of range                                          |
 | 2      | lot or node does not exist                                                             |
 | 3      | `build` on a lot that has a building                                                   |
 | 4      | `demolish` on a lot with nothing on it                                                 |
@@ -516,6 +553,9 @@ for every other command.
 | 7      | not carried out yet: `place road`, `zone` and `fork`                                   |
 | 8      | the lot is one residents go to                                                         |
 | 9      | sent while the city was paused with more commands waiting than it holds; send it again |
+| 10     | `build` or `demolish` the funds cannot pay for                                         |
+| 11     | `policy` for a policy that changed less than a city day ago                            |
+| 12     | `policy` that sets the value the policy already has                                    |
 
 Lots residents go to (homes, workplaces, parks) cannot be built over or demolished,
 because the schedules that send people there do not change.
@@ -535,6 +575,7 @@ fit 64 bytes too, so a fork too deep to name is refused the same way.
 | 4   | demolish   | lot `u32`                            |
 | 5   | speed      | ticks per second `u8`                |
 | 6   | fork       | tick `u32`, name                     |
+| 7   | policy     | kind `u8`, value `u8`                |
 
 A registry record is the kind byte, a tag and fields: `1` created (name, seed,
 districts `u16`, `wall_us` `u64`) or `2` forked (name, parent, tick `u32`,
@@ -803,6 +844,49 @@ page starts from is drawn finished.
 
 Building is only allowed at the live tip. A builder who scrubs back sees the
 past read-only, and building there means forking.
+
+### The page's building tools
+
+The page sends `build` and `demolish`; it does not send `place road` or `zone` yet. A tool is picked from the
+overlay (`web/src/ui/build-bar.ts`), the lot under the pointer is found by `web/src/placement-view.ts`, and
+`web/src/placement.ts` decides whether the command may go and sends it. [The overlay page](ui.md#the-building-tools)
+describes the pieces; this is what they rely on.
+
+- **Only at the live tip.** The tools are off unless the page is showing the live city. That means no earlier moment
+  and no scrub in flight, a live connection, and a session that may publish. A sign-in without the right still joins
+  the city: the gateway lists the command stream among the `missing` resources of its `hello`, and the page reads
+  the tools' state from that. Going back in time puts a held tool away.
+- **The sim's own rules, ahead of the sim.** The page offers bare lots of the development area to `build` and the
+  buildings on them to `demolish`, and turns away anything else with a reason in words, without sending. The sim
+  refuses more than that (a home, a workplace and a park that residents go to), but it can only know which lots those
+  are by running every resident's schedule, which the page does not. The development area is exactly the lots none of
+  them use, so the page's rules are never looser than the sim's. A refusal that gets past anyway comes back as a result
+  code (`web/src/build.ts` has the sentence for each).
+- **Sent as a record, answered by an event.** The record is the one in the table above, published to the gateway's
+  `commands` alias with `ack`. The acknowledgement says Felix has the record, not that the sim applied it. The answer is
+  the `command` event the live state hands out as it takes records, matched on the command id, which the page draws at
+  random (the event's principal is a hash of the sign-in's subject, which the page does not know). Until the event
+  arrives the lot is held, so a second click does not send a second command. After 20 seconds with no event
+  the page says so and frees the lot; the command may still go through.
+- **The ghost is the page's.** It is drawn from the tool's building, rotation and lot and is never part of the city's state: a
+  building appears only when the `built` event arrives, and then rises in its scaffold like anyone's.
+  A building faces its street until the builder turns it (`R`), because a lot's `facing` is the way its door opens.
+
+#### What roads and zones need
+
+Neither is a small step from here, which is why they are a separate change:
+
+- **Roads.** `place road` names two nodes, and a road changes the graph every route is built from. The sim must add the
+  segment to its graph, replan any resident whose route could now be shorter (and any whose route crossed a segment that
+  went), and record it with the `road` event, which the format has, and the keyframe's road list, which `CityState`
+  already reads. The page also routes from its own copy of the generated city: core's `Metro` matches a `trip` event's legs
+  against the resident's route in that copy, so a leg on an added segment resolves to nothing and the trip is dropped.
+  The copy has to learn the changed graph, from `CityState.roads`, before a road can carry a trip. The tool also needs
+  a way to pick two nodes and a ghost for a segment.
+- **Zones.** `zone` carries a lot and a zone number, but no record has a field for a lot's zone, so there is nothing
+  for a `zoned` change to be written to or a keyframe to list. The zone also decides which lots count as homes, shops,
+  offices and factories when residents' days are made, so the sim must say what a new zone does to the lots already
+  built on it and to the schedules that send people there.
 
 ## Branching
 

@@ -31,6 +31,8 @@ export function createPicker(current: string, defaultSize: number): Picker {
   });
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && !list.classList.contains('hidden')) {
+      // Esc closes one thing at a time: the building tools see it was taken.
+      e.preventDefault();
       open(false);
       button.focus();
     }

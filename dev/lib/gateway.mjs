@@ -25,6 +25,9 @@ export const RESULT_NAMES = {
   7: "unsupported",
   8: "in-use",
   9: "busy",
+  10: "no-funds",
+  11: "cooldown",
+  12: "unchanged",
 };
 
 export const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -132,6 +135,8 @@ export const demolish = (lot) => {
   b.writeUInt32LE(lot, 1);
   return b;
 };
+/** A `policy` command: `kind` 0 shop hours, 1 avenue limit, 2 street limit. */
+export const policy = (kind, value) => Buffer.from([7, kind, value]);
 export const placeRoad = (a, z) => {
   const b = Buffer.alloc(9);
   b[0] = 1;

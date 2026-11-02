@@ -50,6 +50,11 @@
   padding: 0;
   list-style: none;
 }
+.council ul + ul {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
 .council li + li {
   margin-top: 8px;
 }
