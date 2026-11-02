@@ -2,6 +2,7 @@
 // forward run or a rewind would reach it. All routes must draw the same picture, which scripts/check-construction.mjs
 // compares with a reference render.
 //   ?mode=build|demolish  ?tick=104  ?via=forward|seek|back  ?tier=low
+// `?churn` instead swaps the lot's building back and forth faster than its models load and reports what is left drawn.
 import * as THREE from 'three';
 import init, { generate } from './core/felix_metro_core.js';
 import { CityState, NO_BUILDING, type TickEvent, type TickRecord, type Trips } from './city';
@@ -15,6 +16,7 @@ declare global {
   interface Window {
     __ready?: boolean;
     __construction?: { active: number; rising: number; falling: number };
+    __churn?: { before: number; after: number; trackedBefore: number; tracked: number; swaps: number };
   }
 }
 
@@ -88,6 +90,26 @@ async function main() {
   const renderer = createRenderer(tier);
   const initial = new Map([[lot.id, demolish ? building : { kind: NO_BUILDING, rotation: 0 }]]);
   const { scene, construction, lots, glows, setTime, setLot } = await createCity(renderer, tier, city, false, initial);
+  if (params.has('churn')) {
+    // Each swap takes down what stood and draws the other building. Left to finish, only the last is on screen.
+    const kinds = [building, { kind: NO_BUILDING, rotation: 0 }];
+    await setLot(lot.id, kinds[0]!);
+    const before = scene.children.length;
+    const trackedBefore = lots.objects(lot.id).length;
+    const swaps = 101;
+    const done = [];
+    for (let i = 0; i < swaps; i++) done.push(setLot(lot.id, kinds[i % 2]!));
+    await Promise.all(done);
+    window.__churn = {
+      before,
+      after: scene.children.length,
+      trackedBefore,
+      tracked: lots.objects(lot.id).length,
+      swaps,
+    };
+    window.__ready = true;
+    return;
+  }
   let state = stateAt(tick, via === 'back' ? 'forward' : via);
   if (via === 'back') state = stateAt(tick + 6, 'forward');
   // The lot as the state has it; a lot not yet built, or already gone, has nothing standing.
