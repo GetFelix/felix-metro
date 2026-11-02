@@ -302,9 +302,14 @@ for (const [size, tag] of [
   // The opening drift ends on its own; wait it out, then see whether the camera holds.
   await settle(page, 2500);
   const first = await azimuth();
-  await settle(page, 1500);
-  const second = await azimuth();
-  check(second !== first, `the camera turns after the quiet (${first} to ${second})`);
+  // The camera moves on a frame, and a software-rendered frame takes seconds on a busy runner, so wait for the turn.
+  const turned = await page
+    .waitForFunction((was) => window.__camera.state().azimuth !== was, first, { polling: 100, timeout: 120_000 })
+    .then(
+      () => true,
+      () => false,
+    );
+  check(turned, `the camera turns after the quiet (from ${first})`);
   await page.mouse.move(400, 300);
   await settle(page, 400);
   const held = await azimuth();
