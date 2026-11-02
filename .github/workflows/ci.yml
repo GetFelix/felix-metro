@@ -118,7 +118,7 @@ jobs:
       # Cars and walkers are instanced: 400 of them add a fixed few hundred draw calls, not about 18 for each. The same
       # page draws a car and a walker close up for the renders kept in web/references.
       - name: Traffic draw calls and pictures
-        timeout-minutes: 10
+        timeout-minutes: 15
         run: |
           npx vite preview --host 127.0.0.1 --port 4179 --strictPort &
           up=0

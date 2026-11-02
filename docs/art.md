@@ -305,9 +305,10 @@ cd web && npm run build && npx vite preview --port 4173
 # then open http://127.0.0.1:4173/traffic-load.html?run=1&districts=4&tier=medium&n=5400
 ```
 
-The frame rate is capped by the display's refresh rate. A 16 district city with no movers at all was 17,108 draw calls
-and 9.3 million triangles at medium on SwiftShader (the same page at 2 by 2 is 4,274 calls), so what is left to cut at
-scale is the static city, which is placed one model at a time, and not the cars and walkers, whose cost is flat.
+The frame rate is capped by the display's refresh rate. A 16 district city at medium, with 160 movers, was 17,108 draw
+calls and 9.3 million triangles on SwiftShader. A 2 by 2 city with no movers was 4,274 calls (the table below, from an
+earlier build, has 4,240), and 160 movers add about 150. What is left to cut at scale is the static city, which is
+placed one model at a time, and not the cars and walkers, whose cost is flat.
 
 The numbers below are in headless Chromium on SwiftShader, which draws with the CPU, at 1280 by 720, on an Apple M4 Max
 shared with other jobs. Draw calls are exact. "Submit" is the median ms over 20 frames the page spent in its own code

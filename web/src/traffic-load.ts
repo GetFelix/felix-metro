@@ -94,7 +94,7 @@ function run(
     renderer.info.reset();
     step();
     post.render(target);
-    if (now - shown >= 500 && ring.length > 10) {
+    if (now - shown >= 500 && ring.length > 4) {
       shown = now;
       const sorted = [...ring].sort((a, b) => a - b);
       const mid = sorted[sorted.length >> 1]!;
@@ -103,7 +103,7 @@ function run(
       out.textContent =
         `${(1000 / mid).toFixed(0)} fps  ${mid.toFixed(1)} ms median  ${p95.toFixed(1)} ms p95\n` +
         `${calls} draws  ${triangles} tris\n` +
-        `${traffic.drawn} of ${asked} movers drawn  ${districts * districts} districts  tier ${tier}`;
+        `${traffic.drawn} of ${asked} movers placed  ${districts * districts} districts  tier ${tier}`;
     }
     requestAnimationFrame(frame);
   };
