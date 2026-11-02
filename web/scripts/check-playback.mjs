@@ -130,7 +130,7 @@ for (let attempt = 1; attempt <= ATTEMPTS && compared < MIN_COMPARED; attempt++)
   // software renderer at a few frames a second can take longer than that to draw the first frame after the join.
   await page
     .waitForFunction(joinRecorded, FRAMES_AFTER_JOIN, { polling: 100, timeout: MINUTE })
-    .catch(() => fail('no frame was drawn after the page joined the live city'));
+    .catch(() => fail('the frames around the join were not drawn after the page joined the live city'));
 
   const done = await page.evaluate(() => ({
     ...window.__metro.playback(),
