@@ -39,6 +39,7 @@ import { createSoundscape } from './soundscape';
 import { intoThePast, startsRewind, whooshDue } from './soundscape-mix';
 import { createStatus, type Status } from './ui/status';
 import { note, toast } from './ui/toast';
+import { councilView, fitCouncil, renderCouncil, TALL_SCREEN, type CouncilEvent } from './council';
 import { money } from './money';
 import { displayName } from './registry';
 import { Traffic } from './traffic';
@@ -543,6 +544,8 @@ async function main() {
   const fundsChip = document.getElementById('funds-chip')!;
   const fundsText = document.getElementById('funds')!;
   let fundsShown: number | null = null;
+  const councilChip = document.getElementById('council-chip')!;
+  let councilShown: CouncilEvent | null = null;
   let liveInfo: NonNullable<Window['__live']> | null = null;
   if (state && traffic) {
     liveInfo = {
@@ -1302,6 +1305,16 @@ async function main() {
           fundsChip.classList.toggle('short', funds !== null && funds < 0);
           if (funds !== null) fundsText.textContent = money(funds);
         }
+        if (state.council !== councilShown) {
+          councilShown = state.council;
+          councilChip.classList.toggle('hidden', councilShown === null);
+          if (councilShown)
+            renderCouncil(
+              councilChip,
+              councilView(councilShown, city?.shore ?? null),
+              window.innerHeight >= TALL_SCREEN,
+            );
+        }
         timelineFrame?.(tick);
         Object.assign(liveInfo, {
           tick,
@@ -1487,6 +1500,7 @@ async function main() {
     camera.aspect = innerWidth / innerHeight;
     camera.updateProjectionMatrix();
     post!.resize();
+    fitCouncil(councilChip, innerHeight >= TALL_SCREEN);
   });
 }
 

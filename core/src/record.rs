@@ -79,6 +79,16 @@ pub const LEDGER_BUILD: u8 = 1;
 /// The price of a `demolish` that was applied.
 pub const LEDGER_DEMOLISH: u8 = 2;
 
+/// Factions of the council, in the order a `council` event lists them.
+/// The people who drive or walk to work or school.
+pub const FACTION_COMMUTERS: usize = 0;
+/// The people who live in the shore districts, or everywhere in a city with no shore.
+pub const FACTION_RESIDENTS: usize = 1;
+/// The shops.
+pub const FACTION_BUSINESS: usize = 2;
+/// How many factions there are.
+pub const FACTIONS: usize = 3;
+
 /// Why a record could not be read.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DecodeError {
@@ -277,6 +287,44 @@ pub enum Event {
     Balance {
         amount: i64,
     },
+    /// Where the council's factions stand, written by district 0 on every
+    /// keyframe tick. `days` is how many city days have been scored; until the
+    /// first one is, the standings are not real. `tally` is the open day's
+    /// running totals, which a sim that restarts continues from.
+    Council {
+        days: u32,
+        /// Days a faction can stay unhappy before the council recalls the mayor.
+        patience: u8,
+        standings: [Standing; FACTIONS],
+        tally: Tally,
+    },
+}
+
+/// One faction's standing after the last scored day. The units of `demand`
+/// and `measure` are the faction's own: commuters in ticks of average commute,
+/// residents in percent of them living away from factories, business in shop visits
+/// a day per shop.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Standing {
+    /// What the faction asks for.
+    pub demand: u32,
+    /// What the last scored day gave it.
+    pub measure: u32,
+    /// 0 to 100, from `measure` against `demand`.
+    pub satisfaction: u8,
+    /// Scored days in a row with `satisfaction` below the unhappy threshold.
+    pub unhappy_days: u8,
+}
+
+/// What a city day has added up so far toward its score.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Tally {
+    /// Trips to work or school that have arrived.
+    pub commutes: u32,
+    /// The ticks those trips took, added up.
+    pub commute_ticks: u64,
+    /// Arrivals at a shop.
+    pub visits: u32,
 }
 
 /// A district's state at one tick, drawable with nothing before it.
