@@ -123,6 +123,17 @@ fn pieces(city: &City) -> Vec<u32> {
         .collect()
 }
 
+/// A `trip` event's route matched to one of a resident's blocks.
+struct Matched {
+    /// Ticks the trip left after the block was due to.
+    gap: u32,
+    trip: Trip,
+    block: usize,
+    day: u32,
+    from_lot: u32,
+    to_lot: u32,
+}
+
 #[derive(Clone, Debug)]
 pub struct Resident {
     pub id: u32,
@@ -263,8 +274,27 @@ impl Resident {
         legs: &[Leg],
         mode: Mode,
     ) -> Option<(Trip, u32, u32)> {
+        let found = self.match_route(city, depart, legs, mode)?;
+        Some((found.trip, found.from_lot, found.to_lot))
+    }
+
+    /// Like [`Resident::trip_from_route`], with the schedule block the trip
+    /// leaves and the day that block's leave tick is on: what a sim that
+    /// restarts needs to carry on from a trip already under way.
+    pub fn trip_in_progress(
+        &self,
+        city: &City,
+        depart: u32,
+        legs: &[Leg],
+        mode: Mode,
+    ) -> Option<(Trip, usize, u32)> {
+        let found = self.match_route(city, depart, legs, mode)?;
+        Some((found.trip, found.block, found.day))
+    }
+
+    fn match_route(&self, city: &City, depart: u32, legs: &[Leg], mode: Mode) -> Option<Matched> {
         let blocks = &self.schedule.blocks;
-        let day = depart / TICKS_PER_DAY;
+        let today = depart / TICKS_PER_DAY;
         (0..blocks.len())
             .filter_map(|block| {
                 let (from_lot, to_lot) =
@@ -272,15 +302,21 @@ impl Resident {
                 let from = city.lots[from_lot as usize].door()?;
                 let to = city.lots[to_lot as usize].door()?;
                 let trip = Trip::from_route(city, from, to, depart, legs, mode)?;
-                let due = [day.saturating_sub(1), day]
-                    .map(|d| self.schedule.leave_tick(block, d))
+                let due = [today.saturating_sub(1), today]
                     .into_iter()
-                    .filter(|&t| t <= depart)
+                    .map(|d| (self.schedule.leave_tick(block, d), d))
+                    .filter(|&(t, _)| t <= depart)
                     .max();
-                Some((depart - due.unwrap_or(0), (trip, from_lot, to_lot)))
+                Some(Matched {
+                    gap: depart - due.map_or(0, |(t, _)| t),
+                    trip,
+                    block,
+                    day: due.map_or(today, |(_, d)| d),
+                    from_lot,
+                    to_lot,
+                })
             })
-            .min_by_key(|(gap, _)| *gap)
-            .map(|(_, found)| found)
+            .min_by_key(|m| m.gap)
     }
 
     /// Every trip of day `day`, in order. A trip leaves at its scheduled tick,

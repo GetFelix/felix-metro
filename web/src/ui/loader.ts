@@ -1,5 +1,5 @@
 // The loading screen: a grid of district blocks that fill in as each district catches up, and one line of text.
-import { displayName } from './registry';
+import { displayName } from '../registry';
 
 export interface Loader {
   /** Fill the block of a district. */

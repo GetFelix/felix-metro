@@ -2,27 +2,71 @@
 
 ## [Unreleased]
 
+### The sim
+
+- A restarted sim carries on from its log instead of starting the city over. It rebuilds the world from the newest
+  keyframe and the records after it, and runs from the next tick at the speed the city was left at: nothing built is lost,
+  no tick is repeated or missing, and a tick that only some districts had committed is finished. The command stream is
+  followed from where the sim stopped reading (a new `command_cursor` event, recorded on keyframe ticks and on ticks that
+  applied commands), so a command sent while the sim was down runs when it comes back and none runs twice. A new city now
+  reads its command stream from the start. The epoch in the tick header stays the same across a restart.
+
 ### Changed
 
 - Built on Felix 0.6.2: the sim's `felix-client` and `felix-wire` pins, the dev stack and CI images.
+- The overlay's styles moved from `web/index.html` into `web/src/ui/*.css`, and the picker, loading screen and frame-time
+  display into `web/src/ui/`. `docs/ui.md` describes the kit, the motion rules and the wording rules.
 
 ### The page
 
-- Backward playback and speeds. From an earlier moment, `L` plays forward and each press doubles the speed to 8x, `J`
-  rewinds the same way, and `K` stops; Space still plays and pauses. Forward runs from 0.5x to 8x, backward from 1x to
-  8x, and the status line names any speed but plain 1x. A rewind refolds the city from the hour's keyframe to each
-  tick it passes, reads the hour before ahead, and stops with a note at the oldest moment the log holds. The seeker reads
-  the hours on either side of the one on screen while the page is idle and now caches three hours of records per
-  district instead of two. `J` on the live city steps back 15 minutes and rewinds from there.
+- A settings sheet, opened from the button under the clock. Quality is Automatic, High, Medium or Low; Automatic
+  forgets a saved tier and judges frame times again from High (`Quality.setAutomatic()`).
+- A key list, opened with `?` or from the settings sheet. It is data (`SHORTCUTS` in `web/src/ui/keys.ts`), so a new key
+  adds a row, and it is ignored while typing in a text field.
+- A tip on a first visit, "Drag the timeline to go back in time", shown once the timeline is on screen and gone on the first
+  interaction. It is never shown with `?ui=0` or `?capture`.
+- The clock's digits roll when they change, and hold still with `prefers-reduced-motion`.
+- On a phone, the past row (Play, how long ago, Back to live) moves under the Felix Metro chip instead of covering it.
+- The hour slider shows a focus ring when it is reached with the keyboard.
+- The clock moves under the Felix Metro chip on a phone while the pill says Reconnecting, since the two overlapped at 360px.
+- Space plays or pauses an earlier moment from the timeline too, and does nothing while the settings sheet is open.
+- Brand tints in the overlay's CSS are tokens in `kit.css` (`--coral-wash`, `--amber-wash`, `--violet-glow`, `--cyan-glow`).
+- Short messages, such as "That moment is no longer kept.", now sit above the timeline in the page's glass style.
+- Camera controls. Left-drag turns and tilts, right-drag or Shift-drag slides, the wheel and a pinch zoom toward the
+  point under the pointer, one finger turns and two fingers slide on a touch screen, and `W` `A` `S` `D`, `Q` `E`,
+  `+` `-` and `0` do the same from the keyboard (`0` goes back to the opening view). The point the camera looks at
+  cannot leave the city, at any zoom, on a 2 by 2 or a 4 by 4 map. Moves are damped and the camera never bounces.
+  The camera is one object with `moveTo`, `state` and `setState` for the features that move it, and a move the app
+  makes jumps for a person who asked for reduced motion. `web/src/camera.ts` replaces Three.js's `OrbitControls`,
+  with the maths in `web/src/camera-math.ts`.
 - Timeline: a drag no longer seeks to a moment retention has just dropped. The drag keeps the bar it began on, so a move
   at the left end could land before the oldest tick the city still holds; it now stops at the oldest one held.
 - Scrubbing hard no longer leaves buildings behind. A lot whose building changed twice in quick succession (the
   second before the first was drawn) was drawn twice, and only the older drawing was tracked, so the other stayed in
   the scene for good. A burst of 101 swaps on one lot left 100 stray objects; the construction check now runs that
   burst and wants none.
+- The city list no longer depends on `harbor`. A page opened at a city the gateway refuses read the list through a
+  hardcoded `harbor`, so the picker was empty whenever that city was missing or closed to the person. It now joins
+  `lobby`, which `dev/seed.mjs` creates for this and nothing else. A stack started before this change has no lobby, so
+  its picker is empty for a refused city until it is restarted with `dev/up.sh`. The dev-stack check opens `/#nowhere` and wants the cities listed.
+- Backward playback and speeds. From an earlier moment, `L` plays forward and each press doubles the speed to 8x, `J`
+  rewinds the same way, and `K` stops; Space still plays and pauses. Forward runs from 0.5x to 8x, backward from 1x to
+  8x, and the status line names any speed but plain 1x. A rewind refolds the city from the hour's keyframe to each
+  tick it passes, reads the hour before ahead, and stops with a note at the oldest moment the log holds. The seeker reads
+  the hours on either side of the one on screen while the page is idle and now caches three hours of records per
+  district instead of two. `J` on the live city steps back 15 minutes and rewinds from there.
 
 ### Tools
 
+- `web/scripts/check-ui.mjs` drives the overlay with the keyboard and takes day and night screenshots at 1280 and 360
+  pixels wide. CI runs it as its own job, `overlay controls`.
+- The builder bot with `--rebuild` handles a demolish that gets no answer. The sim may have applied it, so the bot
+  goes on to the build. If that is refused it builds the old kind back and logs an `orphan` line (`restored: null` if
+  the restore gets no answer either).
+- An `orphan` line written because the bot exited mid-turn now says `restored: null` (unknown) instead of `false`, and
+  `dev/check-builder-bot.mjs` fails on `null` as well as `false`.
+- `dev/lib/turn.mjs` holds a lot's turn, so `node --test dev/lib/turn.test.mjs` (run in CI) can test it with a
+  stand-in for the sim.
 - `clip-local.mjs` points the builder bot at the moved gateway port, and runs its stack as its own compose project so
   its cleanup cannot remove a felix-metro stack started by hand.
 

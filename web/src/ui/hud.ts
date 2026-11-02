@@ -1,5 +1,5 @@
 import type * as THREE from 'three';
-import type { Quality } from './quality';
+import type { Quality } from '../quality';
 
 const FRAMES = 120;
 const REFRESH_MS = 500;

@@ -8,6 +8,12 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  # A new push to a PR cancels its older run. Each main commit keeps its own
+  # group so back-to-back merges all finish.
+  group: ci-${{ github.ref }}${{ github.ref == 'refs/heads/main' && format('-{0}', github.sha) || '' }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 jobs:
   web:
     runs-on: ubuntu-latest
@@ -32,6 +38,8 @@ jobs:
       - run: npm run format:check
       - run: npm run typecheck
       - run: npm test
+      # The builder bot's turn on a lot, with a stand-in for the sim.
+      - run: node --test ../dev/lib/turn.test.mjs
       - run: npm run build
       # Serve it with `python3 -m http.server` from the download.
       - uses: actions/upload-artifact@v4
@@ -117,6 +125,44 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: frames
+          path: web/frames
+
+  # A job of its own: it opens many fresh pages, and sharing the style frame job's time limit left it too little.
+  overlay:
+    name: overlay controls
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen@0.2.129
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npm run core
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      # The settings sheet, key list, first-visit tip and rolling clock, with the keyboard, plus screenshots for review.
+      - name: Overlay controls
+        run: |
+          npx vite preview --host 127.0.0.1 --port 4179 --strictPort &
+          up=0
+          for _ in $(seq 1 30); do curl -sf "http://127.0.0.1:4179/" >/dev/null && up=1 && break; sleep 1; done
+          [[ $up -eq 1 ]] || { echo "nothing is serving on port 4179" >&2; exit 1; }
+          node scripts/check-ui.mjs http://127.0.0.1:4179/ frames/ui
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: overlay-frames
           path: web/frames
 
   rust-fmt:
@@ -206,6 +252,17 @@ jobs:
         run: |
           node dev/builder-bot.mjs pinecrest --interval 1 --count 12 --demolish-after 1 --json bot-log.ndjson
           node dev/check-builder-bot.mjs bot-log.ndjson --min 10
+      # The sim is stopped, a demolish is sent while it is down, and it starts again over the broker's log. Every
+      # district's ticks run on from where they stood with none repeated or missing, the demolish runs once, and the
+      # keyframes after the restart still list the builds. The page checks below then run against the restarted sim.
+      - name: A restarted sim carries on from its log
+        timeout-minutes: 10
+        run: |
+          node dev/check-restart.mjs before pinecrest
+          docker compose -f dev/compose.yml stop sim
+          node dev/check-restart.mjs offline pinecrest
+          docker compose -f dev/compose.yml start sim
+          node dev/check-restart.mjs after pinecrest
       # The page at /#harbor signs in as `viewer`, follows the city through the gateway and draws it: the tick on
       # screen advances, cars are drawn and move, and the sun follows the tick. The sim runs at 4x so the commute and
       # the evening arrive in minutes. Screenshots of a day moment, dusk and a street are in the artifact.

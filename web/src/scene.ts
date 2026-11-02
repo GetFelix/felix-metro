@@ -15,6 +15,7 @@ const TREE_FIRST = 38; // kinds from here are trees and plaza props: no building
 import { NO_BUILDING, type Building } from './city';
 import type { Fleet } from './traffic';
 import { ConstructionFx, type LotAccess } from './construction-fx';
+import { showClock } from './ui/clock';
 
 // Seeded so the frame is identical on every load.
 let seed = 7;
@@ -723,7 +724,7 @@ export async function createCity(
     signMat.emissiveIntensity = d.signEmissive;
     const hh = Math.floor(hour) % 24,
       mm = Math.floor((hour % 1) * 60);
-    document.getElementById('clock')!.textContent = `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+    showClock(`${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`);
     document.getElementById('track')!.style.setProperty('--p', `${(hour / 24) * 100}%`);
   }
 

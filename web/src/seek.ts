@@ -1,5 +1,5 @@
 // Time travel: finding the city at any retained tick. Each district's log is ordered by (epoch, tick), usually one
-// record a tick but not always: a restarted sim takes the next epoch and a retried tick can land twice. The record for
+// record a tick but not always: a log can hold a newer epoch and a retried tick can land twice. The record for
 // a tick is found by reads that correct an estimate, its header names the keyframe it folds from, and the records from
 // that keyframe to the tick are read in ranges and folded in order.
 import type { CityState, TickRecord } from './city';
