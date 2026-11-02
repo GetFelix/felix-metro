@@ -39,28 +39,61 @@ const pages = [];
 const fail = async (message) => {
   console.error(message);
   for (const [i, page] of pages.entries())
-    await page.screenshot({ path: join(out, `failure-${i}.png`) }).catch(() => {});
+    await page.screenshot({ path: join(out, `failure-${i}.png`), timeout: 5000 }).catch(() => {});
   await browser.close();
   process.exit(1);
 };
 
-/** A page signed in as `who`, once its city is drawn and the live connection has caught up. */
+/**
+ * A page signed in as `who`, once its city is drawn and the live connection has caught up. A page that does not get
+ * there in READY_MS is thrown away and opened again, in case its renderer is stuck; a page that is really broken fails
+ * every try, and the failure says what the page was doing.
+ */
+const READY_MS = 150_000;
+const OPEN_TRIES = 3;
 async function open(name, who, options = {}) {
-  const context = await browser.newContext({ viewport: { width: 1280, height: 720 }, ...options });
-  await context.addInitScript((t) => sessionStorage.setItem('metro.token', t), who);
-  const page = await context.newPage();
-  page.label = name;
-  page.on('pageerror', (e) => problems.push(`${name}: page error: ${e}`));
-  page.on('console', (m) => m.type() === 'error' && console.log(`${name} console: ${m.text()}`));
-  pages.push(page);
-  await page.goto(appUrl, { waitUntil: 'load', timeout: 5 * MINUTE });
-  await page
-    .waitForFunction(() => window.__ready === true && window.__build && Number.isFinite(window.__live?.tick), null, {
-      polling: 250,
-      timeout: 5 * MINUTE,
-    })
-    .catch(() => fail(`${name}: the city was never drawn`));
-  return { context, page };
+  for (let attempt = 1; ; attempt++) {
+    const context = await browser.newContext({ viewport: { width: 1280, height: 720 }, ...options });
+    await context.addInitScript((t) => sessionStorage.setItem('metro.token', t), who);
+    const page = await context.newPage();
+    page.label = name;
+    page.crashed = false;
+    page.on('crash', () => (page.crashed = true));
+    page.on('pageerror', (e) => problems.push(`${name}: page error: ${e}`));
+    page.on('console', (m) => m.type() === 'error' && console.log(`${name} console: ${m.text()}`));
+    const started = Date.now();
+    const ready = await page
+      .goto(appUrl, { waitUntil: 'load', timeout: READY_MS })
+      .then(() =>
+        page.waitForFunction(
+          () => window.__ready === true && window.__build && Number.isFinite(window.__live?.tick),
+          null,
+          { polling: 250, timeout: READY_MS },
+        ),
+      )
+      .then(
+        () => true,
+        () => false,
+      );
+    if (ready) {
+      console.log(`opened ${name} in ${Date.now() - started} ms${attempt > 1 ? ` (try ${attempt})` : ''}`);
+      pages.push(page);
+      return { context, page };
+    }
+    // Say what the page was doing, without waiting on a page whose main thread may be stuck.
+    const seen = await Promise.race([
+      page.evaluate(() => ({ ready: window.__ready, build: !!window.__build, tick: window.__live?.tick })),
+      new Promise((resolve) => setTimeout(resolve, 5000, 'no answer from the page')),
+    ]).catch((e) => String(e));
+    console.log(
+      `${name}: not drawn after ${READY_MS / 1000} s (try ${attempt}): crashed=${page.crashed} ${JSON.stringify(seen)}`,
+    );
+    if (attempt === OPEN_TRIES) {
+      pages.push(page);
+      await fail(`${name}: the city was never drawn`);
+    }
+    await context.close().catch(() => {});
+  }
 }
 
 const state = (page) => page.evaluate(() => window.__build.state());
@@ -140,8 +173,11 @@ async function answer(page, before) {
 }
 
 // 2. Two builders. Pick two bare lots in the development area from what A sees.
-const a = await open('A (mayor, mouse)', mayor);
-const b = await open('B (architect, touch)', architect, { hasTouch: true });
+// Opened together: a page that is already drawing starves one still loading (50 s against 10 s on a quiet machine).
+const [a, b] = await Promise.all([
+  open('A (mayor, mouse)', mayor),
+  open('B (architect, touch)', architect, { hasTouch: true }),
+]);
 for (const { page } of [a, b]) {
   await until(page, () => window.__build.state().unavailable === null, null, 'the builder was never allowed');
 }
