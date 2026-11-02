@@ -29,6 +29,8 @@ export interface Params {
   at: number | null;
   /** Look from this view instead of the opening one (`?cam=x,z,distance,azimuth,polar`), as a shared link says. */
   cam: View | null;
+  /** Follow this resident (`?follow=<resident number>`), as a shared link says, or null for none. */
+  follow: number | null;
   /** Seconds with no input before the camera starts turning on its own; zero for never. */
   attract: number;
   /** Keep a trace of every record taken, in `window.__trace`, for the CI checks. */
@@ -41,7 +43,8 @@ export interface Params {
 // ?layout=frame draws the style frame's city instead of the generated one, ?districts=3 sets the districts per side
 // (2 by default) and the hash picks the seed (/#harbor).
 // ?at=1234 shows the city at tick 1234 and stays there, and ?cam=x,z,distance,azimuth,polar looks from a saved view: together
-// they are the link that Share this moment copies. ?attract=30 turns the camera after 30 s untouched (60 by default, 0 never).
+// they are the link that Share this moment copies, with ?follow=412 added when a resident is being followed.
+// ?attract=30 turns the camera after 30 s untouched (60 by default, 0 never).
 // ?trace keeps what became of every record in `window.__trace`. ?capture (with ?trace) hands the render clock to the clip script.
 // ?t=18.5 freezes the clock at that hour, ?still freezes motion, ?tier=low|medium|high forces a tier, ?ui=0 hides the
 // overlay, ?hud shows frame statistics, ?slow=40 adds 40 ms to every frame.
@@ -62,6 +65,7 @@ export function parseParams(search: string, hash = ''): Params {
     gateway: params.get('gateway'),
     at: tickParam(params.get('at')),
     cam: parseCamera(params.get('cam')),
+    follow: residentParam(params.get('follow')),
     attract: attractParam(params.get('attract')),
     trace: params.has('trace'),
     capture: params.has('trace') && params.has('capture'),
@@ -71,6 +75,10 @@ export function parseParams(search: string, hash = ''): Params {
 function tickParam(value: string | null): number | null {
   const tick = value === null || value === '' ? NaN : Number(value);
   return Number.isInteger(tick) && tick >= 0 ? tick : null;
+}
+
+function residentParam(value: string | null): number | null {
+  return value !== null && /^\d{1,9}$/.test(value) ? Number(value) : null;
 }
 
 function attractParam(value: string | null): number {

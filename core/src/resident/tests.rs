@@ -336,3 +336,28 @@ fn a_trip_names_the_lots_it_starts_and_ends_at() {
     }
     assert!(checked > 100);
 }
+
+#[test]
+fn the_card_json_names_the_resident_and_lists_the_day() {
+    let city = City::generate("harbor", 2).unwrap();
+    let places = Places::new(&city);
+    let r = Resident::new(&city, &places, 3).unwrap();
+    let json = r.to_json(&city);
+    assert!(json.starts_with(&format!(
+        "{{\"id\":3,\"name\":\"{}\",\"archetype\":\"{}\",",
+        r.name(&city),
+        r.archetype.name()
+    )));
+    assert_eq!(
+        json.matches("\"activity\"").count(),
+        r.schedule.blocks.len()
+    );
+    for b in &r.schedule.blocks {
+        assert!(json.contains(&format!(
+            "{{\"activity\":\"{}\",\"lot\":{},\"leave\":{}}}",
+            b.activity.name(),
+            b.lot,
+            b.leave
+        )));
+    }
+}

@@ -1,7 +1,8 @@
 // Opens the live city and seeks it to earlier ticks through the page's own seek: every district's folded tick is the tick
 // asked for, the city it folds to matches the live page's, and it is found and folded within a second. Then it opens the
 // same ticks cold with ?at= and logs how long that takes. Usage: node scripts/check-seek.mjs <page url> <out dir> where the
-// page url has no hash. The sim should have run for a while so there is something earlier to go to.
+// page url has no hash. The sim should have run for a while so there is something earlier to go to. A resident followed
+// across those seeks stays followed.
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { chromium } from 'playwright';
@@ -101,6 +102,62 @@ for (const t of targets) {
     misses.push(`finding and folding tick ${t} took a median ${warm.toFixed(0)} ms, over ${BUDGET_MS} ms`);
   if (r.ms > DRAW_HANG_MS) misses.push(`drawing tick ${t} took ${r.ms.toFixed(0)} ms, over ${DRAW_HANG_MS} ms`);
   await page.screenshot({ path: join(out, `at-${t}.png`) });
+}
+
+// A follow is by resident number, so it holds across seeks: each frame asks the state on screen for the resident, which a
+// seek replaces. Follow someone on the road in one seeked state, then look at a tick when they are indoors and at the first
+// tick again: the camera is on them each time and the card keeps saying what they are doing.
+{
+  const here = (resident) =>
+    page.evaluate((r) => {
+      const w = window.__live.where().find((x) => x.resident === r);
+      const c = window.__camera.state();
+      return {
+        w: w ? { x: w.x, z: w.z } : null,
+        c: { x: c.x, z: c.z },
+        doing: document.querySelector('#follow [data-doing]')?.textContent ?? '',
+        shown: !document.getElementById('follow').hidden,
+        who: window.__following.resident(),
+      };
+    }, resident);
+  let mover = null;
+  let at = null;
+  for (const t of targets) {
+    await page.evaluate((tick) => window.__metro.seek(tick), t);
+    mover = await page.evaluate(() => window.__live.where()[0]?.resident ?? null);
+    if (mover !== null) {
+      at = t;
+      break;
+    }
+  }
+  if (mover === null) {
+    console.warn('nobody was on the road at any tick tried; the follow check across seeks is skipped');
+  } else {
+    await page.evaluate((r) => window.__following.start(r), mover);
+    // The camera glides to them on a spring, so it is given a moment.
+    await page.waitForTimeout(1500);
+    const onRoad = await here(mover);
+    if (!onRoad.shown || onRoad.who !== mover)
+      await fail(`following resident ${mover} did not show the card at tick ${at}`);
+    if (!onRoad.w || Math.hypot(onRoad.c.x - onRoad.w.x, onRoad.c.z - onRoad.w.z) > 0.5)
+      await fail(`the camera is not on resident ${mover} at tick ${at}: ${JSON.stringify(onRoad)}`);
+    if (!/^(Driving|Walking) to /.test(onRoad.doing))
+      await fail(`the card says "${onRoad.doing}" for a resident on the road`);
+    for (const t of [7, Math.floor(newest / 2), at]) {
+      await page.evaluate((tick) => window.__metro.seek(tick), t);
+      await page.waitForTimeout(1500);
+      const now = await here(mover);
+      if (!now.shown || now.who !== mover || now.doing === '')
+        await fail(`the follow of resident ${mover} did not survive a seek to tick ${t}: ${JSON.stringify(now)}`);
+      if (!Number.isFinite(now.c.x) || !Number.isFinite(now.c.z))
+        await fail(`the camera lost resident ${mover} at tick ${t}`);
+      if (now.w && Math.hypot(now.c.x - now.w.x, now.c.z - now.w.z) > 0.5)
+        await fail(`the camera is not on resident ${mover} at tick ${t}: ${JSON.stringify(now)}`);
+      console.log(`  following resident ${mover} at tick ${t}: "${now.doing}"`);
+    }
+    await page.screenshot({ path: join(out, 'follow-seek.png') });
+    await page.evaluate(() => window.__following.stop());
+  }
 }
 
 // The same ticks opened cold, a page apiece: not under the budget, which is for a page already loaded.

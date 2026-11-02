@@ -553,6 +553,37 @@ leg start and end, and places the car by `position_at`. A trip that matches no
 route is counted, not drawn. Trips already under way when a page opens are
 not drawn until their resident's next trip.
 
+### Following a resident
+
+Click a car or walker and the camera follows that resident; a card shows their name, kind, what they are doing and
+their day. The page knows the resident by number and nothing else: not the district they are in, which is only where
+a record was written, and not the instance slot they are drawn in, which changes every frame. Each frame it works out
+where they are from the state on screen at the tick on screen:
+
+1. `CityState::voyageAt(resident, tick)` finds the trip they are on at that tick, from whichever district's record told
+   of it. A trip that crosses into another district is still the same resident's trip.
+2. On a trip, `Traffic::positionOf` places them at the tick. It does not read what was drawn: the fleet leaves out
+   what the camera cannot see and the quality tier caps how many movers it draws, and neither may move the camera. The
+   followed resident is also exempt from the cap, so they are always drawn.
+3. With no trip, they are indoors. The page reads their day from `core` (`Metro::profile`, the same schedule the sim
+   uses) and takes the block the tick falls in: the camera goes to that lot, and the card says what they are doing
+   there. Home between 22:00 and 06:00 shows as asleep, as the keyframe's counts have it. The page does not read the
+   `arrived` and `activity` events for this. A trip that runs late still shows as a trip, so the schedule is only used
+   when none is under way. The exception is a page that opened mid-trip: it does not know that trip (see above), so
+   until the resident's next one it puts them at the block they are heading for.
+
+A seek, a scrub or a rewind replaces the state on screen. Nothing of the old one is kept, so the next frame asks the new
+one, and the camera glides to wherever the resident is at that tick.
+
+Picking works from the other side. The fleet notes the resident number and position of every car and walker it placed
+in the last round, and `pick` projects them to the screen and takes the nearest to the pointer within the larger of a
+small radius and the mover's own size on screen. It does not cast a ray at the instanced meshes: a walker is a few
+pixels tall, and an instance number says nothing about who it is.
+
+Turning and zooming leave a follow alone, so a resident can be looked at from any side. Moving the view (a pan, a
+pan key, reset) or `Esc` lets go. The link from **Share this moment** carries `follow=<resident>`, and a page opened
+with it starts with the camera on them.
+
 ## Seeking
 
 To draw tick `T`:
