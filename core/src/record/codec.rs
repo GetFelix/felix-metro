@@ -26,8 +26,8 @@ const EV_SPEED: u8 = 11;
 const EV_COMMAND_CURSOR: u8 = 12;
 /// An `arrived` and the same resident's `activity` that follows it, which is every arrival the sim makes.
 const EV_ARRIVAL: u8 = 13;
-/// Tag 14 is free. An event that is rare, like those below, goes under this tag with a kind varint ahead of its
-/// fields, so the few tags that fit [`EVENT_TAG_BITS`] stay for events a tick writes in bulk.
+/// A rare event goes under this tag with a kind varint ahead of its fields, so the few tags that fit
+/// [`EVENT_TAG_BITS`] stay for events a tick writes in bulk. Tag 14 is still free.
 const EV_EXTENDED: u8 = 15;
 const EXT_LEDGER: u64 = 1;
 const EXT_BALANCE: u64 = 2;
