@@ -52,6 +52,8 @@ services:
       # Four districts each: a 2 by 2 city, one shard per district. Lakeside has
       # its streams but the sim leaves it idle until dev/city.sh starts it.
       METRO_CITIES: ${METRO_CITIES:-harbor:4,pinecrest:4,lakeside:4}
+      # Who may publish commands in every city: the dev IdP's `mayor` unless told otherwise.
+      METRO_BUILDERS: ${METRO_BUILDERS:-mayor}
     volumes:
       - ./seed.mjs:/app/seed.mjs:ro,z
       - ./state:/state:z

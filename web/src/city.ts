@@ -34,8 +34,16 @@ interface SpeedEvent {
   type: 'speed';
   ticksPerSecond: number;
 }
+/** What became of a builder's command: `result` 0 is applied, anything else a refusal (core/src/record.rs). */
+export interface CommandEvent {
+  type: 'command';
+  principal: string;
+  name: string;
+  id: number;
+  result: number;
+}
 /** The events this page acts on; the rest of what a record carries is ignored. */
-export type TickEvent = TripEvent | BuildingEvent | RoadEvent | SpeedEvent | { type: 'other' };
+export type TickEvent = TripEvent | BuildingEvent | RoadEvent | SpeedEvent | CommandEvent | { type: 'other' };
 
 export interface TickRecord {
   kind: 'tick';
@@ -120,6 +128,8 @@ export class CityState {
   onLot: ((lot: number, building: Building | null) => void) | null = null;
   /** Told when a voyage is replaced or ends, just before its journey is freed. */
   onVoyageEnd: ((voyage: Voyage) => void) | null = null;
+  /** Told of every `command` event the records carry, to answer a command this page sent. Only the live state sets it. */
+  onCommand: ((event: CommandEvent) => void) | null = null;
   /** Told what became of every record handed to {@link apply}, for checking the order a district was followed in. */
   onRecord: ((district: number, tick: number, result: 'applied' | 'seen' | 'gap') => void) | null = null;
 
@@ -188,6 +198,8 @@ export class CityState {
         this.road(d, e.segment, e.change);
       } else if (e.type === 'speed') {
         this.speed = e.ticksPerSecond;
+      } else if (e.type === 'command') {
+        this.onCommand?.(e);
       }
     }
     this.prune(d);

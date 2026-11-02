@@ -71,6 +71,34 @@ describe('CityState', () => {
     expect([...state.voyages.keys()]).toEqual([1]);
   });
 
+  it('tells of each command event once, as the records are taken', () => {
+    const state = new CityState(city, trips, 2);
+    const seen: [number, number][] = [];
+    state.onCommand = (e) => seen.push([e.id, e.result]);
+    const command = (id: number, result: number): TickEvent => ({
+      type: 'command',
+      principal: '00000000000000ff',
+      name: 'Ana',
+      id,
+      result,
+    });
+    state.apply(record(0, 5, [command(7, 0), command(8, 3)]));
+    state.apply(record(0, 5, [command(9, 0)]));
+    state.apply(record(1, 5, [command(10, 8)]));
+    expect(seen).toEqual([
+      [7, 0],
+      [8, 3],
+      [10, 8],
+    ]);
+  });
+
+  it('takes command events with nobody listening', () => {
+    const state = new CityState(city, trips, 2);
+    expect(state.apply(record(0, 5, [{ type: 'command', principal: '0', name: 'A', id: 1, result: 0 }]))).toBe(
+      'applied',
+    );
+  });
+
   it('turns trip events into voyages and frees them when they end', () => {
     trips.made.length = 0;
     const state = new CityState(city, trips, 2);

@@ -1,5 +1,6 @@
 // The key list: every key the page answers to, as data. A feature that adds a key adds a row here.
 
+import { BUILD_KEYS } from '../build-keys';
 import { CAMERA_GESTURES, CAMERA_KEYS } from '../camera-keys';
 
 /** One way of doing something: keys pressed together, such as `['Shift', '←']`. */
@@ -54,6 +55,12 @@ export const SHORTCUTS: readonly ShortcutGroup[] = [
       },
       { keys: [['K']], action: 'Stop' },
     ],
+  },
+  {
+    title: 'Building',
+    when: 'In the live city, on a sign-in that may build. Click or tap a lot to use the tool.',
+    // Built from the tools' own table, like the camera's.
+    rows: BUILD_KEYS.map((key) => ({ keys: [[key.keycap]], action: key.label })),
   },
   {
     title: 'Anywhere',

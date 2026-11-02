@@ -1,7 +1,7 @@
 # The page overlay
 
 The overlay is everything on the page that is not the city: the Felix Metro chip, the clock, the timeline,
-the settings and sound buttons and the panels the first one opens. This page says what it does, where it lives
+the settings, sound, build and demolish buttons and the panels they open. This page says what it does, where it lives
 in the code, and how to add to it. It also holds the rules (colour, type, motion and wording) that keep new
 controls looking like the ones already there.
 
@@ -25,6 +25,11 @@ controls looking like the ones already there.
   shown again in that browser.
 - **Share a moment.** The link button under the settings button copies a link that opens the city at the moment on
   screen, from the same camera view. [Moments](../README.md#moments) shows the link and how it is read.
+- **Build and take down.** The two buttons at the left of the row under the clock, or `B` and `X`, pick the build and
+  demolish tools. A panel under them picks the building, `R` turns it and the pointer moves a ghost of it from lot to
+  lot. Click, or tap, to place it. The buttons are off, with a note that says why, when the page has no live city, is
+  showing an earlier moment, or is signed in as someone who may only watch. [Building](../README.md#building) says
+  what a builder may do and why only the cleared ground.
 - **Hide the controls.** `H` hides every control, message and the frame times, for a clean picture. `H` or `Esc`
   brings them back. It does nothing while a field has focus or the settings sheet is open.
 - **Leave it on a wall.** After a minute with no mouse, touch or key the camera turns slowly. Any input stops it.
@@ -35,14 +40,15 @@ controls looking like the ones already there.
 
 These page parameters change the overlay:
 
-| Parameter        | Effect                                                                                     |
-| ---------------- | ------------------------------------------------------------------------------------------ |
-| `?tier=low`      | Forces a quality for this visit (`low`, `medium` or `high`). It overrides the saved choice |
-| `?ui=0`          | Hides the overlay: no chips, no buttons, no `?` or `M` key and no hint                     |
-| `?capture&trace` | The same as `?ui=0` for the controls and the hint, since a clip must draw as is            |
-| `?attract=30`    | Seconds with no input before the camera turns on its own (60 by default, `0` for never)    |
-| `?live=0`        | Draws the city with no gateway; the timeline never appears, so there is no hint            |
-| `?hud`           | Shows frame times under the Felix Metro chip, for tuning                                   |
+| Parameter        | Effect                                                                                                         |
+| ---------------- | -------------------------------------------------------------------------------------------------------------- |
+| `?tier=low`      | Forces a quality for this visit (`low`, `medium` or `high`). It overrides the saved choice                     |
+| `?ui=0`          | Hides the overlay: no chips, no buttons, no `?` or `M` key and no hint                                         |
+| `?capture&trace` | The same as `?ui=0` for the controls and the hint, since a clip must draw as is                                |
+| `?attract=30`    | Seconds with no input before the camera turns on its own (60 by default, `0` for never)                        |
+| `?live=0`        | Draws the city with no gateway; the timeline never appears, so there is no hint, and the build buttons are off |
+| `?as=mayor`      | Signs in as that person at the stand-in sign-in of the dev stack (`viewer` if left out). `mayor` may build     |
+| `?hud`           | Shows frame times under the Felix Metro chip, for tuning                                                       |
 
 ## How it is built
 
@@ -59,6 +65,7 @@ framework. Each part has one file of each kind:
 | Settings sheet and key list      | `web/src/ui/shell.ts`, `settings.ts`, `keys.ts`, `sheet.ts`        | `web/src/ui/sheet.css`    |
 | Share button, photo mode         | `web/src/ui/share.ts`, `web/src/ui/photo.ts`, `web/src/moments.ts` | `web/src/ui/photo.css`    |
 | Sound button                     | `web/src/ui/sound.ts`                                              | `web/src/ui/kit.css`      |
+| Build and demolish tools         | `web/src/ui/build-bar.ts`, `web/src/placement.ts`                  | `web/src/ui/build.css`    |
 | Hint and messages                | `web/src/ui/hint.ts`, `web/src/ui/toast.ts`                        | `web/src/ui/toast.css`    |
 | Frame times (`?hud`)             | `web/src/ui/hud.ts`                                                | `web/src/ui/kit.css`      |
 
@@ -80,6 +87,35 @@ Choosing an option goes through the quality controller in `web/src/quality.ts`:
 - Automatic calls `setAutomatic()`. The saved tier is forgotten and the controller judges frame times again
   from High, as on a first visit.
 
+### The building tools
+
+Three files with one job each, so the rules can be tested without a screen:
+
+- `web/src/placement.ts` is the state of the tools: which one is held, the building and its turn, what the tool would do
+  on a lot, and what became of every command sent. It knows nothing of the page; the page hands it the live city's
+  buildings, the connection and a question, "is the live city what is on screen?".
+- `web/src/ui/build-bar.ts` is the markup: the two buttons, the panel, and the keys, which are read from `BUILD_KEYS` in
+  `web/src/build-keys.ts` the way the camera's are.
+- `web/src/placement-view.ts` finds the lot under the pointer and draws the marker and the ghost. The ground point under
+  the pointer is the wrong lot for a tall building, so it also follows the ray down from rooftop height and tests the
+  lots it passes over against their models.
+
+The rules (`web/src/build.ts`) mirror the sim's, and `placement.ts` checks them before it sends anything. The
+buttons are off with a reason from `whyNot()`, and the tool in hand is put away if the page leaves the live city. A command
+goes out as a record on the command stream; the answer is the `command` event the live state hands to
+`placement.result()`, which matches it by the random id the page gave the command.
+
+```mermaid
+flowchart LR
+    PTR["Pointer or tap"] --> VIEW["placement-view.ts<br/>which lot?"]
+    VIEW --> TOOL["placement.ts<br/>fits? send"]
+    TOOL -->|"build / demolish record"| GW["Gateway: commands"]
+    GW --> SIM["Sim applies it"]
+    SIM -->|"command event, then built / demolished"| LIVE["Live city state"]
+    LIVE -->|"result by id"| TOOL
+    LIVE -->|"lot changes"| DRAW["Scaffold rises or dust falls"]
+```
+
 ### The key list
 
 The list is data. Every row is an entry in `SHORTCUTS` in `web/src/ui/keys.ts`, and the sheet draws its table
@@ -90,7 +126,8 @@ from that array. Nothing else knows about the rows, so a feature that adds a key
 ```
 
 The camera's keys are the exception: the View and Mouse and touch groups are built from `CAMERA_KEYS` and
-`CAMERA_GESTURES` in `web/src/camera-keys.ts`, so the list always matches what the camera reads.
+`CAMERA_GESTURES` in `web/src/camera-keys.ts`, so the list always matches what the camera reads. The Building group is
+built the same way from `BUILD_KEYS` in `web/src/build-keys.ts`.
 
 Each entry is a group of rows. A row lists the ways to do something (`keys`), where each way is one key or
 several pressed together, and says what it does (`action`). `['Shift', '←']` is Shift and the left arrow. The
@@ -271,6 +308,8 @@ node scripts/check-ui.mjs http://localhost:5173/ /tmp/ui
 - the hint is shown once, and never under `?ui=0` or `?capture`;
 - no audio context is made before the sound button is used, the button and `M` switch the sound, and blocked audio
   gives a note and no console error;
+- the build and demolish buttons are there and off, with the reason, on a page with no live city, and are absent under
+  `?ui=0` and `?capture`;
 - the clock rolls, and holds still with reduced motion;
 - `H` hides every control, `?cam` starts the camera where a link says, and attract mode turns the camera and stops on a
   mouse move;
@@ -278,3 +317,7 @@ node scripts/check-ui.mjs http://localhost:5173/ /tmp/ui
 
 It writes screenshots of the shell, the sheet, the key list and the hint, by day and night, at 1280px and 360px wide,
 into the folder you name. Look at them: the checks do not know whether the page looks right.
+
+`check-placement.mjs` checks the building tools against the running dev stack, since they need a gateway and a sim. It
+signs two pages in as different builders (the stack must be started with `METRO_BUILDERS=mayor,architect`) and has them
+use the tools at once: the [README](../README.md#building) lists what it proves.
