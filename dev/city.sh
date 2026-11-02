@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Start a city the sim holds back: dev/city.sh <name> (the stack starts with lakeside and pier held back). The city
+# Start a city the sim holds back: dev/city.sh <name> (the stack starts with lakeside, pier and ember held back). The city
 # is listed in the registry as it starts, so a page that is already open shows it in its city list.
 # The speed endpoint answers loopback only, so this runs curl inside the sim's container.
 set -euo pipefail

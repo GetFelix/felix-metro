@@ -521,6 +521,35 @@ that is not a chapter has none and shows no goals.
   (`METRO_WRITE_FIXTURE=1 cargo test -p felix-metro-sim the_chapter_fixture`) and fails when it is stale; the page's tests
   judge both runs from it.
 
+### Case files
+
+A case file is a city with a question in it and no mayor. The table is `INVESTIGATIONS` in
+`core/src/investigation.rs`, read by the sim and by the page the same way the chapter table is (`investigation(seed)` in
+the wasm build). A city that is not a case file has none and shows no Case section.
+
+| Case  | City            | Question                                                          | Answer            |
+| ----- | --------------- | ----------------------------------------------------------------- | ----------------- |
+| Ember | `ember`, 2 by 2 | The busiest hour of day 1 for trips in a vehicle: street, purpose | Alder, 7 am, work |
+
+- **No commands.** `World::apply` refuses every command in a case file with `REFUSED_UNSUPPORTED`, and the refusal is
+  a function of the seed alone, so a restarted sim refuses the same way. A speed change goes around `apply` and still
+  works, because it moves how fast the day plays, not what happens in it.
+- **No warm-up.** Like a chapter, a case file starts at its first tick. The sim skips the warm-up for a seed in the table.
+- **What the facts mean.** The hour is the one in which the most trips by vehicle set off on the case's day. The street is
+  the one the most of those trips use (a trip counts once per street). The purpose is the activity the most of those
+  drivers set off to do. Walking is not counted.
+- **Kept true by the sim's test.** `world::case_file` recomputes all three from the day's events and fails if the table
+  says anything else, or if a second place comes within 15% for the hour, 30% for the street or a factor of two for the
+  purpose. A change to routing or schedules that moves the answer fails that test, and the table is then rewritten with
+  the new facts or the seed is replaced.
+- **The check.** The page holds the table and checks the answer itself (`web/src/case.ts`): all three parts right or not,
+  and a count of complete answers. An answer with a part missing is not counted. The hints are a two-hour window that holds
+  the hour and a street that crosses the answer. Anyone who reads the JSON from core can read the answer, as with a
+  chapter's goals; the case is a puzzle, not a lock.
+- **Tested against the table.** `web/src/investigation-fixture.json` holds the table. The sim's test rewrites it
+  (`METRO_WRITE_FIXTURE=1 cargo test -p felix-metro-sim the_investigation_fixture`) and fails when it is stale; the page's
+  tests read it.
+
 ### Commands and the registry
 
 A command record is the kind byte, a command id `u32`, the builder's display

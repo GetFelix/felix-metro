@@ -49,8 +49,11 @@ async fn main() -> Result<()> {
             (spec, Some(held))
         }));
     for (spec, held) in all {
-        // A chapter's clock starts when the city does, so it has no day and a half of history behind it.
-        let warmup_ticks = if felix_metro_core::chapter_for(&spec.name).is_some() {
+        // A chapter's clock starts when the city does, so it has no day and a half of history behind it. A case
+        // file's day is the one the player watches, so it starts at tick 0 too.
+        let warmup_ticks = if felix_metro_core::chapter_for(&spec.name).is_some()
+            || felix_metro_core::investigation_for(&spec.name).is_some()
+        {
             0
         } else {
             usual_warmup
