@@ -270,7 +270,9 @@ export class Session {
   }
 
   close() {
+    // A socket that is being closed on purpose can still report an error; after the join that would be fatal.
     this.ws.onclose = null;
+    this.ws.onerror = null;
     this.ws.close();
   }
 }
