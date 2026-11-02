@@ -36,72 +36,118 @@ const check = (ok, what) => {
   console.log(`${ok ? 'ok  ' : 'FAIL'} ${what}`);
 };
 const pages = [];
+/** `work`, or `fallback` once `ms` have passed: a page whose renderer is hung can leave a Playwright call pending for good. */
+const within = (ms, work, fallback) => {
+  let timer;
+  const late = new Promise((resolve) => (timer = setTimeout(resolve, ms, fallback)));
+  return Promise.race([work, late]).finally(() => clearTimeout(timer));
+};
 const fail = async (message) => {
   console.error(message);
   for (const [i, page] of pages.entries())
-    await page
-      .screenshot({ path: join(out, `failure-${i}-${page.label.replace(/\W+/g, '-')}.png`), timeout: 5000 })
-      .catch(() => {});
-  await browser.close();
+    await within(
+      10_000,
+      page
+        .screenshot({ path: join(out, `failure-${i}-${page.label.replace(/\W+/g, '-')}.png`), timeout: 5000 })
+        .catch(() => {}),
+    );
+  await within(
+    10_000,
+    browser.close().catch(() => {}),
+  );
   process.exit(1);
 };
 
+/** Where the browser's CPU time went over two seconds, by process: a spinning renderer and a spinning GPU look different. */
+const busy = () =>
+  within(
+    10_000,
+    (async () => {
+      const cdp = await browser.newBrowserCDPSession();
+      const sample = async () => (await cdp.send('SystemInfo.getProcessInfo')).processInfo;
+      const before = await sample();
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      return (await sample())
+        .map((q) => {
+          const was = before.find((o) => o.id === q.id)?.cpuTime ?? q.cpuTime;
+          return `${q.type}#${q.id} ${Math.round(((q.cpuTime - was) / 2) * 100)}%`;
+        })
+        .join(', ');
+    })().catch((e) => `no process info: ${e.message}`),
+    'no process info',
+  );
+
 /**
  * A page signed in as `who`, once its city is drawn and the live connection has caught up. A page that does not get
- * there in READY_MS is thrown away and opened again, in case its renderer is stuck; a page that is really broken fails
- * every try, and the failure says what the page was doing.
+ * there in READY_MS is thrown away and opened again; a page that is really broken fails every try, and the failure says
+ * what the page was doing. The deadline is ours, not Playwright's: on CI a renderer has hung outright (its connection
+ * went quiet and nginx dropped it a minute later), and the Playwright calls on it never returned or timed out.
  */
 const READY_MS = 120_000;
 const OPEN_TRIES = 3;
 async function open(name, who, options = {}) {
   for (let attempt = 1; ; attempt++) {
-    const context = await browser.newContext({ viewport: { width: 1280, height: 720 }, ...options });
-    await context.addInitScript((t) => sessionStorage.setItem('metro.token', t), who);
-    const page = await context.newPage();
-    page.label = name;
-    page.crashed = false;
-    page.on('crash', () => (page.crashed = true));
-    page.on('pageerror', (e) => problems.push(`${name}: page error: ${e}`));
-    page.on('console', (m) => m.type() === 'error' && console.log(`${name} console: ${m.text()}`));
     const started = Date.now();
-    const why = await page
-      .goto(appUrl, { waitUntil: 'load', timeout: READY_MS })
-      .then(() =>
-        page.waitForFunction(
-          () => window.__ready === true && window.__build && Number.isFinite(window.__live?.tick),
-          null,
-          { polling: 250, timeout: Math.max(1000, READY_MS - (Date.now() - started)) },
-        ),
-      )
-      .then(
-        () => null,
-        (e) => String(e.message).split('\n')[0],
+    let context = null;
+    let page = null;
+    const load = async () => {
+      context = await browser.newContext({ viewport: { width: 1280, height: 720 }, ...options });
+      await context.addInitScript((t) => sessionStorage.setItem('metro.token', t), who);
+      page = await context.newPage();
+      page.label = name;
+      page.crashed = false;
+      page.on('crash', () => (page.crashed = true));
+      page.on('pageerror', (e) => problems.push(`${name}: page error: ${e}`));
+      page.on('console', (m) => m.type() === 'error' && console.log(`${name} console: ${m.text()}`));
+      await page.goto(appUrl, { waitUntil: 'load', timeout: READY_MS });
+      await page.waitForFunction(
+        () => window.__ready === true && window.__build && Number.isFinite(window.__live?.tick),
+        null,
+        { polling: 250, timeout: Math.max(1000, READY_MS - (Date.now() - started)) },
       );
+      return null;
+    };
+    const why = await within(
+      READY_MS + 10_000,
+      load().catch((e) => String(e.message).split('\n')[0]),
+      'no answer from the browser',
+    );
     if (why === null) {
       console.log(`opened ${name} in ${Date.now() - started} ms${attempt > 1 ? ` (try ${attempt})` : ''}`);
       pages.push(page);
       return { context, page };
     }
     // Say what the page was doing, without waiting on a page whose main thread may be stuck.
-    const seen = await Promise.race([
-      page.evaluate(() => ({ ready: window.__ready, build: !!window.__build, tick: window.__live?.tick })),
-      new Promise((resolve) => setTimeout(resolve, 5000, 'no answer from the page')),
-    ]).catch((e) => String(e));
+    const seen = page
+      ? await within(
+          5000,
+          page.evaluate(() => ({ ready: window.__ready, build: !!window.__build, tick: window.__live?.tick })),
+          'no answer from the page',
+        ).catch((e) => String(e))
+      : 'no page yet';
     console.log(
-      `${name}: not drawn within ${READY_MS / 1000} s (try ${attempt}): ${why}; crashed=${page.crashed} ${JSON.stringify(seen)}`,
+      `${name}: not drawn within ${READY_MS / 1000} s (try ${attempt}): ${why}; crashed=${page?.crashed} ${JSON.stringify(seen)}`,
     );
+    console.log(`${name}: browser cpu: ${await busy()}`);
     if (attempt === OPEN_TRIES) {
-      pages.push(page);
+      if (page) pages.push(page);
       await fail(`${name}: the city was never drawn`);
     }
-    await Promise.race([context.close().catch(() => {}), new Promise((resolve) => setTimeout(resolve, 10_000))]);
+    await within(
+      10_000,
+      context?.close().catch(() => {}),
+    );
   }
 }
 
 const state = (page) => page.evaluate(() => window.__build.state());
 const kindOn = (page, lot) => page.evaluate((l) => window.__build.kindOn(l), lot);
+const HUNG = Symbol('hung');
 const until = (page, fn, arg, what, timeout = 2 * MINUTE) =>
-  page.waitForFunction(fn, arg, { polling: 250, timeout }).catch(() => fail(`${page.label}: ${what}`));
+  within(timeout + 10_000, page.waitForFunction(fn, arg, { polling: 250, timeout }), HUNG).then(
+    (done) => (done === HUNG ? fail(`${page.label}: ${what} (the page stopped answering)`) : done),
+    () => fail(`${page.label}: ${what}`),
+  );
 /** Two frames on, so the camera has been placed and the lots' screen positions are current. */
 const frames = (page) =>
   page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
