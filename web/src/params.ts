@@ -1,4 +1,7 @@
 import { seedFromHash, type Layout } from './layout';
+import type { View } from './camera-math';
+import { ATTRACT_SECONDS } from './attract';
+import { parseCamera } from './moments';
 import { isTier } from './quality';
 
 export type Tier = 'low' | 'medium' | 'high';
@@ -24,6 +27,10 @@ export interface Params {
   gateway: string | null;
   /** Show the city at this tick, paused, instead of following it live; null to follow it. */
   at: number | null;
+  /** Look from this view instead of the opening one (`?cam=x,z,distance,azimuth,polar`), as a shared link says. */
+  cam: View | null;
+  /** Seconds with no input before the camera starts turning on its own; zero for never. */
+  attract: number;
   /** Keep a trace of every record taken, in `window.__trace`, for the CI checks. */
   trace: boolean;
   /** Draw only when `window.__capture.frame` asks, for the clip job. Needs `trace`, so a stray link cannot stop a page. */
@@ -33,7 +40,8 @@ export interface Params {
 // ?live=0 skips the gateway and draws the city alone, ?gateway=ws://host:8787/ws names a gateway other than the page's own.
 // ?layout=frame draws the style frame's city instead of the generated one, ?districts=3 sets the districts per side
 // (2 by default) and the hash picks the seed (/#harbor).
-// ?at=1234 shows the city at tick 1234 and stays there, for trying out seeking before the timeline exists.
+// ?at=1234 shows the city at tick 1234 and stays there, and ?cam=x,z,distance,azimuth,polar looks from a saved view: together
+// they are the link that Share this moment copies. ?attract=30 turns the camera after 30 s untouched (60 by default, 0 never).
 // ?trace keeps what became of every record in `window.__trace`. ?capture (with ?trace) hands the render clock to the clip script.
 // ?t=18.5 freezes the clock at that hour, ?still freezes motion, ?tier=low|medium|high forces a tier, ?ui=0 hides the
 // overlay, ?hud shows frame statistics, ?slow=40 adds 40 ms to every frame.
@@ -53,6 +61,8 @@ export function parseParams(search: string, hash = ''): Params {
     live: params.get('live') !== '0',
     gateway: params.get('gateway'),
     at: tickParam(params.get('at')),
+    cam: parseCamera(params.get('cam')),
+    attract: attractParam(params.get('attract')),
     trace: params.has('trace'),
     capture: params.has('trace') && params.has('capture'),
   };
@@ -61,4 +71,9 @@ export function parseParams(search: string, hash = ''): Params {
 function tickParam(value: string | null): number | null {
   const tick = value === null || value === '' ? NaN : Number(value);
   return Number.isInteger(tick) && tick >= 0 ? tick : null;
+}
+
+function attractParam(value: string | null): number {
+  const seconds = value === null || value === '' ? NaN : Number(value);
+  return Number.isFinite(seconds) && seconds >= 0 ? seconds : ATTRACT_SECONDS;
 }

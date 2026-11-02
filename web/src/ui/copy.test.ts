@@ -2,6 +2,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { HINT_TEXT } from './hint';
 import { SHORTCUTS } from './keys';
+import { SHARE_COPIED, SHARE_LABEL, SHARE_NONE } from './share';
 import { CHOICES } from './settings';
 import { UNAVAILABLE_TEXT } from './sound';
 
@@ -11,6 +12,9 @@ const JARGON = /\b(logs?|streams?|offsets?|ticks?|shards?|keyframes?|districts?)
 const words = [
   HINT_TEXT,
   UNAVAILABLE_TEXT,
+  SHARE_LABEL,
+  SHARE_COPIED,
+  SHARE_NONE,
   ...CHOICES.flatMap((c) => [c.label, c.hint]),
   ...SHORTCUTS.flatMap((g) => [g.title, g.when ?? '', ...g.rows.map((r) => r.action)]),
 ];

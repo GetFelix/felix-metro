@@ -4,6 +4,7 @@ import type { Quality } from '../quality';
 import { createHint, createMemory, listenForInteraction } from './hint';
 import { isHelpKey, isTypingTarget, renderKeys } from './keys';
 import { CHOICES, choose, runningText, selectedChoice, type Choice } from './settings';
+import { PHOTO_CLASS } from './photo';
 import { createSheet } from './sheet';
 import { toast } from './toast';
 
@@ -127,6 +128,8 @@ export function createShell(quality: Quality): Shell {
   root.querySelector('[data-back]')!.addEventListener('click', openSettings);
   addEventListener('keydown', (e) => {
     if (e.repeat || !isHelpKey(e) || isTypingTarget(e.target as HTMLElement | null)) return;
+    // The sheet would open with nothing to see; Esc leaves photo mode first.
+    if (document.body.classList.contains(PHOTO_CLASS)) return;
     e.preventDefault();
     openKeys();
   });
