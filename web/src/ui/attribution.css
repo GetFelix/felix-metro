@@ -18,6 +18,10 @@
 .attribution[hidden] {
   display: none;
 }
+/* Flex items drop the spaces at the edges of their text; these are the card's. */
+.attribution-dot {
+  white-space: pre;
+}
 .attribution-link {
   padding: 0;
   background: none;

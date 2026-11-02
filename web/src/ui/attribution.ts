@@ -23,8 +23,8 @@ export function createCard(parent: HTMLElement, over: () => void, out: () => voi
   el.hidden = true;
   const text = document.createElement('span');
   const dot = document.createElement('span');
+  dot.className = 'attribution-dot';
   dot.setAttribute('aria-hidden', 'true');
-  dot.textContent = ' · ';
   const link = document.createElement('button');
   link.type = 'button';
   link.className = 'attribution-link';
@@ -42,7 +42,9 @@ export function createCard(parent: HTMLElement, over: () => void, out: () => voi
       text.textContent = line;
       run = action?.run ?? null;
       link.textContent = action?.label ?? '';
-      link.hidden = dot.hidden = action === null;
+      // Both stay out of the card's text when there is no link, so the text is the line alone.
+      dot.textContent = action ? ' · ' : '';
+      link.hidden = action === null;
       el.hidden = false;
       // Placed below and to the right of the pointer, or the other side of it where that would leave the screen.
       const { width, height } = el.getBoundingClientRect();

@@ -166,7 +166,33 @@ console.log(`See it go up: from tick ${start.past} (bare) to tick ${samples.at(-
 await page.screenshot({ path: join(out, 'go-up.png') });
 if (errors.length > 0) await fail(`errors on the page: ${errors.join('; ')}`);
 
-// 6. With ?ui=0 there is no card.
+// 6. On a phone a tap opens the card and a tap elsewhere closes it.
+const phone = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+const touch = await phone.newPage();
+await touch.goto(`${appUrl}#${city}`, { waitUntil: 'load', timeout: 5 * MINUTE });
+await touch.waitForFunction(() => Number.isFinite(window.__live?.tick) && window.__lots, null, {
+  polling: 250,
+  timeout: 5 * MINUTE,
+});
+await touch.waitForTimeout(3000);
+const tapAt = await touch.evaluate((l) => window.__lots.aim(l), target.lot);
+if ((await touch.evaluate(([x, y]) => window.__lots.pick(x, y), [tapAt.x, tapAt.y])) !== target.lot) {
+  await fail('the building is not under the tap');
+}
+await touch.touchscreen.tap(tapAt.x, tapAt.y);
+const tapped = await touch
+  .waitForFunction(() => window.__lots.card(), null, { polling: 50, timeout: 3000 })
+  .then(() => touch.evaluate(() => window.__lots.card()))
+  .catch(() => null);
+if (!tapped?.startsWith('Built by ')) await fail(`a tap on a building shows ${JSON.stringify(tapped)}`);
+await touch.touchscreen.tap(5, 300);
+await touch
+  .waitForFunction(() => window.__lots.card() === null, null, { polling: 50, timeout: 3000 })
+  .catch(() => fail('a tap elsewhere did not close the card'));
+console.log(`a tap shows "${tapped}", and a tap elsewhere closes it`);
+await phone.close();
+
+// 7. With ?ui=0 there is no card.
 const bare = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 const url = new URL(appUrl);
 url.searchParams.set('ui', '0');
