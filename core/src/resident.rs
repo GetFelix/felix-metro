@@ -242,6 +242,33 @@ impl Resident {
         resident_name(&city.seed, self.id)
     }
 
+    /// The resident as JSON for the page's card: name, archetype, home lot, vehicle kind and the day's
+    /// blocks in order. Every string is lower-case ASCII or a name from the built-in lists, so none needs escaping.
+    pub fn to_json(&self, city: &City) -> String {
+        let blocks: Vec<String> = self
+            .schedule
+            .blocks
+            .iter()
+            .map(|b| {
+                format!(
+                    "{{\"activity\":\"{}\",\"lot\":{},\"leave\":{}}}",
+                    b.activity.name(),
+                    b.lot,
+                    b.leave
+                )
+            })
+            .collect();
+        format!(
+            "{{\"id\":{},\"name\":\"{}\",\"archetype\":\"{}\",\"home\":{},\"vehicle\":{},\"blocks\":[{}]}}",
+            self.id,
+            self.name(city),
+            self.archetype.name(),
+            self.home,
+            self.vehicle,
+            blocks.join(",")
+        )
+    }
+
     /// The trip from block `block` to the next one, leaving at `depart`, or
     /// `None` if the roads do not connect them.
     pub fn trip(&self, city: &City, block: usize, depart: u32, cong: &Congestion) -> Option<Trip> {

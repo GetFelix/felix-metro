@@ -132,6 +132,52 @@ describe('Traffic', () => {
     expect(placed.map((p) => p.id)).toEqual([2]);
   });
 
+  it('says where a trip stands at a tick without it holding a place, and what the cap leaves out is still found', () => {
+    const { f, placed } = fleet();
+    const traffic = new Traffic(f, 0);
+    traffic.cap = 1;
+    const a = voyage(1, 2, 0, 10);
+    const b = voyage(2, 0, 0, 10);
+    traffic.update(4, 0, [a, b]);
+    expect(placed.map((p) => p.id)).toEqual([2]);
+    expect(traffic.capped).toBe(1);
+    const found = traffic.positionOf(b, 4.5)!;
+    expect(found.x).toBeCloseTo(4.5);
+    expect(found.z).toBeCloseTo(-PAVEMENT);
+    expect(traffic.drawn).toBe(1);
+    expect(traffic.positionOf(b, 10)).toBeNull();
+    expect(traffic.positionOf(b, -1)).toBeNull();
+  });
+
+  it('agrees with where a drawn trip is placed', () => {
+    const { f } = fleet();
+    const traffic = new Traffic(f, 0);
+    const a = voyage(1, 2, 0, 10);
+    traffic.update(6.25, 0, [a]);
+    const [drawn] = traffic.where();
+    expect(traffic.positionOf(a, 6.25)).toMatchObject({ x: drawn!.x, z: drawn!.z, heading: drawn!.heading });
+  });
+
+  it('fills the object it is given and hands it back, so asking every frame allocates nothing', () => {
+    const { f } = fleet();
+    const traffic = new Traffic(f, 0);
+    const a = voyage(1, 2, 0, 10);
+    const into = { x: -1, y: -1, z: -1, heading: -1, size: -1, road: 0 };
+    expect(traffic.positionOf(a, 4.5, into)).toBe(into);
+    expect(into).toMatchObject({ x: expect.closeTo(4.5), z: expect.closeTo(-LANE), size: 1 });
+    expect(traffic.positionOf(a, 12, into)).toBeNull();
+  });
+
+  it('always draws the pinned resident, whatever the cap', () => {
+    const { f, placed } = fleet();
+    const traffic = new Traffic(f, 0);
+    traffic.cap = 1;
+    traffic.pinned = 7;
+    traffic.update(4, 0, [voyage(1, 2, 0, 10), voyage(7, 3, 0, 10)]);
+    expect(placed.map((p) => p.id)).toEqual([2, 3]);
+    expect(traffic.capped).toBe(0);
+  });
+
   it('draws nothing before a trip leaves or after it arrives', () => {
     const { f } = fleet();
     const traffic = new Traffic(f, 0);

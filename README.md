@@ -25,7 +25,9 @@ and play forward from there.
 > - The sim resumes a city from its log after a restart.
 > - A share button under the settings button copies a link to the moment and view on screen; `H` hides every control for
 >   a clean picture, and a page left alone for a minute turns slowly (see [Moments](#moments)).
-> - Not built yet: following a resident, and the page's own building tools.
+> - Click a car or walker to follow them: the camera tracks them and a card shows their name, what they are doing
+>   and their day (see [Following a resident](#following-a-resident)).
+> - Not built yet: the page's own building tools.
 >
 > The [style frame](prototype/style-frame.html) shows the look. The plan is in
 > [docs/design.md](docs/design.md) and the work is tracked in
@@ -111,7 +113,7 @@ shown with `?ui=0` or `?capture`. [docs/ui.md](docs/ui.md#sound) explains how it
 | 0   | The look, locked    | In progress: style frame, assets, daylight, post-processing, quality tiers, the UI shell (settings sheet, key list, first-visit hint, rolling clock), camera controls, instanced traffic and ambient life done                                                                                                                                         |
 | 1   | A live city         | Done                                                                                                                                                                                                                                                                                                                                                   |
 | 2   | Time travel         | In progress: keyframes, seeking, the timeline scrubber, rewind then follow, and backward playback with speeds built, smoothness not yet measured                                                                                                                                                                                                       |
-| 3   | Follow a life       | In progress: ambient sound built; following a resident is not                                                                                                                                                                                                                                                                                          |
+| 3   | Follow a life       | In progress: click a car or walker to follow them, with a card for their day and a `?follow=` link; ambient sound built; markers for notable events are not built yet                                                                                                                                                                                  |
 | 4   | Build               | In progress: the sim applies build, demolish and speed commands and records who sent them and who built what, and the page animates a building going up (scaffold) or coming down (dust) over 8 ticks, backwards when you rewind, and says who built a building when you point at it; placement tools in the page, roads and zones are not built yet   |
 | 5   | Branching timelines | Planned                                                                                                                                                                                                                                                                                                                                                |
 | 6   | Scale and failover  | In progress: a restarted sim resumes from its log; 20,000 residents, 16 districts and broker loss are open                                                                                                                                                                                                                                             |
@@ -126,7 +128,7 @@ city. If the connection drops, a `Reconnecting…` pill shows, the city keeps mo
 the page reads what it missed from the log and carries on in order. If retention has
 already dropped what it missed, it restarts that district from the newest keyframe left.
 A city the gateway refuses (a misspelled name, or no access) shows a message instead of
-retrying. The city name in the top left opens a list of every city. The clock's digits roll as time moves, the button under it opens the settings sheet, and the `?` key opens the key list. Following a resident and the page's own
+retrying. The city name in the top left opens a list of every city. The clock's digits roll as time moves, the button under it opens the settings sheet, and the `?` key opens the key list. The page's own
 building tools are not built yet; a command published to the city's command stream by any client with a
 builder's token is applied by the sim and shows up in the page, rising over 8 ticks of city time inside a scaffold (a demolished building scales down in a puff of dust). Rewind through it and it comes down again; the low quality tier skips the scaffold and the dust.
 
@@ -183,7 +185,8 @@ http://localhost:5173/?at=18400&cam=3.2,-1.5,22,0.785,0.9#harbor
 ```
 
 `at` is the city tick, paused as for any earlier moment, and `cam` is where the camera stands:
-`x,z,distance,azimuth,polar`. The camera is held inside the city's limits, so a link opened with a different `districts` or
+`x,z,distance,azimuth,polar`. A link made while following a resident ends in `&follow=<resident number>` too, and opens with
+the camera on them ([Following a resident](#following-a-resident)). The camera is held inside the city's limits, so a link opened with a different `districts` or
 `layout` shows the nearest view it allows. The link keeps the city (the hash, `districts`, `layout` and `gateway`) and leaves out the rest of your visit.
 If the log no longer holds the tick, the page says so and shows the city live.
 
@@ -192,7 +195,23 @@ playback keys still work. A touch screen has no `H`, so reload to leave it.
 
 A page nobody has touched for 60 seconds turns the camera slowly, for a display left running. Any mouse move, click,
 scroll, touch or key stops it. `?attract=30` changes the wait, `?attract=0` turns it off, and it is also off with
-reduced motion. Following one resident from a link is not built yet.
+reduced motion.
+
+## Following a resident
+
+Click a car or walker (tap on a touch screen) to follow them, or press `F` to follow the one nearest the middle of the view. The camera eases in and tracks them as they drive or
+walk, and a card under the city name shows who they are:
+
+- their name and kind: office worker, shift worker, shopkeeper, student, retiree or night worker;
+- what they are doing now, such as `Driving to work`, `Walking to the shops`, `At school` or `Asleep at home`;
+- their day, a list of where they spend it and when they leave each place. The block they are in is highlighted.
+
+When they go indoors the camera stays on their building, and the card says what they are doing there. Turning and
+zooming keep the follow. `Esc` (when no menu is open), the card's close button, or moving the view (right-drag, Shift-drag, two fingers,
+`W` `A` `S` `D` or `0`) lets go. Following carries through seeks, scrubs and rewinds: drag the timeline back and the card
+and camera show where they were at that moment. The **Share this moment** link includes `follow=<resident number>`;
+open `/?follow=412#harbor` to start on resident 412 (residents are numbered from 0, and the harbor city has 522; a number
+the city does not have shows a message). [docs/design.md](docs/design.md#following-a-resident) says how the page finds them each frame.
 
 ## Recording the clip
 

@@ -1,6 +1,6 @@
 // Opens the live city in headless Chromium against the running dev stack and checks that it follows the sim: the tick
 // on screen advances, a car is drawn and moves, and the day turns to dusk with the tick. Writes screenshots of a day
-// moment, dusk and a street close-up. Usage: node scripts/check-live.mjs <page url> <out dir>.
+// moment, dusk and a street close-up. A car picked with a click is followed. Usage: node scripts/check-live.mjs <page url> <out dir>.
 // The sim should run fast (dev/speed.sh harbor 16), so the city reaches its commute and its evening in minutes.
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -76,10 +76,62 @@ for (let i = 0; i < 40 && moved === 0; i++) {
 }
 if (moved === 0) await fail(`${first.size} cars drawn, none moved`);
 console.log(`${first.size} cars seen, ${moved} moved`);
+// 3. Click a car to follow it: the camera stays on them and the card keeps saying what they are doing. The copied link
+// names them. The clipboard is replaced, since a headless page may not be allowed one.
+await page.evaluate(() => {
+  window.__copied = null;
+  if (navigator.clipboard) navigator.clipboard.writeText = async (text) => void (window.__copied = text);
+});
+let car = null;
+for (let i = 0; i < 60 && !car; i++) {
+  car = await page.evaluate(() => {
+    const onScreen = (s) => s && s.x > 40 && s.x < innerWidth - 40 && s.y > 120 && s.y < innerHeight - 140;
+    for (const w of window.__live.where().filter((w) => w.car)) {
+      const s = window.__following.screenOf(w.resident);
+      if (onScreen(s)) return s;
+    }
+    return null;
+  });
+  if (!car) await page.waitForTimeout(500);
+}
+if (!car) await fail('no car was in view to click');
+await page.mouse.click(car.x, car.y);
+await page
+  .waitForFunction(() => window.__following.resident() !== null, null, { polling: 100, timeout: 5000 })
+  .catch(() => fail(`clicking at ${car.x.toFixed(0)}, ${car.y.toFixed(0)} followed nobody`));
+const followed = await page.evaluate(() => window.__following.resident());
+await page
+  .waitForFunction(() => !document.getElementById('follow').hidden, null, { polling: 100, timeout: 5000 })
+  .catch(() => fail('the card did not show'));
+console.log(`followed resident ${followed}: ${await page.locator('#follow [data-name]').textContent()}`);
+await page.waitForTimeout(6000);
+const after = await page.evaluate((r) => {
+  const w = window.__live.where().find((x) => x.resident === r);
+  const c = window.__camera.state();
+  return {
+    who: window.__following.resident(),
+    d: w ? Math.hypot(c.x - w.x, c.z - w.z) : null,
+    doing: document.querySelector('#follow [data-doing]').textContent,
+  };
+}, followed);
+if (after.who !== followed) await fail(`the follow moved from resident ${followed} to ${after.who}`);
+if (after.d !== null && after.d > 0.5)
+  await fail(`the camera is ${after.d.toFixed(2)} tiles from the resident followed`);
+if (after.doing === '') await fail('the card says nothing about what they are doing');
+console.log(`still on resident ${followed}: "${after.doing}"`);
+await page.screenshot({ path: join(out, 'follow.png') });
+await page.click('#share-button');
+const copied = await page.evaluate(() => window.__copied);
+if (!copied?.includes(`follow=${followed}`))
+  await fail(`the shared link does not name the resident followed: ${copied}`);
+await page.keyboard.press('Escape');
+if (await page.locator('#follow').isVisible()) await fail('Esc did not stop following');
+if ((await page.evaluate(() => window.__following.resident())) !== null) await fail('Esc left someone followed');
+
 const load = () =>
   page.evaluate(() => ({ movers: window.__live.movers, capped: window.__live.capped, fps: window.__live.fps }));
 
-// 3. Day follows the tick: a bright hour, then dusk, each looked at from the page.
+// 4. Day follows the tick: a bright hour, then dusk, each looked at from the page.
 const shoot = async (name, from, to, minutes) => {
   await page
     .waitForFunction(

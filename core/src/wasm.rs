@@ -79,6 +79,26 @@ impl Metro {
         })
     }
 
+    /// How many residents the city has; their numbers run from 0.
+    pub fn population(&self) -> u32 {
+        self.places.population()
+    }
+
+    /// Resident `resident` as JSON (see [`crate::Resident::to_json`]), or
+    /// `undefined` when the city has no such resident.
+    pub fn profile(&mut self, resident: u32) -> Option<String> {
+        let (city, places) = (&self.city, &self.places);
+        self.residents
+            .entry(resident)
+            .or_insert_with(|| {
+                (resident < places.population())
+                    .then(|| crate::Resident::new(city, places, resident))
+                    .flatten()
+            })
+            .as_ref()
+            .map(|r| r.to_json(city))
+    }
+
     /// The trip a `trip` event describes, or `undefined` when the resident has
     /// no trip with these legs. `route` is segment and speed pairs, flat, as
     /// in the event; `vehicle` 0 is on foot.

@@ -345,6 +345,17 @@ export class CityState {
     yield* this.voyages.values();
   }
 
+  /**
+   * The trip `resident` is on at `tick`, or undefined when they are indoors. The resident number is the only key: a
+   * trip into another district is the same resident's, so it is found wherever the log put it.
+   */
+  voyageAt(resident: number, tick: number): Voyage | undefined {
+    const on = (v: Voyage) => v.resident === resident && v.depart <= tick && tick < v.journey.arrive();
+    const current = this.voyages.get(resident);
+    if (current && on(current)) return current;
+    return this.finishing.find(on);
+  }
+
   /** Forget voyages that have arrived by `tick`. */
   retire(tick: number): void {
     for (const [resident, v] of this.voyages) {

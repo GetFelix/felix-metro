@@ -1,0 +1,74 @@
+/* The card for the resident being followed, under the city chip. */
+.follow {
+  top: 76px;
+  left: 16px;
+  box-sizing: border-box;
+  width: min(300px, calc(100vw - 80px));
+  max-height: calc(100vh - 76px - 110px);
+  max-height: calc(100dvh - 76px - 110px);
+  overflow-y: auto;
+  padding: var(--space-3) var(--space-4);
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-2);
+}
+.follow header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+.follow header b {
+  display: block;
+  font-size: 16px;
+  font-weight: 700;
+}
+.follow header small {
+  color: var(--muted);
+  font-size: 12px;
+}
+.follow .icon-button {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-m);
+}
+.follow .doing {
+  margin: 0;
+  color: var(--cyan);
+  font-weight: 600;
+}
+.follow h3 {
+  margin: var(--space-1) 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.follow ol {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+}
+.follow li {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: 3px var(--space-2);
+  border-radius: var(--radius-s);
+  color: var(--muted);
+}
+.follow li time {
+  flex: none;
+  font:
+    12px/1.6 'JetBrains Mono',
+    monospace;
+}
+.follow li[aria-current] {
+  background: var(--cyan-wash);
+  color: var(--text);
+}

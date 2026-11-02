@@ -834,6 +834,7 @@ export async function createCity(
     setTime,
     setShadows,
     fleet: crowd?.fleet ?? null,
+    pick: crowd?.pick.bind(crowd) ?? null,
     setLot: (id: number, b: Building | null) => setLotDrawn(id, b),
     /** The lot the ray first meets, or `null`. Only the generated city has lots to meet. */
     pickLot: (ray: Ray) => pickLotDrawn(ray),
