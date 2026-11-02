@@ -18,15 +18,33 @@
 
 ### The page
 
+- Camera controls. Left-drag turns and tilts, right-drag or Shift-drag slides, the wheel and a pinch zoom toward the
+  point under the pointer, one finger turns and two fingers slide on a touch screen, and `W` `A` `S` `D`, `Q` `E`,
+  `+` `-` and `0` do the same from the keyboard (`0` goes back to the opening view). The point the camera looks at
+  cannot leave the city, at any zoom, on a 2 by 2 or a 4 by 4 map. Moves are damped and the camera never bounces.
+  The camera is one object with `moveTo`, `state` and `setState` for the features that move it, and a move the app
+  makes jumps for a person who asked for reduced motion. `web/src/camera.ts` replaces Three.js's `OrbitControls`,
+  with the maths in `web/src/camera-math.ts`.
 - Timeline: a drag no longer seeks to a moment retention has just dropped. The drag keeps the bar it began on, so a move
   at the left end could land before the oldest tick the city still holds; it now stops at the oldest one held.
 - Scrubbing hard no longer leaves buildings behind. A lot whose building changed twice in quick succession (the
   second before the first was drawn) was drawn twice, and only the older drawing was tracked, so the other stayed in
   the scene for good. A burst of 101 swaps on one lot left 100 stray objects; the construction check now runs that
   burst and wants none.
+- The city list no longer depends on `harbor`. A page opened at a city the gateway refuses read the list through a
+  hardcoded `harbor`, so the picker was empty whenever that city was missing or closed to the person. It now joins
+  `lobby`, which `dev/seed.mjs` creates for this and nothing else. A stack started before this change has no lobby, so
+  its picker is empty for a refused city until it is restarted with `dev/up.sh`. The dev-stack check opens `/#nowhere` and wants the cities listed.
 
 ### Tools
 
+- The builder bot with `--rebuild` handles a demolish that gets no answer. The sim may have applied it, so the bot
+  goes on to the build. If that is refused it builds the old kind back and logs an `orphan` line (`restored: null` if
+  the restore gets no answer either).
+- An `orphan` line written because the bot exited mid-turn now says `restored: null` (unknown) instead of `false`, and
+  `dev/check-builder-bot.mjs` fails on `null` as well as `false`.
+- `dev/lib/turn.mjs` holds a lot's turn, so `node --test dev/lib/turn.test.mjs` (run in CI) can test it with a
+  stand-in for the sim.
 - `clip-local.mjs` points the builder bot at the moved gateway port, and runs its stack as its own compose project so
   its cleanup cannot remove a felix-metro stack started by hand.
 

@@ -1,6 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
 import { CityState, type Trips } from './city';
-import { GatewayError, type EventFrame, type Gateway, type Page, type StateValue, type Subscribed } from './gateway';
+import {
+  Gateway as GatewayClass,
+  GatewayError,
+  type EventFrame,
+  type Gateway,
+  type Page,
+  type StateValue,
+  type Subscribed,
+} from './gateway';
 import type { City } from './layout';
 
 // The wasm decoder is not what is tested here: records travel as JSON text.
@@ -9,7 +17,7 @@ vi.mock('./core/felix_metro_core.js', () => ({
   districtKey: (district: number, _shards: number, routing: string) => `${routing}.${district}`,
 }));
 vi.mock('./auth', () => ({ signIn: async () => 'token' }));
-const { follow, createFeeds } = await import('./live');
+const { follow, createFeeds, connectLive } = await import('./live');
 
 const city = { lots: [] } as unknown as City;
 const trips: Trips = { trip: () => undefined };
@@ -262,5 +270,37 @@ describe('a new session', () => {
       (d) => ready.push(d),
     );
     expect(ready.sort()).toEqual([0, 1, 2]);
+  });
+});
+
+describe('a city the gateway refuses', () => {
+  it('lends the city list through the lobby, which no real city stands in for', async () => {
+    const asked: string[] = [];
+    const subscribed: string[] = [];
+    const lobby = {
+      onError: null,
+      close: () => {},
+      subscribe: async (stream: string) => {
+        subscribed.push(stream);
+        return {} as Subscribed;
+      },
+    };
+    const connect = vi.spyOn(GatewayClass, 'connect').mockImplementation(async (_url, name) => {
+      asked.push(name);
+      if (name !== 'lobby') throw new GatewayError('forbidden', 'no such city');
+      return lobby as unknown as Gateway;
+    });
+    const oidc = {} as Parameters<typeof connectLive>[0]['oidc'];
+    const state = new CityState(city, trips, 1);
+    try {
+      const live = await connectLive({ url: 'ws://gateway', oidc, city: 'nowhere', state });
+      await settle();
+      live.close();
+      expect(live.refused).toBe(true);
+      expect(asked).toEqual(['nowhere', 'lobby']);
+      expect(subscribed).toEqual(['cities']);
+    } finally {
+      connect.mockRestore();
+    }
   });
 });
