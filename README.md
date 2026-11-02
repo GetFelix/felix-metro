@@ -18,6 +18,8 @@ and play forward from there.
 > - Space plays forward from an earlier moment at the city's speed, and `J`, `K` and `L` rewind, stop and speed it up
 >   (see [Playing the past](#playing-the-past)). Back to live races to the live city and joins it with no gap and no
 >   reload.
+> - A sound button under the clock (or `M`) plays an ambient bed that follows the hour: traffic by day, crickets at night,
+>   and a whoosh when you go back in time. It is off until you turn it on (see [Sound](#sound)).
 > - Builders change the city through its command stream: the sim applies `build` and `demolish`, each building rises
 >   in a scaffold or falls in dust, and `dev/builder-bot.mjs` grows a neighbourhood on each city's development area.
 > - The sim resumes a city from its log after a restart.
@@ -89,6 +91,21 @@ on the live city steps back 15 minutes and starts rewinding from there. Rewindin
 still holds, with a note. The keys are ignored while you type in a field or hold Ctrl, Cmd or Alt. They need a live
 connection, so a page opened with `?at` cannot play or rewind.
 
+## Sound
+
+The page has an optional ambient sound. It is off until you turn it on: nothing plays on its own.
+
+- Click the speaker button under the clock, or press `M`, to turn it on or off. The button shows a cross while the
+  sound is off. Your choice is kept in this browser. Browsers only let a page make sound after a click or key press, so
+  if you left it on, it starts again at your first click or key press on the next visit.
+- By day you hear traffic. As the lamps come on it fades into crickets, and back again at dawn. The mix follows the
+  city's clock, so it changes when you go back in time too.
+- Going back in time, with `J` or by dragging the timeline into the past, plays a short whoosh.
+- If the browser has no audio or blocks it, the button stays off and a short note says so.
+
+The sound is made in the browser with the Web Audio API, so there are no audio files to download. The button is not
+shown with `?ui=0` or `?capture`. [docs/ui.md](docs/ui.md#sound) explains how it works.
+
 ## Status
 
 | M   | Milestone           | State                                                                                                                                                                                                                                                                         |
@@ -96,7 +113,7 @@ connection, so a page opened with `?at` cannot play or rewind.
 | 0   | The look, locked    | In progress: style frame, assets, daylight, post-processing, quality tiers, the UI shell (settings sheet, key list, first-visit hint, rolling clock), camera controls, instanced traffic and ambient life done                                                                |
 | 1   | A live city         | Done                                                                                                                                                                                                                                                                          |
 | 2   | Time travel         | In progress: keyframes, seeking, the timeline scrubber, rewind then follow, and backward playback with speeds built, smoothness not yet measured                                                                                                                              |
-| 3   | Follow a life       | In progress: click a car or walker to follow them, with a card for their day and a `?follow=` link; markers for notable events are not built yet                                                                                                                              |
+| 3   | Follow a life       | In progress: click a car or walker to follow them, with a card for their day and a `?follow=` link; ambient sound built; markers for notable events are not built yet                                                                                                         |
 | 4   | Build               | In progress: the sim applies build, demolish and speed commands and records who sent them, and the page animates a building going up (scaffold) or coming down (dust) over 8 ticks, backwards when you rewind; placement tools in the page, roads and zones are not built yet |
 | 5   | Branching timelines | Planned                                                                                                                                                                                                                                                                       |
 | 6   | Scale and failover  | In progress: a restarted sim resumes from its log; 20,000 residents, 16 districts and broker loss are open                                                                                                                                                                    |

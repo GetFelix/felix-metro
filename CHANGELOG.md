@@ -52,6 +52,11 @@
 
 ### The page
 
+- Optional ambient sound, off until turned on. A speaker button beside the settings button, or the `M` key, switches it;
+  the choice is kept in local storage and nothing plays before a click or key press. Traffic by day fades into crickets
+  at dusk and back at dawn, following the city's clock, and a whoosh plays when a rewind or a scrub into the past starts
+  (at most once every 1.5 seconds). It is synthesised with the Web Audio API, so there is no audio asset. It is not shown
+  with `?ui=0` or `?capture`, and a browser that blocks audio gets a short note and no console error.
 - Ambient life: shop windows that light between a shop's opening and closing, chimney smoke on work hours, birds on
   some roofs at dawn, traffic lights at crossroads, a garbage truck on a morning round and delivery vans on the shopping
   streets. The sim logs none of it, so every effect is a pure function of the tick on screen and the city's seed
