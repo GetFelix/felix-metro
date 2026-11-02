@@ -17,7 +17,7 @@ import { createPost, passesFor } from './post';
 import { createQuality, settingsFor } from './quality';
 import { createRenderer } from './renderer';
 import { createCity, move } from './scene';
-import init, { generate, Metro } from './core/felix_metro_core.js';
+import init, { chapter as chapterJson, generate, Metro } from './core/felix_metro_core.js';
 import { parseCity, type City } from './layout';
 import { RoadsOnScreen } from './roads-drawn';
 import { beforeSignIn, fetchOidc, signIn } from './auth';
@@ -30,6 +30,8 @@ import { IDLE_MS, SeekError, Seeker, fold, tryFoldMore, type SeekResult } from '
 import { neighbours } from './rewind';
 import { rateText, shuttle, shuttleKey, type ShuttleKey } from './shuttle';
 import { Latest } from './scrub';
+import { createMarkerFeed, mergeMarkers, type Marker } from './markers';
+import { createMarkerRow } from './marker-row';
 import { agoText, createGuess, createTimeline, moveRange, stepTick, clampTick, type Range } from './timeline';
 import { createLoader, type Loader } from './ui/loader';
 import { createPicker } from './ui/picker';
@@ -44,8 +46,9 @@ import { createBuildBar } from './ui/build-bar';
 import { Placement, type CommandLink } from './placement';
 import { createPlacementView } from './placement-view';
 import { note, toast } from './ui/toast';
+import { goalsView, openingPolicy, readChapter, type Chapter } from './goals';
 import { councilView, fitCouncil, renderCouncil, TALL_SCREEN, type CouncilEvent } from './council';
-import { policyRows, USUAL_POLICY, type PolicyEvent } from './policy';
+import { policyRows, type PolicyEvent } from './policy';
 import { money } from './money';
 import { displayName } from './registry';
 import { Traffic } from './traffic';
@@ -419,6 +422,8 @@ async function main() {
 
   const renderer = createRenderer(quality.tier);
   let city: City | null = null;
+  /** The chapter this city plays, if its seed names one. */
+  let chapter: Chapter | null = null;
   let state: CityState | null = null;
   let link: Link = { down: false };
   /** How commands leave the page, once the live connection exists. */
@@ -466,6 +471,7 @@ async function main() {
   if (layout === 'city') {
     await init();
     city = parseCity(generate(seed, districts));
+    chapter = readChapter(chapterJson(seed));
     document.title = `Felix Metro: ${seed}`;
     document.getElementById('subtitle')!.textContent = displayName(seed);
     let past: { state: CityState; result: SeekResult; seekMs: number } | null = null;
@@ -631,6 +637,7 @@ async function main() {
   const councilChip = document.getElementById('council-chip')!;
   let councilShown: CouncilEvent | null = null;
   let policyShown: PolicyEvent | null = null;
+  let councilFunds: number | null = null;
   let liveInfo: NonNullable<Window['__live']> | null = null;
   if (state && traffic) {
     liveInfo = {
@@ -903,6 +910,10 @@ async function main() {
     let range: Range | null = null;
     const tipTick = () => (hasLive ? liveState!.latest : (range?.newest ?? 0));
     const refreshing = { busy: false };
+    /** The moments builders left on the timeline, read with the span; the rush hours come from the clock. */
+    const feed = createMarkerFeed(async (day) => (await opened?.markerBytes(day)) ?? null);
+    let fed = 0;
+    let marked: { key: string; markers: Marker[] } = { key: '', markers: [] };
     /** Test knob: milliseconds each scrub seek waits before it is shown, to hold one in flight. */
     let holdSeeks = 0;
     const refreshRange = async () => {
@@ -913,6 +924,7 @@ async function main() {
         if (!s) return;
         opened = s;
         range = await s.retained();
+        if (await feed.load({ oldest: range.oldest, live: tipTick() })) fed++;
       } catch (err) {
         console.warn('the span of the timeline could not be read', err);
         if (err instanceof GatewayError && err.code === 'closed') dropHistory();
@@ -1099,6 +1111,8 @@ async function main() {
       refresher = setInterval(() => void refreshRange(), 5000);
     };
     const timelineEl = document.getElementById('timeline')!;
+    // A marker goes to its moment the way a release of the handle there does.
+    const row = createMarkerRow(document.getElementById('markers')!, (tick) => go(tick, false));
     status.onBackToLive(goLive);
     status.onPlay(() => void togglePlay());
     addEventListener('keydown', (e) => {
@@ -1145,6 +1159,12 @@ async function main() {
           at,
           live: !inPast,
         });
+      if (usable) {
+        const shownSpan = bar.span;
+        const key = `${shownSpan.oldest}:${shownSpan.live}:${fed}`;
+        if (key !== marked.key) marked = { key, markers: mergeMarkers(shownSpan, feed.stored) };
+        row.update({ oldest: shownSpan.oldest, newest: shownSpan.newest, markers: marked.markers, at });
+      }
       status.past(inPast);
       if (inPast) {
         status.playLabel(playback && !playback.paused ? 'Pause' : 'Play');
@@ -1533,17 +1553,19 @@ async function main() {
           fundsChip.classList.toggle('short', funds !== null && funds < 0);
           if (funds !== null) fundsText.textContent = money(funds);
         }
-        if (state.council !== councilShown || state.policy !== policyShown) {
+        if (state.council !== councilShown || state.policy !== policyShown || (chapter && funds !== councilFunds)) {
           councilShown = state.council;
           policyShown = state.policy;
+          councilFunds = funds;
           councilChip.classList.toggle('hidden', councilShown === null);
           if (councilShown) {
-            const rows = policyRows(policyShown ?? USUAL_POLICY, tick);
+            const rows = policyRows(policyShown ?? openingPolicy(chapter), tick);
             renderCouncil(
               councilChip,
               councilView(councilShown, city?.shore ?? null),
               window.innerHeight >= TALL_SCREEN,
               rows,
+              chapter ? goalsView(chapter, councilShown, funds) : null,
             );
           }
         }

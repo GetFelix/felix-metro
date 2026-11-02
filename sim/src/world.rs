@@ -134,7 +134,7 @@ impl World {
                 .collect(),
             upkeep: economy::upkeep_base(&city),
             council: Council::new(),
-            policy: Policy::new(),
+            policy: Policy::opening(&city.seed),
             city,
             people,
             tick: 0,
@@ -454,8 +454,8 @@ impl World {
                 tally: self.council.tally,
             });
             // Left out until a policy is first changed, which keeps the rush-hour log under its budget;
-            // a restart reads a missing event as the usual hours and limits.
-            if self.policy != Policy::new() {
+            // a restart reads a missing event as the policies the city opened with.
+            if self.policy != Policy::opening(&self.city.seed) {
                 out[0].events.push(self.policy.event());
             }
             for (district, keyframe) in self.keyframes(tick).into_iter().enumerate() {

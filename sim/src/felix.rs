@@ -10,6 +10,7 @@ use felix_client::{ClientConfig, ClusterClient, CommitOp, ConditionalWrite};
 use tracing::warn;
 
 use crate::commands::{Incoming, commands_stream};
+use crate::markers::{self, Marked};
 use crate::runner::{Log, Write};
 
 /// How to reach Felix and which tenant to act as.
@@ -94,6 +95,9 @@ fn ensure_shards(shards: u32, districts: usize) -> Result<()> {
     Ok(())
 }
 
+/// The shard a day's markers are kept in: district 0's, since it commits every tick.
+const MARKERS_SHARD: u32 = 0;
+
 /// A city's event stream on a cluster.
 #[derive(Clone)]
 pub struct FelixLog {
@@ -138,6 +142,7 @@ impl Log for FelixLog {
         expected: u64,
         record: Vec<u8>,
         keyframe: bool,
+        marked: Option<&Marked>,
     ) -> Result<Write> {
         let mut ops = vec![CommitOp::publish(&*self.stream, record)];
         if keyframe {
@@ -145,6 +150,13 @@ impl Log for FelixLog {
                 &*self.stream,
                 "keyframe",
                 expected.to_le_bytes().to_vec(),
+            ));
+        }
+        if let Some(marked) = marked {
+            ops.push(CommitOp::put(
+                &*self.stream,
+                markers::key(marked.day),
+                marked.bytes.clone(),
             ));
         }
         let written = self
@@ -162,6 +174,20 @@ impl Log for FelixLog {
             ConditionalWrite::Written { .. } => Write::Written,
             ConditionalWrite::Refused { tail } => Write::Refused { tail },
         })
+    }
+
+    async fn markers(&self, day: u32) -> Result<Option<Vec<u8>>> {
+        let state = self
+            .client
+            .state_get_on_shard(
+                &self.tenant,
+                &self.namespace,
+                &self.stream,
+                MARKERS_SHARD,
+                &markers::key(day),
+            )
+            .await?;
+        Ok(state.value.map(|bytes| bytes.to_vec()))
     }
 
     async fn read(&self, district: u16, offset: u64) -> Result<Option<Vec<u8>>> {

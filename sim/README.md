@@ -76,6 +76,14 @@ malformed record or an unknown lot, is recorded in district 0.
 The result codes are in `core/src/record.rs`. A paused city holds the commands it reads
 until a `speed` command or the operator resumes it.
 
+## Timeline markers
+
+An applied `build` or `demolish` also lands in the day's list of markers that the page's timeline shows, with the
+builder's name. The list is the state key `markers.<day>` of the city's events stream (`<day>` counts from 0), kept in
+district 0's shard and written in the same commit as the tick that made the change, so a restart leaves it whole and a
+tick run again writes the same list. A day holds at most 256 markers. Nothing about the tick records changes. A restart reads the days it can write to before its first tick.
+[docs/design.md](../docs/design.md#timeline-markers) has the layout.
+
 ## Money
 
 The city has one account, $100,000 to start, kept as a share per district. A build or demolition takes its price
@@ -101,7 +109,7 @@ percent of the road's speed) with a `policy` command. Each can change once a cit
 shopkeepers at work longer and raise shop tax; a limit caps how fast trips are planned and driven on that class of road.
 District 0 writes a `policy` event when one changes and on every keyframe tick after the first change, with the values and when each last
 changed, and a restart restores them. A client sends one with `policy(kind, value)` from `dev/lib/gateway.mjs`
-(kind 0 is shop hours, 1 the avenue limit, 2 the street limit); the page has no control for it yet. [docs/design.md](../docs/design.md#policy) has the rules.
+(kind 0 is shop hours, 1 the avenue limit, 2 the street limit); the page has no control for it yet. A city that is a chapter (`pier`) opens with its own limits and skips the warm-up. [docs/design.md](../docs/design.md#policy) has the rules.
 
 ## The registry
 

@@ -26,6 +26,7 @@ import {
   UNSUPPORTED,
   build,
   commandBytes,
+  decodeMarkers,
   demolish,
   joined,
   placeRoad,
@@ -99,6 +100,7 @@ const cases = [
   ["a road past the last node", placeRoad(4_000_000_000, 0), UNKNOWN, 0],
   ["taking away a road the city was generated with", removeRoad(0), NOT_BUILT, 0],
 ];
+const refusedAt = [];
 if (city === "pinecrest") {
   cases.push(["a road where one already runs", placeRoad(0, 1), ROAD_EXISTS, 0], ["a road over other roads", placeRoad(0, 2), ROAD_BLOCKED, 0]);
 }
@@ -106,12 +108,48 @@ if (city === "pinecrest") {
   const seen = await mayor.send(cases.map(([, command], i) => [2000 + i, command]));
   cases.forEach(([what, , result, district], i) => {
     const e = seen.get(2000 + i);
+    refusedAt.push(e.record.tick);
     if (e.result !== result) fail(`${what}: result ${e.result}, wanted ${result}`);
     if (e.record.district !== district) fail(`${what}: recorded in district ${e.record.district}, wanted ${district}`);
     if (e.principal !== built.command.principal) fail(`${what}: the sender changed`);
     if (e.record.events.some((x) => CHANGED.includes(x.type))) fail(`${what}: changed something`);
     console.log(`${city}: ${what} refused with ${result} in district ${e.record.district}`);
   });
+}
+
+// The timeline's markers: the day's list, kept in district 0's state, names the build, and who made it. The refused
+// build of the same lot left nothing. A lot can be built and demolished more than once in a day (this check and the
+// restart check both take the first free lot), so a marker is found by its tick. District 0 commits the tick on its
+// own, so the list can trail the command's result by a moment.
+const MARK_BUILT = 1;
+const MARK_DEMOLISHED = 2;
+const markersOf = async (tick, type, lot) => {
+  const deadline = Date.now() + 20_000;
+  for (;;) {
+    const bytes = await mayor.stateGet(`markers.${Math.floor(tick / 5760)}`);
+    const found = bytes && decodeMarkers(bytes)?.markers.filter((m) => m.tick === tick && m.type === type && m.subject === lot);
+    if (found?.length || Date.now() > deadline) return found ?? [];
+    await sleep(300);
+  }
+};
+{
+  const found = await markersOf(built.command.record.tick, MARK_BUILT, built.lot);
+  if (found.length !== 1) fail(`the day's markers hold ${found.length} builds of lot ${built.lot}, wanted 1`);
+  if (found[0].tick !== built.command.record.tick) fail(`the marker is at tick ${found[0].tick}, the build at ${built.command.record.tick}`);
+  if (found[0].by !== NAME) fail(`the marker names "${found[0].by}", wanted "${NAME}"`);
+  console.log(`${city}: the day's markers name the build of lot ${built.lot} at tick ${found[0].tick}, by ${found[0].by}`);
+  // The refusals left no marker: none at their ticks, and no second build of the lot after the first.
+  const days = new Set([built.command.record.tick, ...refusedAt].map((t) => Math.floor(t / 5760)));
+  const listed = [];
+  for (const d of days) {
+    const bytes = await mayor.stateGet(`markers.${d}`);
+    if (bytes) listed.push(...decodeMarkers(bytes).markers);
+  }
+  const stray = listed.filter((m) => refusedAt.includes(m.tick) && m.tick !== built.command.record.tick);
+  if (stray.length) fail(`a refused command left markers: ${JSON.stringify(stray)}`);
+  const again = listed.filter((m) => m.type === MARK_BUILT && m.subject === built.lot && m.tick >= built.command.record.tick);
+  if (again.length !== 1) fail(`lot ${built.lot} has ${again.length} build markers from tick ${built.command.record.tick} on, wanted 1`);
+  console.log(`${city}: the refused commands left no markers`);
 }
 
 // The district's next keyframe shows the build: it is a diff against the generated city, so the lot must be listed.
@@ -136,6 +174,9 @@ if (city === "pinecrest") {
     if (e.result !== APPLIED) fail(`demolishing lot ${lot}: result ${e.result}`);
     if (!e.record.events.some((x) => x.type === "demolished" && x.lot === lot)) fail(`lot ${lot}: no demolished event`);
   }
+  const last = taken.at(-1);
+  const found = await markersOf(seen.get(3000 + last).record.tick, MARK_DEMOLISHED, last);
+  if (found.length !== 1 || found[0].by !== NAME) fail(`the day's markers do not name the demolition of lot ${last}: ${JSON.stringify(found)}`);
 }
 // A road over the cleared ground is laid, and taken away again so the city is as the next check expects.
 const road = ROADS[city];

@@ -36,7 +36,7 @@ async fn main() -> Result<()> {
     let mut cities = JoinSet::new();
     let mut controls = std::collections::HashMap::new();
     let mut warmups = std::collections::HashMap::new();
-    let warmup_ticks = config.warmup_hours * felix_metro_core::TICKS_PER_HOUR;
+    let usual_warmup = config.warmup_hours * felix_metro_core::TICKS_PER_HOUR;
     let mut starts: std::collections::HashMap<String, mpsc::Sender<StartRequest>> =
         std::collections::HashMap::new();
     let all = config
@@ -49,6 +49,12 @@ async fn main() -> Result<()> {
             (spec, Some(held))
         }));
     for (spec, held) in all {
+        // A chapter's clock starts when the city does, so it has no day and a half of history behind it.
+        let warmup_ticks = if felix_metro_core::chapter_for(&spec.name).is_some() {
+            0
+        } else {
+            usual_warmup
+        };
         let (control, speed) = watch::channel(config.ticks_per_second);
         controls.insert(spec.name.clone(), control.clone());
         let (warming, warming_seen) = watch::channel(held.is_none() && warmup_ticks > 0);

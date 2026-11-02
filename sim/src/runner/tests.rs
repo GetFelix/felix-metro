@@ -33,6 +33,8 @@ type Script = Arc<dyn Fn(u16, u64, u32) -> Option<Fault> + Send + Sync>;
 struct Memory {
     shards: Arc<Mutex<HashMap<u16, Vec<Vec<u8>>>>>,
     keyframes: Arc<Mutex<HashMap<u16, u64>>>,
+    /// Timeline markers by day, as district 0's commits left them.
+    markers: Arc<Mutex<HashMap<u32, Vec<u8>>>>,
     /// The command stream: stamped payloads, by offset.
     commands: Arc<Mutex<Vec<Vec<u8>>>>,
     sends: Arc<Mutex<HashMap<(u16, u64), u32>>>,
@@ -48,6 +50,7 @@ impl Memory {
         Memory {
             shards: Arc::default(),
             keyframes: Arc::default(),
+            markers: Arc::default(),
             commands: Arc::default(),
             sends: Arc::default(),
             order: Arc::default(),
@@ -86,7 +89,13 @@ impl Memory {
             .unwrap_or_default()
     }
 
-    fn append(&self, district: u16, expected: u64, record: Vec<u8>, keyframe: bool) -> Write {
+    fn append(
+        &self,
+        district: u16,
+        expected: u64,
+        record: Vec<u8>,
+        (keyframe, marked): (bool, Option<&Marked>),
+    ) -> Write {
         let mut shards = self.shards.lock().unwrap();
         let shard = shards.entry(district).or_default();
         if shard.len() as u64 != expected {
@@ -100,6 +109,12 @@ impl Memory {
         if keyframe {
             self.keyframes.lock().unwrap().insert(district, expected);
         }
+        if let Some(marked) = marked {
+            self.markers
+                .lock()
+                .unwrap()
+                .insert(marked.day, marked.bytes.clone());
+        }
         (self.hook)(district, expected);
         Write::Written
     }
@@ -112,7 +127,9 @@ impl Log for Memory {
         expected: u64,
         record: Vec<u8>,
         keyframe: bool,
+        marked: Option<&Marked>,
     ) -> Result<Write> {
+        let state = (keyframe, marked);
         let attempt = {
             let mut sends = self.sends.lock().unwrap();
             let n = sends.entry((district, expected)).or_default();
@@ -120,23 +137,27 @@ impl Log for Memory {
             *n
         };
         match (self.script)(district, expected, attempt) {
-            None => Ok(self.append(district, expected, record, keyframe)),
+            None => Ok(self.append(district, expected, record, state)),
             Some(Fault::Fail) => Err(anyhow::anyhow!("connection reset")),
             Some(Fault::LoseAnswer) => {
-                self.append(district, expected, record, keyframe);
+                self.append(district, expected, record, state);
                 std::future::pending().await
             }
             Some(Fault::Hang) => std::future::pending().await,
             Some(Fault::Foreign) => {
-                self.append(district, expected, vec![9, 9, 9], false);
+                self.append(district, expected, vec![9, 9, 9], (false, None));
                 std::future::pending().await
             }
             Some(Fault::Permanent) => Err(felix_client::CommitError::Unsupported.into()),
             Some(Fault::Slow(wait)) => {
                 tokio::time::sleep(wait).await;
-                Ok(self.append(district, expected, record, keyframe))
+                Ok(self.append(district, expected, record, state))
             }
         }
+    }
+
+    async fn markers(&self, day: u32) -> Result<Option<Vec<u8>>> {
+        Ok(self.markers.lock().unwrap().get(&day).cloned())
     }
 
     async fn read(&self, district: u16, offset: u64) -> Result<Option<Vec<u8>>> {
@@ -714,7 +735,7 @@ async fn the_log_and_the_city_are_the_same_at_any_speed_and_a_seek_finds_its_tic
 #[tokio::test(start_paused = true)]
 async fn a_log_with_someone_elses_records_stops_the_city() {
     let log = Memory::healthy();
-    log.append(1, 0, vec![1, 2, 3], false);
+    log.append(1, 0, vec![1, 2, 3], (false, None));
     let err = run_city("harbor", city(), settings(5), log)
         .await
         .unwrap_err();
@@ -786,7 +807,7 @@ async fn another_writer_in_the_warmup_stops_the_city() {
 #[tokio::test(start_paused = true)]
 async fn a_city_with_history_does_not_warm_up_again() {
     let log = Memory::healthy();
-    log.append(1, 0, vec![1, 2, 3], false);
+    log.append(1, 0, vec![1, 2, 3], (false, None));
     let err = run_city("harbor", city(), warm(2000, 2000), log.clone())
         .await
         .unwrap_err();
