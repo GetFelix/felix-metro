@@ -3,9 +3,10 @@
 use super::wire::{Reader, Writer};
 use super::{
     Authored, BuildingDiff, Command, CommandRecord, Counts, DecodeError, Doing, EncodeError, Event,
-    FACTIONS, FLAG_KEYFRAME, Header, KIND_COMMAND, KIND_MARKERS, KIND_REGISTRY, KIND_TICK, Keyframe,
-    Leg, MARK_BUILT, MARK_DEMOLISHED, MARK_ROAD, MAX_PROGRESS, Marker, MarkersRecord, POLICIES,
-    PolicySetting, RegistryRecord, ResidentState, RoadDiff, Standing, Tally, TickRecord, Vehicle,
+    FACTIONS, FLAG_KEYFRAME, Header, KIND_COMMAND, KIND_MARKERS, KIND_REGISTRY, KIND_TICK,
+    Keyframe, Leg, MARK_BUILT, MARK_DEMOLISHED, MARK_ROAD, MAX_PROGRESS, Marker, MarkersRecord,
+    POLICIES, PolicySetting, RegistryRecord, ResidentState, RoadDiff, Standing, Tally, TickRecord,
+    Vehicle,
 };
 use crate::city::City;
 use crate::schedule::TICKS_PER_DAY;
