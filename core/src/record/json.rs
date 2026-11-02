@@ -187,6 +187,28 @@ fn event(out: &mut String, e: &Event) {
         Event::Balance { amount } => {
             let _ = write!(out, "{{\"type\":\"balance\",\"amount\":{amount}");
         }
+        Event::Council {
+            days,
+            patience,
+            standings,
+            ..
+        } => {
+            let _ = write!(
+                out,
+                "{{\"type\":\"council\",\"days\":{days},\"patience\":{patience},\"standings\":["
+            );
+            for (n, s) in standings.iter().enumerate() {
+                if n > 0 {
+                    out.push(',');
+                }
+                let _ = write!(
+                    out,
+                    "{{\"demand\":{},\"measure\":{},\"satisfaction\":{},\"unhappyDays\":{}}}",
+                    s.demand, s.measure, s.satisfaction, s.unhappy_days
+                );
+            }
+            out.push(']');
+        }
     }
     out.push('}');
 }

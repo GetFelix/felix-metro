@@ -26,7 +26,7 @@ fn name(rng: &mut Rng) -> String {
 
 fn event(rng: &mut Rng) -> Event {
     let resident = rng.next_u64() as u32;
-    match rng.below(15) {
+    match rng.below(16) {
         0 => Event::Trip {
             resident,
             vehicle: rng.below(6) as u8,
@@ -96,7 +96,7 @@ fn event(rng: &mut Rng) -> Event {
         13 => Event::Balance {
             amount: (rng.next_u64() as i64) >> rng.below(64),
         },
-        _ => Event::Author {
+        14 => Event::Author {
             principal: rng.next_u64(),
             name: name(rng),
             lots: (0..rng.below(6))
@@ -105,6 +105,21 @@ fn event(rng: &mut Rng) -> Event {
                     built: rng.next_u64() as u32,
                 })
                 .collect(),
+        },
+        _ => Event::Council {
+            days: rng.below(400) as u32,
+            patience: rng.below(6) as u8,
+            standings: std::array::from_fn(|_| Standing {
+                demand: rng.below(500) as u32,
+                measure: rng.below(500) as u32,
+                satisfaction: rng.below(101) as u8,
+                unhappy_days: rng.below(5) as u8,
+            }),
+            tally: Tally {
+                commutes: rng.below(20_000) as u32,
+                commute_ticks: rng.next_u64() >> rng.below(64),
+                visits: rng.below(20_000) as u32,
+            },
         },
     }
 }
