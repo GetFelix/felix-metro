@@ -7,6 +7,11 @@
 //! See `docs/design.md`, "Roads".
 
 use super::roads::{EAST, NORTH, SOUTH, WEST};
+use crate::record::{
+    REFUSED_MALFORMED, REFUSED_NOT_BUILT, REFUSED_NOT_STRAIGHT, REFUSED_ROAD_BLOCKED,
+    REFUSED_ROAD_EXISTS, REFUSED_TOO_LONG, REFUSED_UNKNOWN,
+};
+
 use super::{City, Door, Lot, RoadPiece, RoadTile, Segment, SegmentClass, piece_of};
 
 /// The longest built segment, in tiles.
@@ -49,6 +54,21 @@ impl std::fmt::Display for RoadError {
 }
 
 impl std::error::Error for RoadError {}
+
+impl RoadError {
+    /// The `command` event result a refusal of this kind is recorded with.
+    pub fn refusal(self) -> u8 {
+        match self {
+            RoadError::UnknownNode | RoadError::UnknownSegment => REFUSED_UNKNOWN,
+            RoadError::NotInLine => REFUSED_NOT_STRAIGHT,
+            RoadError::TooLong => REFUSED_TOO_LONG,
+            RoadError::Joined => REFUSED_ROAD_EXISTS,
+            RoadError::Blocked => REFUSED_ROAD_BLOCKED,
+            RoadError::NotBuilt => REFUSED_NOT_BUILT,
+            RoadError::Order => REFUSED_MALFORMED,
+        }
+    }
+}
 
 /// A built segment as a keyframe lists it: enough to lay it again.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

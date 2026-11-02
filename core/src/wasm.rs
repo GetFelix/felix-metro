@@ -103,6 +103,27 @@ impl Metro {
         self.city.roads_json()
     }
 
+    /// Why a road between nodes `a` and `b` is refused on the land and roads alone:
+    /// 0 if it is not, else the `command` result the sim would record
+    /// (see [`crate::RoadError::refusal`]). Whether a resident uses a tile, or a
+    /// building stands on it, is for the caller to check.
+    #[wasm_bindgen(js_name = roadCheck)]
+    pub fn road_check(&self, a: u32, b: u32) -> u8 {
+        self.city.road_tiles(a, b).err().map_or(0, |e| e.refusal())
+    }
+
+    /// The tiles strictly between nodes `a` and `b` that a road would cover, as
+    /// x and z pairs, or nothing if no road may go there.
+    #[wasm_bindgen(js_name = roadTiles)]
+    pub fn road_tiles(&self, a: u32, b: u32) -> Vec<u32> {
+        self.city
+            .road_tiles(a, b)
+            .unwrap_or_default()
+            .into_iter()
+            .flat_map(|(x, z)| [u32::from(x), u32::from(z)])
+            .collect()
+    }
+
     /// [`crate::City::hash`] of the city with the built roads laid, as 16 hex digits.
     #[wasm_bindgen(js_name = cityHash)]
     pub fn city_hash(&self) -> String {

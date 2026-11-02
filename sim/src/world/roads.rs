@@ -4,12 +4,9 @@
 //! The rules about the land are `City::road_tiles`'s; the ones that need the
 //! world are here: the lots residents use, the buildings, and the funds.
 
-use felix_metro_core::RoadError;
 use felix_metro_core::record::{
-    Event, LEDGER_BUILD, LEDGER_DEMOLISH, REFUSED_IN_USE, REFUSED_MALFORMED, REFUSED_NO_FUNDS,
-    REFUSED_NOT_BUILT, REFUSED_NOT_STRAIGHT, REFUSED_OCCUPIED, REFUSED_ROAD_BLOCKED,
-    REFUSED_ROAD_EXISTS, REFUSED_TOO_LONG, REFUSED_UNKNOWN, RESULT_APPLIED, ROAD_ADDED,
-    ROAD_REMOVED,
+    Event, LEDGER_BUILD, LEDGER_DEMOLISH, REFUSED_IN_USE, REFUSED_NO_FUNDS, REFUSED_NOT_BUILT,
+    REFUSED_OCCUPIED, REFUSED_UNKNOWN, RESULT_APPLIED, ROAD_ADDED, ROAD_REMOVED,
 };
 
 use super::{Applied, World, economy, is_empty};
@@ -31,7 +28,7 @@ impl World {
         let district = self.node_district(a).unwrap_or(0);
         let tiles = match self.city.road_tiles(a, b) {
             Ok(tiles) => tiles,
-            Err(err) => return Applied::refused(district, road_refusal(err)),
+            Err(err) => return Applied::refused(district, err.refusal()),
         };
         // The same rules as a building: a lot residents go to, or one with something on it, is not bare ground.
         for &(x, z) in &tiles {
@@ -120,17 +117,5 @@ impl World {
     pub(super) fn roads_changed(&mut self) {
         self.cars.resize(self.city.segments.len(), 0);
         self.upkeep = economy::upkeep_base(&self.city);
-    }
-}
-
-fn road_refusal(err: RoadError) -> u8 {
-    match err {
-        RoadError::UnknownNode | RoadError::UnknownSegment => REFUSED_UNKNOWN,
-        RoadError::NotInLine => REFUSED_NOT_STRAIGHT,
-        RoadError::TooLong => REFUSED_TOO_LONG,
-        RoadError::Joined => REFUSED_ROAD_EXISTS,
-        RoadError::Blocked => REFUSED_ROAD_BLOCKED,
-        RoadError::NotBuilt => REFUSED_NOT_BUILT,
-        RoadError::Order => REFUSED_MALFORMED,
     }
 }
