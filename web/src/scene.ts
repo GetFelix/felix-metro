@@ -834,6 +834,7 @@ export async function createCity(
     setTime,
     setShadows,
     fleet: crowd?.fleet ?? null,
+    pick: crowd?.pick.bind(crowd) ?? null,
     setLot: (id: number, b: Building | null) => setLotDrawn(id, b),
     /** Show the building a builder's tool would put on lot `id` as a ghost, or none with null; `fits` tints it. */
     previewBuilding: (...args: Parameters<typeof previewBuilding>) => previewBuilding(...args),

@@ -130,6 +130,20 @@ describe('CityState', () => {
     expect([...state.active()].map((v) => v.depart)).toEqual([14]);
   });
 
+  it('finds the trip a resident is on at a tick by the resident number, from whichever district told of it', () => {
+    const state = new CityState(city, trips, 2);
+    // Resident 1 leaves from district 0; their next trip arrives in a record of district 1.
+    state.apply(record(0, 5, [trip(1, 5)]));
+    state.apply(record(1, 5, [trip(1, 14)]));
+    expect(state.voyageAt(1, 4)).toBeUndefined();
+    expect(state.voyageAt(1, 5)?.depart).toBe(5);
+    // The earlier trip is replaced in the map but still on the road until it arrives.
+    expect(state.voyageAt(1, 13)?.depart).toBe(5);
+    expect(state.voyageAt(1, 16)?.depart).toBe(14);
+    expect(state.voyageAt(1, 24)).toBeUndefined();
+    expect(state.voyageAt(2, 8)).toBeUndefined();
+  });
+
   it('refuses a record that skips a tick and takes it once the gap is filled', () => {
     const state = new CityState(city, trips, 2);
     expect(state.apply(record(0, 5))).toBe('applied');

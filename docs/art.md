@@ -117,6 +117,8 @@ controls.setState(JSON.parse(saved), { ease: false }); // jump straight back to 
 
 `moveTo(target, distance, azimuth, polar, { ease })` holds every number inside the limits and turns the short way round. `state()` is where the camera is heading, rounded to three places, so a link can carry it. `setState` takes the same object back and returns false for anything else. In a dev build, or under `?trace`, the camera is on the page as `window.__camera` for trying these in the console.
 
+`track(x, z)` moves the goal's ground point and leaves the rest, which is what following a resident does every frame, so the person's distance and angles are kept. The camera dispatches `start` when anything takes it and `steer` when the person moves the point it looks at (a drag of the ground, a pan key, reset); turning and zooming send no `steer`. [The follow card](ui.md#the-follow-card) lets go of a resident on `steer`.
+
 The opening drift (`startIntro`) places the camera through the same object and ends when the person touches any control or the app moves the camera, so a saved view applied at load is not drifted away from. Under `?capture&trace` the controls are off and the clip script positions the camera itself, as before.
 
 ## Construction
@@ -245,6 +247,10 @@ flowchart LR
 the lot at each end of a trip. It places every voyage between `fleet.begin(dt)` and `fleet.end()` and keeps nothing
 between rounds, so what is drawn is exactly what the last update placed. `web/src/fleet.ts` turns those poses into
 instances.
+`positionOf(voyage, tick)` gives the same pose for one voyage without placing it, so the camera can follow a resident the
+fleet has culled or the tier's cap has left out. The fleet also keeps each placed car's and walker's resident number and
+position for the round, and `pick` turns a point on the screen into the nearest resident (see
+[Following a resident](design.md#following-a-resident)).
 
 **Cars.** A car model is a body and four wheels, and on some a door, each its own mesh. The fleet makes one instanced
 mesh for each part of each of the seven car models (the sim's six, and the page's own garbage truck), and an instance's matrix is the car's pose times the part's place in

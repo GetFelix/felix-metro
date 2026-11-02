@@ -40,6 +40,18 @@ describe('momentLink', () => {
     });
   });
 
+  it('adds the resident being followed, and nothing when there is none', () => {
+    const link = momentLink('https://metro.example/?districts=3&follow=9#harbor', 4321, view, 412);
+    expect(link).toBe('https://metro.example/?districts=3&at=4321&cam=1.25,-3,21.5,0.785,0.9&follow=412#harbor');
+    expect(momentLink('https://metro.example/?follow=9#harbor', 4321, view)).not.toContain('follow');
+    expect(momentLink('https://metro.example/#harbor', 4321, view, 0)).toContain('&follow=0');
+  });
+
+  it('is read back as the same resident', () => {
+    const link = new URL(momentLink('http://localhost/#bay', 77, view, 15));
+    expect(parseParams(link.search, link.hash)).toMatchObject({ at: 77, cam: view, follow: 15 });
+  });
+
   it('starts the query when there is nothing to keep', () => {
     expect(momentLink('http://localhost/', 5, view)).toBe('http://localhost/?at=5&cam=1.25,-3,21.5,0.785,0.9');
   });

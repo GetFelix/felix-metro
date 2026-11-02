@@ -5,11 +5,13 @@ the settings, sound, build and demolish buttons and the panels they open. This p
 in the code, and how to add to it. It also holds the rules (colour, type, motion and wording) that keep new
 controls looking like the ones already there.
 
-| Day, with the LIVE pill                                  | Night, with the settings sheet                                         |
-| -------------------------------------------------------- | ---------------------------------------------------------------------- |
-| ![The overlay at noon](screenshots/ui-shell-day.jpg?v=1) | ![The settings sheet at night](screenshots/ui-settings-night.jpg?v=1)  |
-| **The key list**                                         | **A phone, looking at an earlier moment**                              |
-| ![The key list](screenshots/ui-keys-day.jpg?v=1)         | ![The overlay on a phone at night](screenshots/ui-phone-night.jpg?v=1) |
+| Day, with the LIVE pill                                       | Night, with the settings sheet                                         |
+| ------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| ![The overlay at noon](screenshots/ui-shell-day.jpg?v=1)      | ![The settings sheet at night](screenshots/ui-settings-night.jpg?v=1)  |
+| **The key list**                                              | **A phone, looking at an earlier moment**                              |
+| ![The key list](screenshots/ui-keys-day.jpg?v=1)              | ![The overlay on a phone at night](screenshots/ui-phone-night.jpg?v=1) |
+| **Following a resident**                                      | **The follow card on a phone**                                         |
+| ![The follow card at noon](screenshots/ui-follow-day.jpg?v=1) | ![The follow card on a phone](screenshots/ui-follow-phone.jpg?v=1)     |
 
 ## What you can do
 
@@ -23,8 +25,14 @@ controls looking like the ones already there.
 - **Get a hint on a first visit.** When the timeline first appears, a line above it says "Drag the timeline to go
   back in time". It goes away on your first click, key press or scroll, or after a few seconds, and it is not
   shown again in that browser.
+- **Follow a resident.** Click a car or walker (tap on a touch screen), or press `F` for the one nearest the middle of
+  the view. The camera tracks them, and a card under
+  the city name shows their name, what kind of resident they are, what they are doing now and their day. `Esc`, the
+  card's close button or moving the view lets go (`Esc` first closes an open menu, the sheet or photo mode); turning and zooming do not.
+  [Following a resident](../README.md#following-a-resident) says more.
 - **Share a moment.** The link button under the settings button copies a link that opens the city at the moment on
-  screen, from the same camera view. [Moments](../README.md#moments) shows the link and how it is read.
+  screen, from the same camera view, and with the same resident followed if there is one.
+  [Moments](../README.md#moments) shows the link and how it is read.
 - **Build and take down.** The two buttons at the left of the row under the clock, or `B` and `X`, pick the build and
   demolish tools. A panel under them picks the building, `R` turns it and the pointer moves a ghost of it from lot to
   lot. Click, or tap, to place it. On a touch screen a demolish takes two taps, one to pick the building and one to confirm,
@@ -32,8 +40,9 @@ controls looking like the ones already there.
   or placed while the controls are hidden. The buttons are off, with a note that says why, when the page has no live city, is
   showing an earlier moment, or is signed in as someone who may only watch. [Building](../README.md#building) says
   what a builder may do and why only the cleared ground.
-- **Hide the controls.** `H` hides every control, message and the frame times, for a clean picture. `H` or `Esc`
-  brings them back. It does nothing while a field has focus or the settings sheet is open.
+- **Hide the controls.** `H` hides every control, message, the follow card and the frame times, for a clean picture.
+  `H` or `Esc` brings them back, and that `Esc` does not stop a follow. It does nothing while a field has focus or the
+  settings sheet is open.
 - **Leave it on a wall.** After a minute with no mouse, touch or key the camera turns slowly. Any input stops it.
 - **Reach everything with the keyboard.** Every control can be focused with `Tab` and used with `Enter`,
   `Space` or the arrow keys. The focused control gets a cyan ring. With an earlier moment on screen, `Space` plays
@@ -48,6 +57,7 @@ These page parameters change the overlay:
 | `?ui=0`          | Hides the overlay: no chips, no buttons, no `?` or `M` key and no hint                                                                                                                                                 |
 | `?capture&trace` | The same as `?ui=0` for the controls and the hint, since a clip must draw as is                                                                                                                                        |
 | `?attract=30`    | Seconds with no input before the camera turns on its own (60 by default, `0` for never)                                                                                                                                |
+| `?follow=412`    | Opens with the camera on resident 412 and their card. A resident the city lacks is said so                                                                                                                             |
 | `?live=0`        | Draws the city with no gateway; the timeline never appears, so there is no hint, and the build buttons are off                                                                                                         |
 | `?as=mayor`      | Picks which login the dev stack's stand-in identity provider signs in (`viewer` if left out); `mayor` may build. It grants nothing with a real provider, and a tab already signed in keeps its token, so use a new tab |
 | `?hud`           | Shows frame times under the Felix Metro chip, for tuning                                                                                                                                                               |
@@ -66,6 +76,7 @@ framework. Each part has one file of each kind:
 | Timeline bar                     | `web/src/timeline.ts`                                              | `web/src/ui/timeline.css` |
 | Settings sheet and key list      | `web/src/ui/shell.ts`, `settings.ts`, `keys.ts`, `sheet.ts`        | `web/src/ui/sheet.css`    |
 | Share button, photo mode         | `web/src/ui/share.ts`, `web/src/ui/photo.ts`, `web/src/moments.ts` | `web/src/ui/photo.css`    |
+| Follow card                      | `web/src/ui/follow-card.ts`, `web/src/follow.ts`, `web/src/tap.ts` | `web/src/ui/follow.css`   |
 | Sound button                     | `web/src/ui/sound.ts`                                              | `web/src/ui/kit.css`      |
 | Build and demolish tools         | `web/src/ui/build-bar.ts`, `web/src/placement.ts`                  | `web/src/ui/build.css`    |
 | Hint and messages                | `web/src/ui/hint.ts`, `web/src/ui/toast.ts`                        | `web/src/ui/toast.css`    |
@@ -210,6 +221,37 @@ from the element's `data-old` attribute, which is not text.
 storage as "not seen" so it never throws. The tip is offered when the timeline first becomes usable and the
 page is not already showing the past. With no gateway there is no timeline, so no tip.
 
+### The follow card
+
+A click or tap on a car or walker starts a follow. `tap.ts` tells a click from the start of a drag, so turning the view
+never picks anything, and `main.ts` asks the fleet which resident is under the pointer. `follow.ts` holds the rest and
+has no DOM in it: a `Following` object keeps the resident's number, and each frame it works out where they are and what
+they are doing, moves the camera and hands the card a `CardView`. `follow-card.ts` only draws that view.
+
+```mermaid
+flowchart LR
+    CLICK["Click or tap<br/>tap.ts"] --> PICK["Fleet.pick<br/>who is under it"]
+    URL["?follow=412"] --> FOLLOW["Following.start"]
+    PICK --> FOLLOW
+    FOLLOW -->|every frame| WHERE["Where are they at this tick?<br/>trip, or the schedule"]
+    WHERE --> CAM["Camera tracks them"]
+    WHERE --> CARD["Card: name, doing, day"]
+    PAN["Pan, reset or Esc"] -->|let go| FOLLOW
+```
+
+The card's markup is built once, and its rows are redrawn only when what they are doing changes. It is placed before the city chip in the page
+so the city menu is never hidden behind it, and it is a `.chip`, so photo mode and `?ui=0` hide it. A region that is always in the page says who is followed, since text in a card that
+starts hidden is not read out, and when the card goes while it holds focus, focus moves to a control. `Esc` is read in
+the capture phase, before photo mode, the sheet and the city menu close themselves on the same key, so the press that leaves photo
+mode or closes either does not also stop the follow (`isStopKey` is the rule, and it is unit tested).
+
+The camera tells `steer` when the person moves the point it looks at (a drag of the ground, a pan key, reset); that
+is what lets go. Turning and zooming do not, so a resident can be looked at from any side. A pinch is not a move: two
+fingers must slide their middle 24 pixels before it counts.
+
+To change what the card says, edit the phrases in `follow.ts`; `copy.test.ts` checks them against the same rules as the
+rest of the overlay.
+
 ## The kit
 
 New controls use these, so that they look like part of the page. All colours come from the palette: the CSS custom
@@ -315,6 +357,8 @@ node scripts/check-ui.mjs http://localhost:5173/ /tmp/ui
 - the clock rolls, and holds still with reduced motion;
 - `H` hides every control, `?cam` starts the camera where a link says, and attract mode turns the camera and stops on a
   mouse move;
+- `?follow=` shows the resident's card with their day and puts the camera on them, turning keeps the follow, and `Esc`,
+  a pan, a pan key and reset let it go;
 - nothing overflows or collides at 360px, even with the city picker's arrow showing and the Reconnecting pill.
 
 It writes screenshots of the shell, the sheet, the key list and the hint, by day and night, at 1280px and 360px wide,

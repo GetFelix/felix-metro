@@ -43,6 +43,18 @@ export const SHORTCUTS: readonly ShortcutGroup[] = [
     rows: CAMERA_GESTURES.map((gesture) => ({ keys: [[gesture.input]], action: gesture.label })),
   },
   {
+    title: 'Following',
+    when: 'Moving the view (right-drag, Shift-drag, two fingers, W A S D or 0) lets go too; turning and zooming do not.',
+    rows: [
+      {
+        keys: [['Click'], ['Tap']],
+        action: 'Follow a car or walker: the camera tracks them and a card shows their day',
+      },
+      { keys: [['F']], action: 'Follow the car or walker nearest the middle of the view' },
+      { keys: [['Esc']], action: 'Stop following' },
+    ],
+  },
+  {
     title: 'Playback',
     when: 'Looking at an earlier moment, or J from the live city. Space does nothing while a button is focused.',
     rows: [
