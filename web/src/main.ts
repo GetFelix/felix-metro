@@ -36,6 +36,8 @@ import { createLoader, type Loader } from './ui/loader';
 import { createLotHover, type LotHover } from './ui/lot-hover';
 import { createPicker } from './ui/picker';
 import { createShell, type Shell } from './ui/shell';
+import { createStatsPanel, type StatsPanel } from './ui/stats';
+import { createStats, type CityStats } from './stats';
 import { createSound } from './ui/sound';
 import { createSoundscape } from './soundscape';
 import { intoThePast, startsRewind, whooshDue } from './soundscape-mix';
@@ -70,6 +72,8 @@ declare global {
       /** Put the camera low beside the first car drawn. */
       closeUp(): boolean;
     };
+    /** The city stats for the state and tick on screen, as the panel shows them. */
+    __stats?: () => CityStats | null;
     /** What became of each record the page took, as `[district, tick, result]`; only under ?trace. */
     __trace?: [number, number, string][];
     /** The seek behind a page opened with ?at: the tick shown, and the ms to find and fold the city, and the ms after that to its first frame. */
@@ -353,7 +357,9 @@ async function main() {
   let apply: (tier: Tier) => void = () => {};
   const quality = createQuality({ url: urlTier, still, onChange: (t) => apply(t) });
   // The capture job needs the page as it draws, with nothing to dismiss, so it gets no controls and no tip.
-  const shell = ui && !capture && layout === 'city' ? createShell(quality) : null;
+  const stats: StatsPanel | null =
+    ui && !capture && layout === 'city' ? createStatsPanel(() => shell?.isOpen ?? false) : null;
+  const shell: Shell | null = stats ? createShell(quality, stats) : null;
   // The sound has no audio context until its button is first used, and none at all without the button.
   const soundscape = createSoundscape();
   const sound = shell
@@ -512,6 +518,25 @@ async function main() {
     state.onVoyageEnd = (v) => traffic.release(v);
     hour = cityTime(Math.max(0, state.latest - 1)).hour;
   }
+  // The tick on screen, as the numbers of the stats panel are read for: null before the first frame has one.
+  const readStats = city ? createStats(city) : null;
+  const statsNow = (): CityStats | null => {
+    if (!readStats) return null;
+    const tick = liveInfo?.tick;
+    const folded = state && tick !== undefined && !Number.isNaN(tick);
+    return readStats(folded ? state : null, folded ? Math.floor(tick) : 0);
+  };
+  let statsAt = 0;
+  // Drawn at once when switched on, so the panel is never up empty while a slow first frame is awaited.
+  const showStats = () => {
+    const read = statsNow();
+    if (read) stats?.show(read);
+  };
+  stats?.onChange((on) => {
+    statsAt = 0;
+    if (on) showStats();
+  });
+  if (hooks) window.__stats = statsNow;
   hour = frozenHour ?? (state ? hour : parseFloat(slider.value));
   slider.value = String(hour);
   slider.addEventListener('input', () => {
@@ -1386,6 +1411,11 @@ async function main() {
           fps: smoothed,
         });
       }
+    }
+    // A few times a second is plenty for numbers a person reads.
+    if (stats?.on && now - statsAt >= 250) {
+      statsAt = now;
+      showStats();
     }
     // With no log there is no tick, only the hour on the slider, and the resident is placed by their schedule.
     if (!state) following?.frame(hour * TICKS_PER_HOUR, noVoyage);

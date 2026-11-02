@@ -325,7 +325,8 @@ commit also writes the stream state key `keyframe`, so the newest one is one
 
 Because buildings and roads are diffs against the city the seed generates, the
 keyframe of a city nobody has built in carries none of them, and the cost is
-the residents. The counts are what the stats sparkline plots.
+the residents. The counts summarise the residents list for a reader that would rather not walk it: the city stats
+(see [City stats](#city-stats)) are checked against them in a test.
 
 ### Who built what
 
@@ -735,6 +736,41 @@ touched, not at page load; the span is read again every 5 s only while the
 handle is dragged or the past is shown, and the sessions close after 30 s idle. The pill in the clock reads how long
 before the live tip the city on screen is, in city time.
 
+### City stats
+
+The stats panel shows the residents, who is on the road and the buildings by kind for the tick on screen. They are read
+from the folded state the scene is drawn from, never from a separate feed, so a scrub, a rewind or a seek changes them
+with the picture. `web/src/stats.ts` does the counting.
+
+| Number             | Where it comes from                                                                                                                                              |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Residents          | The residents every district's keyframe lists, added up whenever every district has a keyframe of one tick. Nobody moves in or out, so the total stays the same. |
+| On the road        | Residents with a trip that has left by the tick on screen and not yet arrived, split into cars and walkers by vehicle kind.                                      |
+| Buildings, by kind | The generated city's lots, changed by the lots the state says differ from it. Trees, plaza props and chimneys are not counted.                                   |
+
+A trip is on the road from its `depart` tick up to, but not including, its arrival tick. The arrival is known when the
+`trip` event is folded, from the rebuilt journey. A trip that left before the state's first record has no `trip`
+event, so it comes from the keyframe, which lists every resident on the road, and ends at its `arrived` event. That is
+what makes the count right straight after a seek. A seek folds one district's records and then the next's, and an
+arrival is in the district the traveller reaches, not the one the keyframe names them in, so an `arrived` event the
+state cannot place yet is kept until the keyframe that needs it is folded. The page draws such a car only from the resident's next trip (see
+[The live view](#the-live-view)), but it counts it.
+
+The state can hold records a tick or two ahead of the one drawn, so the count is asked for the drawn tick and ignores
+trips that leave after it. The panel reads the numbers a few times a second, not every frame.
+
+`web/src/stats.test.ts` follows the sim's own log of a morning (07:00 to 09:00, four districts) and compares the
+page's count with what the sim says was on the road at every tick, whether the state is folded from the start, holds
+records ahead of the tick, or starts at a keyframe as a seek does. The fixture, `web/src/stats-fixture.json`, is
+written by a test in `sim/src/world/tests.rs`, which fails when the file is out of date:
+
+```sh
+METRO_WRITE_FIXTURE=1 cargo test -p felix-metro-sim the_stats_fixture
+```
+
+Residents by activity (at home, at work, asleep) are not shown: only keyframes carry them, once an hour, and the events
+between them do not say where a resident is going to stay.
+
 ## Building
 
 Builders publish commands (`place road`, `zone`, `build`, `demolish`) to the
@@ -798,14 +834,14 @@ anything is built inside it.
 ## Risks, and what this surfaces in Felix
 
 - **Interpolation drift.** A car drawn by interpolation can disagree with where the sim thinks it is if the sim changes its plan without a `replan`. Every change of plan is an event, and the client trusts the log over its own guess.
-- **Retention.** History is bounded by one broker's disk. At 1 GB a day that is weeks, but tiered storage that Felix can read back would make it unbounded.
+- **Retention.** History is bounded by one broker's disk. At 1 GB a day that is weeks, but tiered storage that Felix can read back would make it unbounded. Until then the dev stack (`dev/seed.mjs`) keeps each stream for 7 days or 1 GiB, whichever is reached first, and everything older is gone, so a page asked for an older tick says the log no longer holds it.
 - **Scope.** No feature that does not serve one of the five demonstrations or the look.
 
 **Felix gaps this design runs into**
 
 1. **The page does not use the gateway's time lookup yet.** felix-gateway 0.8.0 exposes `offset_for_time` behind its `time` feature, but the page still estimates and corrects when it seeks. Using it makes a seek one lookup per district.
 2. **Per-shard subscribe through the gateway.** Done: the gateway's `read` and `subscribe` take a shard, and the page subscribes to each district's shard (`live.ts`). Kept here because it was a gap when the design was written.
-3. **Tiered storage has no read path.** Offloaded segments cannot be read back, so history older than local retention is gone.
+3. **Tiered storage has no read path.** Offloaded segments cannot be read back, so history older than local retention is gone. Felix tracks the work in [felix#172](https://github.com/GetFelix/felix/issues/172) (offload and cold-tier reads); this project does not enable tiered storage until reads work.
 4. **A commit is not idempotent.** A retried tick can land twice; readers dedupe on `(epoch, district, tick)`.
 
 **Open questions**

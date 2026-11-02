@@ -7,6 +7,7 @@ import { archetypeLabel, doing, type Activity, type Archetype } from '../follow'
 import { STOP_LABEL } from './follow-card';
 import { SHARE_COPIED, SHARE_LABEL, SHARE_NONE } from './share';
 import { CHOICES } from './settings';
+import { GROUPS } from '../stats';
 import { UNAVAILABLE_TEXT } from './sound';
 
 // docs/ui.md sets the copy rules: plain words, none of the system's own, and no em dashes.
@@ -43,6 +44,7 @@ const words = [
   SHARE_LABEL,
   SHARE_COPIED,
   SHARE_NONE,
+  ...GROUPS.map((g) => g.label),
   ...CHOICES.flatMap((c) => [c.label, c.hint]),
   ...SHORTCUTS.flatMap((g) => [g.title, g.when ?? '', ...g.rows.map((r) => r.action)]),
 ];
