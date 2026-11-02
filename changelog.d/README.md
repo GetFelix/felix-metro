@@ -1,8 +1,7 @@
 # Changelog fragments
 
-Add one file here per change instead of editing `CHANGELOG.md`. Pull requests that
-each add a line to the same section used to conflict with one another; separate
-files cannot.
+Add one file here per change instead of editing `CHANGELOG.md`. Parallel pull requests
+that edit the same section conflict; separate files do not.
 
 ## Naming
 
@@ -48,7 +47,7 @@ and commit the result. It merges the fragments into the `## [Unreleased]` sectio
 kept, and a fragment is added after them under the same heading), retitles it as the
 release, leaves an empty `## [Unreleased]`, and deletes the fragments. Headings the
 table does not list stay at the end. The release workflow reads its notes from that
-section with `.github/scripts/changelog-section.py`, and it refuses a tag while
+section with `.github/scripts/changelog-section.py`, and it refuses to release while
 fragments are still here.
 
 ## Checks
