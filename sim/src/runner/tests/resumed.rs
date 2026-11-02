@@ -423,6 +423,28 @@ async fn markers_survive_a_restart_and_a_refused_command_leaves_none() {
             (300, lot, "mayor".to_string())
         ]
     );
+
+    // The same lot built again in the same day, across another restart, is a second marker at its own tick
+    // and leaves the earlier ones as they were: a lot's history is every change, not the latest.
+    let (send, inbox) = mpsc::channel(8);
+    let history = load_history(&log, 4, &quick(0)).await.unwrap().unwrap();
+    send.try_send(log.publish("mayor", 4, build(6))).unwrap();
+    for missed in log.commands(3, u64::MAX).await.unwrap() {
+        send.try_send(missed).unwrap();
+    }
+    run_with_history(
+        "harbor",
+        harbor(),
+        quick(500),
+        log.clone(),
+        Some(inbox),
+        Some(history),
+    )
+    .await
+    .unwrap();
+    let marks = marker_subjects(&log, 0);
+    assert_eq!(marks.iter().map(|m| m.0).collect::<Vec<_>>(), [0, 300, 400]);
+    assert!(marks.iter().all(|m| m.1 == lot));
 }
 
 #[tokio::test(start_paused = true)]

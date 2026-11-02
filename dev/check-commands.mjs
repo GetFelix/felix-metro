@@ -74,7 +74,8 @@ const cases = [
 }
 
 // The timeline's markers: the day's list, kept in district 0's state, names the build, and who made it. The refused
-// build of the same lot left nothing. District 0 commits the tick on its own, so the list can trail the command's
+// build of the same lot left nothing. A lot can be built and demolished more than once in a day (this check and the
+// restart check both take the first free lot), so a marker is found by its tick. District 0 commits the tick on its own, so the list can trail the command's
 // result by a moment.
 const MARK_BUILT = 1;
 const MARK_DEMOLISHED = 2;
@@ -82,7 +83,7 @@ const markersOf = async (tick, type, lot) => {
   const deadline = Date.now() + 20_000;
   for (;;) {
     const bytes = await mayor.stateGet(`markers.${Math.floor(tick / 5760)}`);
-    const found = bytes && decodeMarkers(bytes)?.markers.filter((m) => m.type === type && m.subject === lot);
+    const found = bytes && decodeMarkers(bytes)?.markers.filter((m) => m.tick === tick && m.type === type && m.subject === lot);
     if (found?.length || Date.now() > deadline) return found ?? [];
     await sleep(300);
   }

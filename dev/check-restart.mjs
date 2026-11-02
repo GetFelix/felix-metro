@@ -114,13 +114,14 @@ console.log(`${city}: the keyframes after the restart list the builds`);
 for (const { lot: l, tick } of state.taken) {
   const bytes = await mayor.stateGet(`markers.${Math.floor(tick / 5760)}`);
   const marks = bytes ? decodeMarkers(bytes).markers : [];
-  const builds = marks.filter((m) => m.type === 1 && m.subject === l);
+  // The same lot may have been built before in the day, so look at the build's own tick.
+  const builds = marks.filter((m) => m.tick === tick && m.type === 1 && m.subject === l);
   if (builds.length !== 1 || builds[0].tick !== tick) fail(`the markers list lot ${l}'s build ${builds.length} times, wanted once at tick ${tick}`);
 }
 {
   const ticks = mayor.records.find((r) => r.events.some((e) => e.type === "command" && e.id === OFFLINE_ID)).tick;
   const bytes = await mayor.stateGet(`markers.${Math.floor(ticks / 5760)}`);
-  const down = (bytes ? decodeMarkers(bytes).markers : []).filter((m) => m.type === 2 && m.subject === lot);
+  const down = (bytes ? decodeMarkers(bytes).markers : []).filter((m) => m.tick === ticks && m.type === 2 && m.subject === lot);
   if (down.length !== 1) fail(`the markers list the demolish of lot ${lot} ${down.length} times, wanted once`);
 }
 console.log(`${city}: the markers survived the restart`);
