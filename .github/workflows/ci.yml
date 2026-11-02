@@ -316,6 +316,13 @@ jobs:
         working-directory: web
         timeout-minutes: 10
         run: node scripts/check-seek.mjs 'http://127.0.0.1:8088/?tier=low' live-frames/seek
+      # The card of a followed resident lists the trips and arrivals the sim wrote for them that day: a second client reads
+      # the log and decodes the events itself, and the card's entries must be those, no more and no fewer. A click on an
+      # entry seeks the timeline to its tick.
+      - name: The card's day matches the log
+        working-directory: web
+        timeout-minutes: 10
+        run: node scripts/check-day.mjs 'http://127.0.0.1:8088/?tier=low' live-frames/day
       # The timeline bar over the live city: a pointer drag across hours faster than a seek completes and arrow-key steps.
       # Every sampled frame has the city drawn and the clock follows the handle; at rest the city is at the handle's tick.
       # Screenshots of the bar live, while dragging and in the past are in the artifact.

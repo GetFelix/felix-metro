@@ -82,3 +82,25 @@ test("reads a keyframe's building diff and steps over the rest of it", () => {
 test("ignores records of another kind", () => {
   assert.equal(decode(Uint8Array.from([1, 0, 0])), null);
 });
+
+test("reads whose trip, change of route and arrival an event is, whatever size the resident number is", () => {
+  const route = [...varint(1), ...zigzag(4), 100];
+  for (const resident of [5, 300, 2 ** 15]) {
+    const events = [
+      event(1, [...varint(resident), 2, ...zigzag(0), ...route]),
+      event(2, [...varint(resident), ...varint(4), ...route]),
+      event(3, [...varint(resident), ...varint(77)]),
+      event(4, [...varint(resident), 1, ...zigzag(30)]),
+      event(13, [...varint(resident), ...varint(78), 1, ...zigzag(30)]),
+      event(7, [...u32(50), ...u16(22), 0]),
+    ];
+    const out = decode(tick({ district: 1, tick: 400, events }));
+    assert.deepEqual(out.events, [
+      { type: "trip", resident },
+      { type: "replan", resident },
+      { type: "arrived", resident },
+      { type: "arrived", resident },
+      { type: "built", lot: 50, kind: 22 },
+    ]);
+  }
+});

@@ -45,6 +45,15 @@ const ACTIVITIES: Record<Activity, { here: string; to: string }> = {
   leisure: { here: 'In the park', to: 'the park' },
 };
 
+/** An `activity` event's kind, as the log numbers it, to the schedule's activity. */
+const ACTIVITY_CODES: readonly Activity[] = ['home', 'work', 'school', 'shop', 'leisure'];
+
+/** How to say where a resident is (`here`) or heading (`to`) for an activity kind in the log, or null for a kind not known. */
+export function activityWords(code: number | null): { here: string; to: string } | null {
+  const activity = code === null ? undefined : ACTIVITY_CODES[code];
+  return activity ? ACTIVITIES[activity] : null;
+}
+
 /** Home between 22:00 and 06:00 is asleep, as the keyframe's counts have it. */
 const BEDTIME = 22 * TICKS_PER_HOUR;
 const WAKING = 6 * TICKS_PER_HOUR;
@@ -167,6 +176,8 @@ export interface Deps {
   pin(resident: number | null): void;
   /** Draw the card, or take it away on null. */
   show(card: CardView | null): void;
+  /** Told who is followed when a follow starts, and null when it ends. */
+  onFollow?(resident: number | null): void;
 }
 
 export class Following {
@@ -200,6 +211,7 @@ export class Following {
     this.shown = 0;
     this.now = null;
     this.deps.pin(resident);
+    this.deps.onFollow?.(resident);
     return true;
   }
 
@@ -208,6 +220,7 @@ export class Following {
     this.profile = null;
     this.deps.pin(null);
     this.deps.show(null);
+    this.deps.onFollow?.(null);
   }
 
   /**

@@ -697,6 +697,28 @@ where they are from the state on screen at the tick on screen:
    when none is under way. The exception is a page that opened mid-trip: it does not know that trip (see above), so
    until the resident's next one it puts them at the block they are heading for.
 
+   The card's list of their day is separate: it is read from those events, as the next section describes.
+
+#### A resident's day from the log
+
+The card's list of a day is what the sim did, not the schedule. The page reads one day of the log, from the keyframe at
+its midnight (24 city hours, 5,760 ticks, to the day) to one city hour into the next, and keeps only this resident's
+events from every district: a `trip` is in the district of the lot they leave, an `arrived` and `activity` in the
+district of the lot they reach, and a `replan` wherever they are. Every district is read because a route can cross
+districts the resident has no lot in. From those it makes entries:
+
+- a **trip** from its `trip` tick to the tick of the `arrived` that ends it, with the lot and the activity (the `activity`
+  that follows the arrival) saying where and what for;
+- a **stay** from an `arrived` to the next `trip` (the `until` an `activity` carries is the plan, so it is not used);
+- a **route change** at each `replan`.
+
+What was going on at midnight comes from that keyframe's entry for the resident: indoors (activity, lot) or on the road
+(vehicle). A trip or arrival in the keyframe's own tick speaks for itself, since the keyframe is the state after that
+tick's events. Records are kept once per district and tick with the newest epoch winning, and a newer epoch also replaces every older-epoch record at or after the tick it began from (a restarted sim begins again from an earlier tick), so the same tick read from
+history and delivered live is one tick. A click on a row seeks the timeline to the entry's tick. While the day is the one
+the live city is in, records the live connection takes in are added as they arrive; the listener is registered before the
+history is read, for the same reason a subscriber is registered before history is read anywhere else.
+
 A seek, a scrub or a rewind replaces the state on screen. Nothing of the old one is kept, so the next frame asks the new
 one, and the camera glides to wherever the resident is at that tick.
 

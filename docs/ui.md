@@ -33,9 +33,10 @@ controls looking like the ones already there.
   reachable from the keyboard.
 - **Follow a resident.** Click a car or walker (tap on a touch screen), or press `F` for the one nearest the middle of
   the view. The camera tracks them, and a card under
-  the city name shows their name, what kind of resident they are, what they are doing now and their day. `Esc`, the
-  card's close button or moving the view lets go (`Esc` first closes an open menu, the sheet or photo mode); turning and zooming do not.
-  [Following a resident](../README.md#following-a-resident) says more.
+  the city name shows their name, what kind of resident they are, what they are doing now and their day: the trips and
+  stays the log holds for them, a day at a time, with arrows for the day before and after. A row takes you to that
+  moment. `Esc`, the card's close button or moving the view lets go (`Esc` first closes an open menu, the sheet or
+  photo mode); turning and zooming do not. [Following a resident](../README.md#following-a-resident) says more.
 - **Share a moment.** The link button under the settings button copies a link that opens the city at the moment on
   screen, from the same camera view, and with the same resident followed if there is one.
   [Moments](../README.md#moments) shows the link and how it is read.
@@ -88,6 +89,7 @@ framework. Each part has one file of each kind:
 | Share button, photo mode         | `web/src/ui/share.ts`, `web/src/ui/photo.ts`, `web/src/moments.ts` | `web/src/ui/photo.css`       |
 | City stats panel                 | `web/src/ui/stats.ts`, `web/src/stats.ts`                          | `web/src/ui/stats.css`       |
 | Follow card                      | `web/src/ui/follow-card.ts`, `web/src/follow.ts`, `web/src/tap.ts` | `web/src/ui/follow.css`      |
+| A resident's day on the card     | `web/src/day.ts`, `web/src/day-panel.ts`                           | `web/src/ui/follow.css`      |
 | Sound button                     | `web/src/ui/sound.ts`                                              | `web/src/ui/kit.css`         |
 | Building card                    | `web/src/ui/attribution.ts`, `web/src/ui/lot-hover.ts`             | `web/src/ui/attribution.css` |
 | Build and demolish tools         | `web/src/ui/build-bar.ts`, `web/src/placement.ts`                  | `web/src/ui/build.css`       |
@@ -284,7 +286,7 @@ flowchart LR
     PAN["Pan, reset or Esc"] -->|let go| FOLLOW
 ```
 
-The card's markup is built once, and its rows are redrawn only when what they are doing changes. It is placed before the city chip in the page
+The card's markup is built once. Its doing line and schedule are redrawn only when what they are doing changes. It is placed before the city chip in the page
 so the city menu is never hidden behind it, and it is a `.chip`, so photo mode and `?ui=0` hide it. A region that is always in the page says who is followed, since text in a card that
 starts hidden is not read out, and when the card goes while it holds focus, focus moves to a control. `Esc` is read in
 the capture phase, before photo mode, the sheet and the city menu close themselves on the same key, so the press that leaves photo
@@ -294,7 +296,40 @@ The camera tells `steer` when the person moves the point it looks at (a drag of 
 is what lets go. Turning and zooming do not, so a resident can be looked at from any side. A pinch is not a move: two
 fingers must slide their middle 24 pixels before it counts.
 
-To change what the card says, edit the phrases in `follow.ts`; `copy.test.ts` checks them against the same rules as the
+#### The day on the card
+
+The list of their day is not the schedule. `day.ts` turns the log's `trip`, `arrived`, `activity` and `replan` events
+for one resident into entries (a trip from the tick it left to the tick it arrived, a stay from an arrival to the next
+trip, a change of route), and `day-panel.ts` decides which day to show, reads it, keeps it current and seeks when a row
+is chosen. The card draws a `DayView` and has no log in it, as it has no camera.
+
+```mermaid
+flowchart LR
+    LOG["The log<br/>every district"] -->|Seeker.scan, a day plus an hour| DAY["DayLog<br/>this resident's events"]
+    LIVE["Live records<br/>as they arrive"] --> DAY
+    KF["The keyframe at midnight<br/>where they were"] --> DAY
+    DAY --> ROWS["Rows: trip, stay, route change"]
+    ROWS --> CARD["Card list"]
+    CARD -->|click a row| SEEK["Timeline seek to that tick"]
+```
+
+A day is read from its midnight keyframe, which says where the resident was when it began, up to an hour into the next
+day, so a trip that left just before midnight shows where it arrived. The records are scanned and thrown away except for
+the resident's own events, so a day of them does not push out what scrubbing has cached. `DayLog` keeps one record per
+district and tick, the newest epoch winning, and drops older-epoch records a restarted sim has written again, so history
+and the live feed can overlap without repeating a row. The card
+follows the day of the moment on screen once it has stayed there for a moment, and stops following it when the person
+presses an arrow, and goes back to following it when the person pages to today. The rows are redrawn only when they
+change, and focus stays on the same entry when they are, so a key press never finds focus on the page. The arrows use
+`aria-disabled` rather than `disabled` for the same reason.
+
+The card also says when something is wrong. If the log no longer holds the day, the list is empty and a line beneath
+says so; if only the start of the day is gone, the rest is listed with a line saying that; if the read fails, a line says
+their day could not be read, and the arrows still work. A click on an entry from before the oldest moment the log keeps
+shows a message and goes to that oldest moment. Without a log the panel reports `unavailable` and the card keeps listing
+the schedule, labelled as their usual day.
+
+To change what the card says, edit the phrases in `follow.ts` and `day.ts`; `copy.test.ts` checks them against the same rules as the
 rest of the overlay.
 
 ## The kit
