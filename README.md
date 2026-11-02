@@ -194,25 +194,55 @@ and checks it lists the built lot, and demolishes what it built. A `viewer` cann
 
 ### Growing a neighbourhood
 
-`dev/builder-bot.mjs` builds like a mayor does, for demos and the clip. It signs in as `mayor`,
-sends a probe command and waits for its result (commands sent before the sim opens its
-subscription are lost), then raises a cluster of buildings in one district, one every
-`--interval` seconds, on the city's development area first (see below), nearest its middle outwards. Homes go on suburban land, shops on
-corners and arterials, offices toward the centre of town and factories on industrial land.
+`dev/builder-bot.mjs` builds the way a mayor does, for demos and the clip. Start the stack with `dev/up.sh`
+first. The bot needs Node 22, and `cargo` to read the city's layout unless you pass `--city-file`.
 
 ```sh
 node dev/builder-bot.mjs pinecrest --interval 2 --count 12 --json bot.ndjson
 ```
 
-Almost every lot is one residents go to, and the sim refuses to change those. Each city therefore
-sets aside a development area of 14 to 16 empty lots in one district (14 in `harbor`, 15 in
-`pinecrest` at 2 by 2) that no resident visits, drawn as bare earth until something is built.
-The bot asks the core crate's `city_json` example for it (it needs `cargo`), grows there first,
-and puts homes on it. It never demolishes by default: a lot that holds a building is skipped.
-`--rebuild` demolishes and then builds on such lots. If the build is then refused the bot builds the
-old kind back and logs an `orphan` line saying whether that worked. Every command's result is
-read: a refusal (in use, occupied, busy, unsupported) moves on to the next lot, and no lot is sent
-twice.
+`pinecrest` is the city to build in. The bot signs in as `mayor`, sends a probe command and waits for its result
+(commands sent before the sim opens its subscription are lost), then raises 12 buildings in one district, one every
+2 seconds, and writes a line of JSON for each command to `bot.ndjson`. Homes go on suburban land, shops on corners
+and arterials, offices toward the centre of town and factories on industrial land.
+
+**Where it builds.** Almost every lot is one residents go to, and the sim refuses to change those. Each city
+therefore sets aside a development area: 14 to 16 empty lots in one district (14 in `harbor`, 15 in `pinecrest`
+at 2 by 2) that no resident visits, drawn as bare earth until something is built. The bot gets the layout from the
+core crate's `city_json` example and builds on the development area first, from its middle outwards, with the same
+rules as elsewhere (homes preferred on suburban lots). A city of one district (`--side 1`) has a smaller area: 5
+lots in `harbor`, 12 in `pinecrest` and 4 in `lakeside`. Once those are built on, the bot moves to the other empty
+lots of the district.
+
+**What it reads back.** Every command's result is read. A refusal (in use, occupied, busy, unsupported) moves on to
+the next lot, and the bot never goes back to a lot. A command that gets no result within `--result-timeout` counts
+as lost.
+
+**Lots that hold a building.** By default these are skipped. With `--rebuild` the bot demolishes the building and
+builds a new one in its place. Between the two the lot is bare, so the bot keeps track of it:
+
+```mermaid
+flowchart TD
+  A[demolish the old building] --> B{answer?}
+  B -- refused --> Z[skip the lot]
+  B -- already empty --> F[build the new kind]
+  F -- applied --> Y[done: the lot has a new building]
+  F -- refused, or no answer --> Z
+  B -- applied, or no answer --> C[build the new kind]
+  C -- applied --> Y
+  C -- refused, or no answer --> D[build the old kind back]
+  D --> E[log an orphan line: restored true, false or null]
+```
+
+"Already empty" means an earlier run took the building down. The bot builds there, and if that fails the lot stays
+bare with no orphan line, because this run demolished nothing.
+
+A demolish with no answer is treated as applied, because the sim may have applied it and the answer been lost. If
+the build is then refused, the old kind is built back. The bot writes an `orphan` line to the JSON log (and a
+message to stderr) saying how that went. Its `restored` is `true` when the old building stands again (the restore
+was applied, or refused because the lot was never emptied), `false` when the restore was refused, and `null` when
+it got no answer or the bot exited mid-turn (a second signal, or an error).
+`dev/check-builder-bot.mjs` fails on any orphan that is not `true`.
 
 | Flag | Default | |
 |---|---|---|
@@ -223,17 +253,16 @@ twice.
 | `--rebuild` | off | also demolish and rebuild lots that hold a building |
 | `--demolish-after <s>` | off | once done, wait this long and take buildings down again, newest first |
 | `--demolish <n>` | 3 | how many to take down |
-| `--json <path or ->` | off | a line of JSON for the start, each command with its tick, and the end |
+| `--json <path or ->` | off | a line of JSON for the start, each command with its tick, any orphan, and the end |
 | `--side <n>` | 2 (the square root of `DISTRICTS`) | districts a side of the city has; the sim's default |
 | `--city-file <path>` | run the example | the example's output, saved |
 | `--result-timeout <s>` | 30 | how long a command may go unanswered before it counts as lost |
 
-SIGINT or SIGTERM stops after the command in flight and writes the end line (a second one exits at
-once, still writing it), which carries the mean
-tile of what was built for aiming a camera. It exits 1 if a command got no result or nothing was
-built. It places no roads; the sim refuses them. CI runs it for about 20 seconds and checks the
-log with `dev/check-builder-bot.mjs`, which counts only net new buildings (a build applied on a lot that
-was empty, with no demolish applied on it first) and wants at least ten in one district.
+SIGINT or SIGTERM stops after the lot the bot is working on and writes the end line, which carries the mean tile of
+what was built for aiming a camera. A second signal exits at once, still writing it. The bot exits 1 if a command got
+no result or nothing was built. It places no roads; the sim refuses them. CI runs it for about 20 seconds and checks
+the log with `dev/check-builder-bot.mjs`, which counts only net new buildings (a build applied on a lot that was
+empty, with no demolish applied on it first) and wants at least ten in one district.
 
 The sim runs at 4 ticks a second. Its speed endpoint accepts only loopback, so it is
 not published; `dev/speed.sh` runs `curl` inside the sim's container:
