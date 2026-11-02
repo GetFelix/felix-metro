@@ -43,12 +43,14 @@ export function createPost(
   const composer = new EffectComposer(renderer);
   const has = (n: PassName) => passes.includes(n);
 
-  // Runs every frame, so the visibility buffer and the restore function are made once.
-  const shown = new Uint8Array(glows.length);
+  // Runs every frame, so the visibility buffer and the restore function are made once, and the buffer grows only when
+  // a road a builder lays adds lamps.
+  let shown = new Uint8Array(glows.length);
   const restore = () => {
     for (let i = 0; i < glows.length; i++) glows[i]!.visible = shown[i] === 1;
   };
   const hide = () => {
+    if (shown.length < glows.length) shown = new Uint8Array(glows.length * 2);
     for (let i = 0; i < glows.length; i++) {
       shown[i] = glows[i]!.visible ? 1 : 0;
       glows[i]!.visible = false;

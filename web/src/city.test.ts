@@ -1,15 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
   CityState,
+  syncRoads,
   NO_BUILDING,
   ROAD_ADDED,
-  ROAD_CLOSED,
-  ROAD_OPENED,
   ROAD_REMOVED,
   type Journey,
   type TickEvent,
   type TickRecord,
   type Trips,
+  type Voyage,
 } from './city';
 import type { City } from './layout';
 
@@ -266,24 +266,180 @@ describe('CityState', () => {
     expect(state.policy?.settings[0]?.value).toBe(2);
   });
 
-  it('follows road events, and a keyframe replaces what its district knew', () => {
+  const roadwork = (segment: number, change: number, a = 1, b = 2): TickEvent => ({
+    type: 'roadwork',
+    segment,
+    change,
+    a,
+    b,
+  });
+
+  it('keeps every road a builder added, live or taken away, and a keyframe replaces what its district knew', () => {
     const state = new CityState(city, trips, 2);
-    state.apply(record(0, 1, [{ type: 'road', segment: 4, change: ROAD_CLOSED }]));
-    state.apply(record(0, 2, [{ type: 'road', segment: 9, change: ROAD_ADDED }]));
-    state.apply(record(1, 2, [{ type: 'road', segment: 20, change: ROAD_REMOVED }]));
+    let told = 0;
+    state.onRoads = () => told++;
+    state.apply(record(0, 1, [roadwork(104, ROAD_ADDED, 6, 7)]));
+    state.apply(record(0, 2, [roadwork(105, ROAD_ADDED, 3, 4)]));
+    state.apply(record(1, 2, [roadwork(106, ROAD_ADDED, 30, 31)]));
+    state.apply(record(0, 3, [roadwork(104, ROAD_REMOVED, 6, 7)]));
+    expect(told).toBe(4);
+    // A road taken away keeps its entry: its id is never used again.
     expect([...state.roads]).toEqual([
-      [4, ROAD_CLOSED],
-      [9, ROAD_ADDED],
-      [20, ROAD_REMOVED],
+      [104, { change: ROAD_REMOVED, a: 6, b: 7 }],
+      [105, { change: ROAD_ADDED, a: 3, b: 4 }],
+      [106, { change: ROAD_ADDED, a: 30, b: 31 }],
     ]);
-    state.apply(record(0, 3, [{ type: 'road', segment: 4, change: ROAD_OPENED }]));
-    expect(state.roads.has(4)).toBe(false);
-    // District 0's keyframe lists only what differs now, so segment 9 goes and district 1's entry stays.
-    state.apply(record(0, 4, [], { buildings: [], roads: [[7, ROAD_CLOSED]] }));
-    expect([...state.roads].sort((a, b) => a[0] - b[0])).toEqual([
-      [7, ROAD_CLOSED],
-      [20, ROAD_REMOVED],
-    ]);
+    // District 0's keyframe lists every road of its own, so 105, which it leaves out, goes; district 1's road stays.
+    state.apply(record(0, 4, [], { buildings: [], roads: [[104, ROAD_REMOVED, 6, 7]] }));
+    expect([...state.roads.keys()].sort()).toEqual([104, 106]);
+    expect(told).toBe(5);
+    // A keyframe that says what the state already knows changes nothing.
+    state.apply(record(1, 4, [], { buildings: [], roads: [[106, ROAD_ADDED, 30, 31]] }));
+    expect(told).toBe(5);
+  });
+
+  it('lists the built roads in segment order as core takes them, the same array until they change', () => {
+    const state = new CityState(city, trips, 2);
+    expect(state.builtRoads()).toEqual(new Uint32Array(0));
+    state.apply(record(1, 1, [roadwork(110, ROAD_ADDED, 30, 31)]));
+    state.apply(record(0, 1, [roadwork(108, ROAD_ADDED, 6, 7), roadwork(108, ROAD_REMOVED, 6, 7)]));
+    const list = state.builtRoads();
+    expect([...list]).toEqual([108, 6, 7, 1, 110, 30, 31, 0]);
+    expect(state.builtRoads()).toBe(list);
+    state.apply(record(0, 2, [roadwork(111, ROAD_ADDED, 1, 2)]));
+    expect(state.builtRoads()).not.toBe(list);
+  });
+
+  it('gives core the built roads before it turns a trip into a journey, and only when they changed', () => {
+    const given: number[][] = [];
+    const seen: number[] = [];
+    const metro: Trips = {
+      trip(_resident, _vehicle, depart) {
+        seen.push(given.length);
+        return new FakeJourney(depart + 10);
+      },
+      setRoads(roads) {
+        given.push([...roads]);
+      },
+    };
+    const state = new CityState(city, metro, 2);
+    state.apply(record(0, 1, [trip(1, 1)]));
+    expect(given).toEqual([]);
+    state.apply(record(0, 2, [roadwork(104, ROAD_ADDED, 6, 7), trip(2, 2), trip(3, 2)]));
+    expect(given).toEqual([[104, 6, 7, 0]]);
+    expect(seen).toEqual([0, 1, 1]);
+    // A second state on the same core city puts its own roads back before its trips.
+    const other = new CityState(city, metro, 2);
+    other.apply(record(0, 1, [trip(4, 1)]));
+    state.apply(record(0, 3, [trip(5, 3)]));
+    expect(given).toEqual([[104, 6, 7, 0], [], [104, 6, 7, 0]]);
+  });
+
+  describe('a replan', () => {
+    const replanning = () => {
+      const made: { resident: number; depart: number; node: number; journey: FakeJourney }[] = [];
+      const metro: Trips & { made: typeof made } = {
+        made,
+        trip: (_resident, _vehicle, depart) => new FakeJourney(depart + 10),
+        replan(resident, _vehicle, depart, node) {
+          if (resident === 999) return undefined;
+          const journey = new FakeJourney(depart + 5);
+          made.push({ resident, depart, node, journey });
+          return journey;
+        },
+      };
+      return metro;
+    };
+    const replan = (resident: number, node = 12): TickEvent => ({
+      type: 'replan',
+      resident,
+      vehicle: 1,
+      node,
+      route: [[3, 100]],
+    });
+
+    it('ends the trip under way at once and starts the new one from the node', () => {
+      const metro = replanning();
+      const state = new CityState(city, metro, 2);
+      const ended: Voyage[] = [];
+      state.onVoyageEnd = (v) => ended.push(v);
+      state.apply(record(0, 5, [trip(1, 5)]));
+      const old = state.voyages.get(1)!;
+      state.apply(record(0, 6, [replan(1)]));
+      // Released and freed now, not drawn on until it would have arrived: its road may be gone.
+      expect(ended).toEqual([old]);
+      expect((old.journey as FakeJourney).freed).toBe(true);
+      expect([...state.active()].map((v) => v.depart)).toEqual([6]);
+      expect(metro.made.map((m) => [m.resident, m.depart, m.node])).toEqual([[1, 6, 12]]);
+      expect(state.voyages.get(1)!.journey).toBe(metro.made[0]!.journey);
+      expect(state.unplaced).toBe(0);
+    });
+
+    it('also ends an earlier trip still being drawn', () => {
+      const state = new CityState(city, replanning(), 2);
+      state.apply(record(0, 5, [trip(1, 5)]));
+      state.apply(record(0, 6, [trip(1, 6)]));
+      expect([...state.active()]).toHaveLength(2);
+      state.apply(record(0, 7, [replan(1)]));
+      expect([...state.active()].map((v) => v.depart)).toEqual([7]);
+    });
+
+    it('keeps the resident on the road until the new route arrives', () => {
+      const metro: Trips = {
+        trip: (_resident, _vehicle, depart) => new FakeJourney(depart + 10),
+        replan: (_resident, _vehicle, depart) => new FakeJourney(depart + 20),
+      };
+      const state = new CityState(city, metro, 2);
+      state.apply(record(0, 5, [trip(1, 5)]));
+      state.apply(record(0, 6, [replan(1)]));
+      expect(state.onRoad(20).cars).toBe(1);
+      expect(state.onRoad(26).cars).toBe(0);
+    });
+
+    it('takes over only the trip under way, not an earlier one that arrived', () => {
+      const metro: Trips = {
+        trip: (_resident, _vehicle, depart) => new FakeJourney(depart === 2 ? 8 : depart + 10),
+        replan: (_resident, _vehicle, depart) => new FakeJourney(depart + 5),
+      };
+      const state = new CityState(city, metro, 2);
+      // District 0 holds the arrival and the replan; district 1, folded after it, holds both trips.
+      state.apply(record(0, 8, [{ type: 'arrived', resident: 1 } as TickEvent]), true);
+      state.apply(record(0, 10, [replan(1)]), true);
+      state.apply(record(1, 9, [trip(1, 2), trip(1, 9)]), true);
+      expect(state.onRoad(5).cars).toBe(1);
+      expect(state.onRoad(8).cars).toBe(0);
+      expect(state.onRoad(12).cars).toBe(1);
+      expect(state.onRoad(15).cars).toBe(0);
+      expect(state.voyages.get(1)!.depart).toBe(10);
+    });
+
+    it('counts a replan core cannot place, and draws nothing for it', () => {
+      const state = new CityState(city, replanning(), 2);
+      state.apply(record(0, 5, [trip(999, 5)]));
+      state.apply(record(0, 6, [replan(999)]));
+      expect(state.voyages.has(999)).toBe(false);
+      expect(state.unplaced).toBe(1);
+      // A page whose core cannot replan counts every replan.
+      const plain = new CityState(city, trips, 2);
+      plain.apply(record(0, 6, [replan(1)]));
+      expect(plain.unplaced).toBe(1);
+    });
+  });
+
+  it('rewinds a road: a state folded from a keyframe before it has none, and one before its removal has it', () => {
+    const records = [
+      record(0, 240, [], { buildings: [], roads: [] }),
+      record(0, 241, [roadwork(104, ROAD_ADDED, 6, 7)]),
+      record(0, 242, [roadwork(104, ROAD_REMOVED, 6, 7)]),
+    ];
+    const foldTo = (tick: number) => {
+      const s = new CityState(city, trips, 1);
+      for (const r of records) if (r.tick <= tick) s.apply(r);
+      return s;
+    };
+    expect([...foldTo(240).builtRoads()]).toEqual([]);
+    expect([...foldTo(241).builtRoads()]).toEqual([104, 6, 7, 0]);
+    expect([...foldTo(242).builtRoads()]).toEqual([104, 6, 7, 1]);
   });
 
   it('shows a command the same from events as from the keyframe after it', () => {
@@ -308,5 +464,37 @@ describe('CityState', () => {
     const unknown = { type: 'command', principal: '00', name: 'x', id: 1, result: 250 } as unknown as TickEvent;
     expect(() => state.apply(record(0, 1, [unknown, { type: 'built', lot: 1, kind: 7, rotation: 0 }]))).not.toThrow();
     expect(state.built.get(1)).toEqual({ kind: 7, rotation: 0 });
+  });
+});
+
+describe('syncRoads', () => {
+  it('keeps what core had when it turns the roads down, and does not ask again for the same list', () => {
+    let asked = 0;
+    const metro: Trips = {
+      trip: () => undefined,
+      setRoads(roads) {
+        asked++;
+        if (roads[0] === 3) throw new Error('roads out of order');
+      },
+    };
+    const good = Uint32Array.from([104, 6, 7, 0]);
+    const bad = Uint32Array.from([3, 6, 7, 0]);
+    expect(syncRoads(metro, good)).toBe(true);
+    expect(syncRoads(metro, good)).toBe(true);
+    expect(asked).toBe(1);
+    expect(syncRoads(metro, bad)).toBe(false);
+    expect(syncRoads(metro, bad)).toBe(false);
+    expect(asked).toBe(2);
+    // The good list is still what core holds, so going back to it costs nothing.
+    expect(syncRoads(metro, good)).toBe(true);
+    expect(asked).toBe(2);
+  });
+
+  it('does not lay the roads again for another list with the same roads', () => {
+    let asked = 0;
+    const metro: Trips = { trip: () => undefined, setRoads: () => void asked++ };
+    expect(syncRoads(metro, Uint32Array.from([104, 6, 7, 0]))).toBe(true);
+    expect(syncRoads(metro, Uint32Array.from([104, 6, 7, 0]))).toBe(true);
+    expect(asked).toBe(1);
   });
 });

@@ -46,9 +46,21 @@ function world() {
       zone: x < 5 ? 'commercial' : 'industrial',
       kind: kinds[i % kinds.length]!,
       facing: 0,
+      doorSegment: 0,
     });
   }
-  const city: City = { seed: 'harbor', tiles: 12, shore: null, tower: -1, development: [], lots, roads, water: [] };
+  const city: City = {
+    seed: 'harbor',
+    tiles: 12,
+    shore: null,
+    tower: -1,
+    development: [],
+    lots,
+    roads,
+    water: [],
+    nodes: [],
+    segments: [],
+  };
   const half = 5.5;
   const kind = new Map(lots.map((l) => [l.id, l.kind]));
   const built = new Map<number, THREE.Object3D>();
