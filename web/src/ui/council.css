@@ -12,9 +12,32 @@
   justify-content: space-between;
   cursor: pointer;
 }
+.council summary {
+  list-style: none;
+}
+.council summary::-webkit-details-marker {
+  display: none;
+}
+.council summary::after {
+  content: '';
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin: 4px 2px 0 0;
+  border-right: 1.5px solid var(--muted);
+  border-bottom: 1.5px solid var(--muted);
+  transform: rotate(45deg);
+}
+.council details[open] summary::after {
+  margin-top: 6px;
+  transform: rotate(225deg);
+}
 .council summary b {
   color: var(--muted);
   font-weight: 500;
+}
+.council summary > span {
+  margin-left: auto;
 }
 .council summary span.recall {
   color: var(--coral);

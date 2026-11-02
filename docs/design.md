@@ -277,7 +277,7 @@ fields.
 | ---- | --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 1    | `ledger`  | reason `u8` (0 day, 1 build, 2 demolish), earned varint, spent varint                                                                                                                                     |
 | 2    | `balance` | amount, a zigzag varint (may be negative)                                                                                                                                                                 |
-| 3    | `council` | days varint, patience `u8`, then for each of three factions demand varint, measure varint, satisfaction `u8`, unhappy days `u8`; then the open day's commutes varint, commute ticks varint, visits varint |
+| 4    | `council` | days varint, patience `u8`, then for each of three factions demand varint, measure varint, satisfaction `u8`, unhappy days `u8`; then the open day's commutes varint, commute ticks varint, visits varint |
 
 A reader skips an extended kind it does not know.
 
@@ -433,13 +433,14 @@ about 15 minutes, 71% of the shore's residents live away from factories and a sh
   scored; until it is 1 the standings are only the demands. A city day ends on a keyframe tick, so the event written
   then carries the new score. The page reads the newest one, so scrubbing shows the council as it stood.
 - **Restart.** The restart takes the council from its newest keyframe tick, including the running totals of the day in
-  progress, then steps on. A log written before the council existed starts it fresh, so its first score covers only the part of the day after
-  the restart.
+  progress, then steps on. A log written before the council existed starts it fresh, so its first score covers only
+  the part of the day after the restart.
 
 The page folds the council to one line below the funds: the lowest score, or the recall warning when a faction has been
 unhappy, naming the faction closest to a recall and the days left. Opening it lists a bar for each satisfaction, what the
-faction wants and how the last day went. It starts open on a tall screen and folded on a short one, and stays as the
-player leaves it. Before the first day is scored it says so instead of drawing empty bars.
+faction wants and how the last day went. It starts open on a tall screen and folded on a short one, follows the window
+if it is resized until the player opens or folds it, and then stays as the player leaves it. Before the first day is
+scored it says so instead of drawing empty bars.
 
 Cost to the log: one `council` event of about 30 bytes per keyframe tick, which is a city hour. `report_load` on the
 harbor city moves the day mean from 656.7 to 657.1 B/s.

@@ -177,7 +177,7 @@ fn only_shops_residents_go_to_count_as_shops() {
     });
     assert_eq!(world.shops_standing(), standing);
 
-    // One residents do go to stops counting when it is cleared.
+    // A shop that residents go to stops counting once it is cleared.
     let gone = *visited.iter().min().unwrap();
     world.set_building(BuildingDiff {
         lot: gone,

@@ -166,8 +166,8 @@ impl World {
         self.council.score(quiet, shops);
     }
 
-    /// How many shops residents go to that are still shops: a lot nobody
-    /// has a shop block at gets no visits, so it can't make business unhappy.
+    /// How many shops residents go to that are still shops: a shop no
+    /// resident has a shop block at gets no visits, so it can't make business unhappy.
     fn shops_standing(&self) -> u32 {
         let visited: HashSet<u32> = self
             .people

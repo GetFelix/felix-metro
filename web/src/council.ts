@@ -93,6 +93,9 @@ export function recallText(recall: NonNullable<CouncilView['recall']>): string {
   return `${recall.faction} will recall the mayor in ${days}`;
 }
 
+/** A screen at least this tall (px) has room for the council opened. */
+export const TALL_SCREEN = 720;
+
 /** The one line the council shows while folded away. */
 export function councilSummary(view: CouncilView): string {
   if (view.recall) return recallText(view.recall);
@@ -106,12 +109,11 @@ export function councilSummary(view: CouncilView): string {
 
 /**
  * Draws the council into `root`, replacing what it held. It is a folded line the player can open, so it does not
- * push the controls below it off a short screen. A redraw keeps it as the player left it; the first draw opens it
- * only if `openFirst`.
+ * push the controls below it off a short screen. A redraw updates it in place and keeps it as the player left it; the first
+ * draw opens it only if `openFirst`.
  */
 export function renderCouncil(root: HTMLElement, view: CouncilView, openFirst: boolean): void {
   const previous = root.firstElementChild as HTMLDetailsElement | null;
-  const open = previous ? previous.open : openFirst;
   const rows = view.factions.map((f) => {
     const li = document.createElement('li');
     li.classList.toggle('unhappy', f.unhappy);
@@ -134,15 +136,30 @@ export function renderCouncil(root: HTMLElement, view: CouncilView, openFirst: b
   });
   const list = document.createElement('ul');
   list.append(...rows);
-  const summary = document.createElement('summary');
-  const title = document.createElement('b');
-  title.textContent = 'Council';
   const line = document.createElement('span');
   line.textContent = councilSummary(view);
   line.classList.toggle('recall', view.recall !== null);
+  if (previous) {
+    // Keep the summary element so a focused summary stays focused through a redraw.
+    previous.querySelector('summary > span')?.replaceWith(line);
+    previous.querySelector('ul')?.replaceWith(list);
+    return;
+  }
+  const summary = document.createElement('summary');
+  const title = document.createElement('b');
+  title.textContent = 'Council';
   summary.append(title, line);
   const details = document.createElement('details');
-  details.open = open;
+  details.open = openFirst;
   details.append(summary, list);
+  summary.addEventListener('click', () => {
+    details.dataset.touched = '1';
+  });
   root.replaceChildren(details);
+}
+
+/** Opens or folds the council to suit the screen, unless the player has already chosen. */
+export function fitCouncil(root: HTMLElement, tall: boolean): void {
+  const details = root.firstElementChild as HTMLDetailsElement | null;
+  if (details && !details.dataset.touched) details.open = tall;
 }

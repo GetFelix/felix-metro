@@ -1,5 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { councilSummary, councilView, recallText, renderCouncil, type CouncilEvent, type Standing } from './council';
+import {
+  councilSummary,
+  councilView,
+  fitCouncil,
+  recallText,
+  renderCouncil,
+  type CouncilEvent,
+  type Standing,
+} from './council';
 
 const standing = (over: Partial<Standing> = {}): Standing => ({
   demand: 48,
@@ -89,11 +97,30 @@ class Fake {
       contains: (name: string) => this.flags.has(name),
     };
   }
+  dataset: Record<string, string> = {};
+  parent: Fake | null = null;
+  private readonly listeners: Array<() => void> = [];
   append(...nodes: Fake[]) {
+    for (const n of nodes) n.parent = this;
     this.children.push(...nodes);
   }
   replaceChildren(...nodes: Fake[]) {
+    for (const n of nodes) n.parent = this;
     this.children = nodes;
+  }
+  replaceWith(node: Fake) {
+    node.parent = this.parent;
+    this.parent!.children = this.parent!.children.map((c) => (c === this ? node : c));
+  }
+  addEventListener(_type: string, fn: () => void) {
+    this.listeners.push(fn);
+  }
+  click() {
+    for (const fn of this.listeners) fn();
+  }
+  querySelector(selector: string): Fake | null {
+    if (selector === 'summary > span') return this.all('summary')[0]?.children.find((c) => c.tag === 'span') ?? null;
+    return this.all(selector)[0] ?? null;
   }
   all(tag: string): Fake[] {
     return this.children.flatMap((c) => [...(c.tag === tag ? [c] : []), ...c.all(tag)]);
@@ -127,5 +154,24 @@ describe('renderCouncil', () => {
     draw(root, 0);
     const scores = root.all('li').map((li) => li.children[0]?.children[1]?.textContent);
     expect(scores).toEqual(['not scored yet', 'not scored yet', 'not scored yet']);
+  });
+
+  it('updates in place, so a focused summary survives a redraw', () => {
+    const root = new Fake('div');
+    draw(root, 2);
+    const summary = root.all('summary')[0];
+    draw(root, 3);
+    expect(root.all('summary')[0]).toBe(summary);
+    expect(root.all('details')).toHaveLength(1);
+  });
+
+  it('refits to the screen until the player has opened or folded it', () => {
+    const root = new Fake('div');
+    draw(root, 2, true);
+    fitCouncil(root as unknown as HTMLElement, false);
+    expect(root.all('details')[0]?.open).toBe(false);
+    root.all('summary')[0]!.click();
+    fitCouncil(root as unknown as HTMLElement, true);
+    expect(root.all('details')[0]?.open).toBe(false);
   });
 });
