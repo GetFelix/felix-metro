@@ -106,7 +106,7 @@ async function use(page, tool, lot, { kind = null, touch = false, confirm = fals
             () => false,
           );
         if (went) break;
-        if (tap === 3) await fail(`${page.label}: no tap confirmed the demolish`);
+        if (tap === 3) await fail(`${page.label}: no tap confirmed the demolish: ${JSON.stringify(await state(page))}`);
       }
     }
   } else {
