@@ -4,7 +4,7 @@
 import { decodeRecord } from './core/felix_metro_core.js';
 import { TICKS_PER_DAY, TICKS_PER_HOUR } from './clock';
 import { momentText } from './timeline';
-import { ROAD_ADDED, ROAD_CLOSED, ROAD_OPENED } from './city';
+import { ROAD_ADDED, ROAD_REMOVED } from './city';
 
 export type MarkerKind = 'rush' | 'built' | 'demolished' | 'road';
 
@@ -42,10 +42,12 @@ export function rushMarkers(span: Span): Marker[] {
 /** The state key the sim keeps a city day's markers in; `day` counts from 0. */
 export const markersKey = (day: number): string => `markers.${day}`;
 
+// 0 and 1 are the closures an older sim wrote to its markers; its stored days still hold them.
 const ROAD_WORDS: Record<number, string> = {
-  [ROAD_CLOSED]: 'closed',
-  [ROAD_OPENED]: 'opened',
+  0: 'closed',
+  1: 'opened',
   [ROAD_ADDED]: 'added',
+  [ROAD_REMOVED]: 'removed',
 };
 
 /** The sim's `type` codes of a marker (`MARK_*` in core/src/record.rs). */
