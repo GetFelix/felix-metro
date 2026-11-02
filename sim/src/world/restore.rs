@@ -10,7 +10,7 @@ use felix_metro_core::record::{
 };
 use felix_metro_core::{BuiltRoad, City, Mode, TICKS_PER_DAY};
 
-use super::{Council, Person, State, World, activity_kind, count_car};
+use super::{Council, Person, Policy, State, World, activity_kind, count_car};
 
 /// A `trip` or `replan` event, which holds what a keyframe's vehicle does not:
 /// when the trip left (or was moved) and the whole route.
@@ -26,8 +26,8 @@ pub(crate) struct Departure {
 impl World {
     /// The world as it stood at the end of tick `at`, which `frames` (one
     /// keyframe per district, taken at `at`) describe. `balances` is each
-    /// district's share of the account then, `council` the council's state, and
-    /// `departures` the latest `trip` event of every resident who was on the road.
+    /// district's share of the account then, `council` the council's state,
+    /// `policy` the policies, and `departures` the latest `trip` event of every resident who was on the road.
     ///
     /// Stepping the result gives the records the original would have, as long
     /// as the builds after `at` are applied to it first. A keyframe does not
@@ -39,6 +39,7 @@ impl World {
         frames: &[Keyframe],
         balances: &[i64],
         council: Council,
+        policy: Policy,
         departures: &HashMap<u32, Departure>,
     ) -> Result<World> {
         let mut world = World::new(city);
@@ -66,6 +67,7 @@ impl World {
         world.roads_changed();
         world.accounts = balances.to_vec();
         world.council = council;
+        world.policy = policy;
         ensure!(
             frames.len() == world.districts(),
             "{} keyframes for {} districts",
@@ -106,11 +108,17 @@ impl World {
                 let person = &mut world.people[i];
                 match &state.doing {
                     Doing::Activity { kind, lot, until } => {
-                        let (block, day) = block_at(person, *kind, *lot, *until)?;
+                        let late_close = world.policy.late_close();
+                        let (block, day) = block_at(person, *kind, *lot, *until, late_close)?;
                         person.block = block;
                         person.day = day;
-                        // Leaving is at `until`, whether that was the schedule or a late arrival.
-                        person.state = State::At { since: *until };
+                        // `until` is later than the schedule only for a late arrival or a retry,
+                        // which `since` holds. Otherwise the arrival time is lost, and any time
+                        // before the leave tick behaves the same, even if a policy moves the leave.
+                        let leave = person.resident.leave_tick(block, day, late_close);
+                        person.state = State::At {
+                            since: if *until > leave { *until } else { 0 },
+                        };
                     }
                     Doing::Trip(vehicle) => {
                         let departure = departures.get(&state.id).with_context(|| {
@@ -119,7 +127,16 @@ impl World {
                                 state.id
                             )
                         })?;
-                        travelling(&world.city, person, district as u16, vehicle, departure, at)?;
+                        let late_close = world.policy.late_close();
+                        travelling(
+                            &world.city,
+                            person,
+                            district as u16,
+                            vehicle,
+                            departure,
+                            at,
+                            late_close,
+                        )?;
                     }
                 }
             }
@@ -159,8 +176,8 @@ impl World {
         Ok(())
     }
 
-    /// Carries out what a `built`, `demolished`, `roadwork` or command `ledger`
-    /// event in `district`'s record says. Other events change nothing a restart
+    /// Carries out what a `built`, `demolished`, `roadwork`, `policy` or command
+    /// `ledger` event in `district`'s record says. Other events change nothing a restart
     /// has to rebuild: stepping makes them, a day's `ledger` included. A road
     /// must be the next segment id: see [`World::apply_logged_tick`].
     pub(crate) fn apply_logged(&mut self, district: usize, event: &Event) -> Result<()> {
@@ -203,6 +220,10 @@ impl World {
                 kind: NO_BUILDING,
                 rotation: 0,
             },
+            Event::Policy { .. } => {
+                self.policy = Policy::from_event(event).unwrap_or(self.policy);
+                return Ok(());
+            }
             _ => return Ok(()),
         };
         self.built.insert(diff.lot, diff);
@@ -214,7 +235,13 @@ impl World {
 /// `until`: the block whose leave tick is the latest one not after `until`
 /// (a late arrival leaves the moment it arrives, so `until` can be later than
 /// the schedule says).
-fn block_at(person: &Person, kind: u8, lot: u32, until: u32) -> Result<(usize, u32)> {
+fn block_at(
+    person: &Person,
+    kind: u8,
+    lot: u32,
+    until: u32,
+    late_close: u32,
+) -> Result<(usize, u32)> {
     let schedule = &person.resident.schedule;
     let today = until / TICKS_PER_DAY;
     schedule
@@ -228,7 +255,7 @@ fn block_at(person: &Person, kind: u8, lot: u32, until: u32) -> Result<(usize, u
                 .map(move |day| (block, day))
         })
         .filter_map(|(block, day)| {
-            let leave = schedule.leave_tick(block, day);
+            let leave = person.resident.leave_tick(block, day, late_close);
             (leave <= until).then(|| (until - leave, block, day))
         })
         .min()
@@ -250,6 +277,7 @@ fn travelling(
     vehicle: &Vehicle,
     departure: &Departure,
     at: u32,
+    late_close: u32,
 ) -> Result<()> {
     let id = person.resident.id;
     let mode = if departure.vehicle == 0 {
@@ -263,9 +291,13 @@ fn travelling(
                 .resident
                 .replan_in_progress(city, node, departure.depart, &departure.route, mode)
         }
-        None => person
-            .resident
-            .trip_in_progress(city, departure.depart, &departure.route, mode),
+        None => person.resident.trip_in_progress(
+            city,
+            departure.depart,
+            &departure.route,
+            mode,
+            late_close,
+        ),
     };
     let (trip, block, day) = found.with_context(|| {
         format!(

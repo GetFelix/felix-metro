@@ -127,13 +127,13 @@ export function roadRefusal(code: number): string {
   switch (code) {
     case 2:
       return 'That crossing is not on the map.';
-    case 20:
-      return 'A road runs straight: pick two crossings in one row or column.';
-    case 21:
-      return 'A road can be at most 12 tiles long.';
     case 22:
-      return 'A road already joins these two crossings.';
+      return 'A road runs straight: pick two crossings in one row or column.';
     case 23:
+      return 'A road can be at most 12 tiles long.';
+    case 24:
+      return 'A road already joins these two crossings.';
+    case 25:
       return 'The ground between is not clear: another road, the water or the edge of the map is in the way, or a road runs beside it.';
     default:
       return refusal(code);
@@ -176,7 +176,7 @@ const GENERATED_ROAD =
 
 /** What a refused command is told to the person as, by the result code of its `command` event. */
 export function refusal(result: number, tool: 'build' | 'demolish' | 'road' | null = null): string {
-  if (result === 23 && tool === 'build') return 'A road runs over that lot now.';
+  if (result === 25 && tool === 'build') return 'A road runs over that lot now.';
   switch (result) {
     case 1:
       return 'The city could not read that.';
@@ -196,15 +196,15 @@ export function refusal(result: number, tool: 'build' | 'demolish' | 'road' | nu
       return 'The city is busy. Try again.';
     case 10:
       return 'The city cannot afford that right now.';
-    case 20:
-      return 'A road has to run straight, along one row or column.';
-    case 21:
-      return 'That road is longer than 12 tiles.';
     case 22:
-      return 'A road already joins those two crossings.';
+      return 'A road has to run straight, along one row or column.';
     case 23:
-      return 'Something is in the way: a road, the water or a building.';
+      return 'That road is longer than 12 tiles.';
     case 24:
+      return 'A road already joins those two crossings.';
+    case 25:
+      return 'Something is in the way: a road, the water or a building.';
+    case 26:
       return 'Only a road a builder laid can be taken away, and only once.';
     default:
       return 'The city turned that down.';

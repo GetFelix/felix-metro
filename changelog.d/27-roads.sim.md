@@ -3,4 +3,4 @@
   touches another road; only a road a builder added can be removed, for $100. Segment ids are never reused. Each is a `roadwork` event (extended
   kind 6), and keyframes list every built road, removed ones included, so a restart or a late page rebuilds the same
   city. When a road goes, every vehicle whose way used it is sent another way from the intersection it was heading for,
-  in the same tick, with a `replan` event (now `resident, vehicle, node, route`). Results 20 to 24 are new refusals.
+  in the same tick, with a `replan` event (now `resident, vehicle, node, route`). Results 22 to 26 are new refusals.

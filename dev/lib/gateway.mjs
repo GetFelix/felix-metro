@@ -15,11 +15,11 @@ export const UNSUPPORTED = 7;
 export const IN_USE = 8;
 export const BUSY = 9;
 export const NO_FUNDS = 10;
-export const NOT_STRAIGHT = 20;
-export const TOO_LONG = 21;
-export const ROAD_EXISTS = 22;
-export const ROAD_BLOCKED = 23;
-export const NOT_BUILT = 24;
+export const NOT_STRAIGHT = 22;
+export const TOO_LONG = 23;
+export const ROAD_EXISTS = 24;
+export const ROAD_BLOCKED = 25;
+export const NOT_BUILT = 26;
 export const RESULT_NAMES = {
   0: "applied",
   1: "malformed",
@@ -32,11 +32,13 @@ export const RESULT_NAMES = {
   8: "in-use",
   9: "busy",
   10: "no-funds",
-  20: "not-straight",
-  21: "too-long",
-  22: "road-exists",
-  23: "road-blocked",
-  24: "not-built",
+  11: "cooldown",
+  12: "unchanged",
+  22: "not-straight",
+  23: "too-long",
+  24: "road-exists",
+  25: "road-blocked",
+  26: "not-built",
 };
 
 /** What a `roadwork` event's change says: a builder added the road, or took it away. */
@@ -158,6 +160,8 @@ export const demolish = (lot) => {
   b.writeUInt32LE(lot, 1);
   return b;
 };
+/** A `policy` command: `kind` 0 shop hours, 1 avenue limit, 2 street limit. */
+export const policy = (kind, value) => Buffer.from([7, kind, value]);
 export const placeRoad = (a, z) => {
   const b = Buffer.alloc(9);
   b[0] = 1;

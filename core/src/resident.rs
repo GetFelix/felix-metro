@@ -272,6 +272,20 @@ impl Resident {
         )
     }
 
+    /// The tick block `block` of day `day` ends. A shopkeeper stays at work
+    /// `late_close` ticks past the schedule's close, as the shop-hours policy
+    /// asks.
+    pub fn leave_tick(&self, block: usize, day: u32, late_close: u32) -> u32 {
+        let at = self.schedule.leave_tick(block, day);
+        if self.archetype == Archetype::Shopkeeper
+            && self.schedule.blocks[block].activity == Activity::Work
+        {
+            at + late_close
+        } else {
+            at
+        }
+    }
+
     /// The trip from block `block` to the next one, leaving at `depart`, or
     /// `None` if the roads do not connect them.
     pub fn trip(&self, city: &City, block: usize, depart: u32, cong: &Congestion) -> Option<Trip> {
@@ -310,7 +324,7 @@ impl Resident {
         legs: &[Leg],
         mode: Mode,
     ) -> Option<(Trip, usize, u32)> {
-        let found = self.match_route(city, Some(node), depart, legs, mode)?;
+        let found = self.match_route(city, Some(node), depart, legs, mode, 0)?;
         Some((found.trip, found.block, found.day))
     }
 
@@ -323,7 +337,7 @@ impl Resident {
         legs: &[Leg],
         mode: Mode,
     ) -> Option<(Trip, u32)> {
-        let found = self.match_route(city, Some(node), depart, legs, mode)?;
+        let found = self.match_route(city, Some(node), depart, legs, mode, 0)?;
         Some((found.trip, found.to_lot))
     }
 
@@ -350,7 +364,7 @@ impl Resident {
         legs: &[Leg],
         mode: Mode,
     ) -> Option<(Trip, u32, u32)> {
-        let found = self.match_route(city, None, depart, legs, mode)?;
+        let found = self.match_route(city, None, depart, legs, mode, 0)?;
         Some((found.trip, found.from_lot, found.to_lot))
     }
 
@@ -363,8 +377,9 @@ impl Resident {
         depart: u32,
         legs: &[Leg],
         mode: Mode,
+        late_close: u32,
     ) -> Option<(Trip, usize, u32)> {
-        let found = self.match_route(city, None, depart, legs, mode)?;
+        let found = self.match_route(city, None, depart, legs, mode, late_close)?;
         Some((found.trip, found.block, found.day))
     }
 
@@ -377,6 +392,7 @@ impl Resident {
         depart: u32,
         legs: &[Leg],
         mode: Mode,
+        late_close: u32,
     ) -> Option<Matched> {
         let blocks = &self.schedule.blocks;
         let today = depart / TICKS_PER_DAY;
@@ -390,13 +406,20 @@ impl Resident {
                     None => city.lots[from_lot as usize].door()?,
                 };
                 let trip = Trip::from_route(city, door, to, depart, legs, mode)?;
+                // The trip left under the policy of its departure, which the keyframe's may have
+                // since raised, so the day comes from the unextended leave tick. A late close only
+                // delays a departure past it.
                 let due = [today.saturating_sub(1), today]
                     .into_iter()
-                    .map(|d| (self.schedule.leave_tick(block, d), d))
+                    .map(|d| (self.leave_tick(block, d, 0), d))
                     .filter(|&(t, _)| t <= depart)
                     .max();
+                let late = due.map_or(0, |(_, d)| self.leave_tick(block, d, late_close));
+                let left = due
+                    .map_or(0, |(t, _)| t)
+                    .max(if late <= depart { late } else { 0 });
                 Some(Matched {
-                    gap: depart - due.map_or(0, |(t, _)| t),
+                    gap: depart - left,
                     trip,
                     block,
                     day: due.map_or(today, |(_, d)| d),

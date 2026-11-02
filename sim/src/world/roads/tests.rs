@@ -11,7 +11,7 @@ use felix_metro_core::record::{
 use felix_metro_core::{City, Mode};
 
 use super::*;
-use crate::world::{Council, Departure};
+use crate::world::{Council, Departure, Policy};
 use crate::world::{DistrictTick, State};
 use felix_metro_core::TICKS_PER_HOUR;
 
@@ -539,7 +539,16 @@ fn restore_at(city: City, ticks: &[Vec<DistrictTick>], at: u32) -> World {
         .iter()
         .find_map(Council::from_event)
         .unwrap();
-    World::restore(city, at, &frames, &balances, council, &departures).unwrap()
+    World::restore(
+        city,
+        at,
+        &frames,
+        &balances,
+        council,
+        Policy::new(),
+        &departures,
+    )
+    .unwrap()
 }
 
 /// One tick's events as a restart reads them, district by district.

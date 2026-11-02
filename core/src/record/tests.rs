@@ -103,6 +103,12 @@ fn event(rng: &mut Rng) -> Event {
         14 => Event::Balance {
             amount: (rng.next_u64() as i64) >> rng.below(64),
         },
+        15 => Event::Policy {
+            settings: std::array::from_fn(|_| PolicySetting {
+                value: rng.below(101) as u8,
+                changed: (rng.below(3) > 0).then(|| rng.next_u64() as u32),
+            }),
+        },
         _ => Event::Council {
             days: rng.below(400) as u32,
             patience: rng.below(6) as u8,
@@ -197,7 +203,7 @@ fn command_record(rng: &mut Rng) -> CommandRecord {
     CommandRecord {
         id: rng.next_u64() as u32,
         name: name(rng),
-        command: match rng.below(7) {
+        command: match rng.below(8) {
             0 => Command::PlaceRoad {
                 a: lot,
                 b: rng.next_u64() as u32,
@@ -215,7 +221,11 @@ fn command_record(rng: &mut Rng) -> CommandRecord {
             4 => Command::Speed {
                 ticks_per_second: rng.below(33) as u8,
             },
-            5 => Command::RemoveRoad { segment: lot },
+            5 => Command::Policy {
+                kind: rng.below(3) as u8,
+                value: rng.below(101) as u8,
+            },
+            6 => Command::RemoveRoad { segment: lot },
             _ => Command::Fork {
                 tick: lot,
                 name: format!("{}-fork", name(rng)),

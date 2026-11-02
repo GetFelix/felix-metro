@@ -121,11 +121,11 @@ describe('roads', () => {
   });
 
   it('says why core turned the land down, in words', () => {
-    expect(canPlaceRoad(strip(), 0, 1, 20)).toMatchObject({ ok: false, why: expect.stringMatching(/straight/) });
-    expect(canPlaceRoad(strip(), 0, 1, 21)).toMatchObject({ why: expect.stringMatching(/12 tiles/) });
-    expect(canPlaceRoad(strip(), 0, 1, 22)).toMatchObject({ why: expect.stringMatching(/already joins/) });
-    expect(canPlaceRoad(strip(), 0, 1, 23)).toMatchObject({ why: expect.stringMatching(/not clear/) });
-    expect(canPlaceRoad(strip(), 0, 0, 20)).toMatchObject({ why: expect.stringMatching(/different crossing/) });
+    expect(canPlaceRoad(strip(), 0, 1, 22)).toMatchObject({ ok: false, why: expect.stringMatching(/straight/) });
+    expect(canPlaceRoad(strip(), 0, 1, 23)).toMatchObject({ why: expect.stringMatching(/12 tiles/) });
+    expect(canPlaceRoad(strip(), 0, 1, 24)).toMatchObject({ why: expect.stringMatching(/already joins/) });
+    expect(canPlaceRoad(strip(), 0, 1, 25)).toMatchObject({ why: expect.stringMatching(/not clear/) });
+    expect(canPlaceRoad(strip(), 0, 0, 22)).toMatchObject({ why: expect.stringMatching(/different crossing/) });
   });
 
   it('refuses ground with a building on it, or that residents may use', () => {
@@ -172,10 +172,10 @@ describe('roads', () => {
 
 describe('what a refusal says', () => {
   it('has plain words for every result the sim records', () => {
-    const codes = [1, 2, 3, 4, 5, 7, 8, 9, 10, 20, 21, 22, 23, 24];
+    const codes = [1, 2, 3, 4, 5, 7, 8, 9, 10, 22, 23, 24, 25, 26];
     for (const code of [...codes, 99]) expect(refusal(code)).toMatch(/^[A-Z].*\.$/);
     expect(new Set(codes.map((code) => refusal(code))).size).toBe(codes.length);
-    expect(refusal(23, 'build')).toMatch(/road runs over/);
+    expect(refusal(25, 'build')).toMatch(/road runs over/);
   });
 
   it('knows the result codes core records', () => {

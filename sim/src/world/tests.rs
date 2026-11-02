@@ -582,6 +582,53 @@ fn council(step: &[DistrictTick]) -> Council {
         .expect("a keyframe tick writes the council")
 }
 
+/// A world restored from the keyframe tick `at` of a run whose steps are `ticks`.
+pub(super) fn restored(city: &City, ticks: &[Vec<DistrictTick>], at: u32) -> World {
+    let frames: Vec<_> = ticks[at as usize]
+        .iter()
+        .map(|d| d.keyframe.clone().unwrap())
+        .collect();
+    let mut departures = HashMap::new();
+    for step in &ticks[..=at as usize] {
+        for event in step.iter().flat_map(|d| &d.events) {
+            if let Event::Trip {
+                resident,
+                vehicle,
+                depart,
+                route,
+            } = event
+            {
+                departures.insert(
+                    *resident,
+                    Departure {
+                        depart: *depart,
+                        vehicle: *vehicle,
+                        route: route.clone(),
+                        node: None,
+                    },
+                );
+            }
+        }
+    }
+    let balances = balances(&ticks[at as usize]);
+    let council = council(&ticks[at as usize]);
+    let policy = ticks[at as usize][0]
+        .events
+        .iter()
+        .find_map(Policy::from_event)
+        .unwrap_or_else(Policy::new);
+    World::restore(
+        city.clone(),
+        at,
+        &frames,
+        &balances,
+        council,
+        policy,
+        &departures,
+    )
+    .unwrap()
+}
+
 #[test]
 fn a_world_restored_from_a_keyframe_steps_as_the_original_does() {
     // From an hour of the night, the rush hours and the middle of the day, in cities of 4 and 9 districts.
@@ -594,36 +641,7 @@ fn a_world_restored_from_a_keyframe_steps_as_the_original_does() {
         let ticks: Vec<_> = (0..TICKS_PER_DAY + 600).map(|_| world.step()).collect();
         for &hour in hours {
             let at = hour * TICKS_PER_HOUR;
-            let frames: Vec<_> = ticks[at as usize]
-                .iter()
-                .map(|d| d.keyframe.clone().unwrap())
-                .collect();
-            let mut departures = HashMap::new();
-            for step in &ticks[..=at as usize] {
-                for event in step.iter().flat_map(|d| &d.events) {
-                    if let Event::Trip {
-                        resident,
-                        vehicle,
-                        depart,
-                        route,
-                    } = event
-                    {
-                        departures.insert(
-                            *resident,
-                            Departure {
-                                depart: *depart,
-                                vehicle: *vehicle,
-                                route: route.clone(),
-                                node: None,
-                            },
-                        );
-                    }
-                }
-            }
-            let balances = balances(&ticks[at as usize]);
-            let council = council(&ticks[at as usize]);
-            let mut restored =
-                World::restore(city.clone(), at, &frames, &balances, council, &departures).unwrap();
+            let mut restored = restored(&city, &ticks, at);
             assert_eq!(restored.next_tick(), at + 1);
             for tick in at + 1..at + 400 {
                 assert!(
@@ -647,7 +665,16 @@ fn a_keyframe_with_nobody_on_the_road_to_say_where_from_is_refused() {
         .collect();
     let balances = balances(&ticks[at as usize]);
     let council = council(&ticks[at as usize]);
-    let Err(err) = World::restore(city, at, &frames, &balances, council, &HashMap::new()) else {
+    let policy = Policy::new();
+    let Err(err) = World::restore(
+        city,
+        at,
+        &frames,
+        &balances,
+        council,
+        policy,
+        &HashMap::new(),
+    ) else {
         panic!("restored with no trip events");
     };
     assert!(format!("{err:#}").contains("no trip event"), "{err:#}");

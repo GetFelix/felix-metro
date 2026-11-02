@@ -280,7 +280,7 @@ describe('the road tool', () => {
         built: new Map(),
         roads: roadMap,
       }),
-      roadCheck: (a, b) => (Math.min(a, b) === 0 && Math.max(a, b) === 1 ? 0 : 20),
+      roadCheck: (a, b) => (Math.min(a, b) === 0 && Math.max(a, b) === 1 ? 0 : 22),
       ...over,
     });
     t.placement.select('road');
@@ -339,7 +339,7 @@ describe('the road tool', () => {
       ok: false,
       why: expect.stringMatching(/still going through/),
     });
-    placement.result(100, 24);
+    placement.result(100, 26);
     expect(placement.status.state === 'refused' && placement.status.text).toMatch(/builder laid/);
     roadMap.set(104, { change: ROAD_REMOVED, a: 0, b: 1 });
     expect(placement.roadPreview()!.check).toMatchObject({ ok: false, why: expect.stringMatching(/own streets/) });

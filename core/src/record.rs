@@ -71,16 +71,21 @@ pub const REFUSED_BUSY: u8 = 9;
 /// `build` or `demolish` that the city's account cannot pay for.
 pub const REFUSED_NO_FUNDS: u8 = 10;
 /// `place road` between a node and itself, or two nodes not in one row or column.
-pub const REFUSED_NOT_STRAIGHT: u8 = 20;
+pub const REFUSED_NOT_STRAIGHT: u8 = 22;
 /// `place road` longer than 12 tiles.
-pub const REFUSED_TOO_LONG: u8 = 21;
+pub const REFUSED_TOO_LONG: u8 = 23;
 /// `place road` between two nodes a road already joins.
-pub const REFUSED_ROAD_EXISTS: u8 = 22;
+pub const REFUSED_ROAD_EXISTS: u8 = 24;
 /// `place road` over a tile that is not bare ground or has a road beside it, or
 /// `build` on a lot a road covers.
-pub const REFUSED_ROAD_BLOCKED: u8 = 23;
+pub const REFUSED_ROAD_BLOCKED: u8 = 25;
 /// `remove road` of a segment that is generated or already removed.
-pub const REFUSED_NOT_BUILT: u8 = 24;
+pub const REFUSED_NOT_BUILT: u8 = 26;
+
+/// `policy` command result: the same policy changed less than a cooldown ago.
+pub const REFUSED_COOLDOWN: u8 = 11;
+/// `policy` command that sets a policy to the value it already has.
+pub const REFUSED_UNCHANGED: u8 = 12;
 
 /// `ledger` event reasons.
 /// A city day's taxes in, and road and building upkeep out.
@@ -99,6 +104,17 @@ pub const FACTION_RESIDENTS: usize = 1;
 pub const FACTION_BUSINESS: usize = 2;
 /// How many factions there are.
 pub const FACTIONS: usize = 3;
+
+/// Policies, in the order a `policy` event lists them.
+/// Hours the shops stay open past their usual close, 0 to 3. Shopkeepers go home that much later, and
+/// each shop pays that much more business tax.
+pub const POLICY_SHOP_HOURS: usize = 0;
+/// The speed limit on avenues, in percent of their speed, 30 to 100.
+pub const POLICY_AVENUE_LIMIT: usize = 1;
+/// The speed limit on streets, in percent of their speed, 30 to 100.
+pub const POLICY_STREET_LIMIT: usize = 2;
+/// How many policies there are.
+pub const POLICIES: usize = 3;
 
 /// Why a record could not be read.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -321,6 +337,21 @@ pub enum Event {
         standings: [Standing; FACTIONS],
         tally: Tally,
     },
+    /// The city's policies as they stand, in the order of [`POLICIES`]. District
+    /// 0 writes it when a `policy` command changes one and on every keyframe
+    /// tick once any has changed, so a sim that restarts reads the values and their cooldowns.
+    Policy {
+        settings: [PolicySetting; POLICIES],
+    },
+}
+
+/// One policy's value and when it last changed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PolicySetting {
+    /// The policy's value, in the units of its kind.
+    pub value: u8,
+    /// The tick of the last change, or `None` if it has never changed.
+    pub changed: Option<u32>,
 }
 
 /// One faction's standing after the last scored day. The units of `demand`
@@ -439,6 +470,11 @@ pub enum Command {
     Fork {
         tick: u32,
         name: String,
+    },
+    /// Sets policy `kind` (a `POLICY_` index) to `value`.
+    Policy {
+        kind: u8,
+        value: u8,
     },
     /// Takes away a road a builder added, by segment id.
     RemoveRoad {
