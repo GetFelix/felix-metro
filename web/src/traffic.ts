@@ -64,7 +64,7 @@ export interface Fleet {
   view(camera: THREE.Camera | null): void;
   /** Start a round of placements. `dt` seconds is how far the walkers' legs move on. */
   begin(dt: number): void;
-  /** Place a car of vehicle kind `kind` (1 to 6). `size` is 1 at full size and 0 at nothing. */
+  /** Place a car of vehicle kind `kind` (1 to 6 from the log, 7 for the page's own garbage truck). `size` is 1 at full size and 0 at nothing. */
   car(kind: number, x: number, y: number, z: number, heading: number, size: number): void;
   /** Place the walker `resident` is. */
   person(resident: number, x: number, y: number, z: number, heading: number, size: number): void;
@@ -93,6 +93,8 @@ export class Traffic {
   private readonly from = [0, 0];
   private readonly to = [0, 0];
   private readonly pose: Pose = { x: 0, z: 0, heading: 0 };
+  /** Placed after the voyages in every round, for what the page draws that the log does not describe. */
+  extras: ((fleet: Fleet) => void) | null = null;
   /** A voyage was released since the fleet last drew, so it still shows one that has ended. */
   private stale = false;
   private updating = false;
@@ -201,6 +203,7 @@ export class Traffic {
       if (s.car) this.fleet.car(s.vehicle, s.x, s.y, s.z, s.heading, s.size);
       else this.fleet.person(resident, s.x, s.y, s.z, s.heading, s.size);
     }
+    this.extras?.(this.fleet);
     this.fleet.end();
   }
 }

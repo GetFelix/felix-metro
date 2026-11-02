@@ -50,7 +50,7 @@ export interface InstancedFleet {
 }
 
 /** The meshes of a model, each with where it sits in the model. */
-function parts(model: GLTF): { mesh: THREE.Mesh; local: THREE.Matrix4 }[] {
+export function parts(model: GLTF): { mesh: THREE.Mesh; local: THREE.Matrix4 }[] {
   const root = model.scene;
   root.updateMatrixWorld(true);
   const inverse = root.matrixWorld.clone().invert();
@@ -151,6 +151,7 @@ export function createFleet(scene: THREE.Scene, p: FleetParts): InstancedFleet {
     },
     car(kind, x, y, z, heading, size) {
       if (size <= 0 || !inView(x, y, z)) return;
+      // The sim's kinds are 1 to 6, fewer than the models, so none of them reaches the page's own truck.
       const set = cars[(kind - 1) % cars.length]!;
       const scale = p.carScale * size;
       pose(car, x, y, z, heading, scale);

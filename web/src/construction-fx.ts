@@ -145,6 +145,11 @@ export class ConstructionFx {
     for (const lot of this.gone) this.release(lot);
   }
 
+  /** Whether the lot is going up or coming down now. */
+  busy(lot: number): boolean {
+    return this.slots.has(lot);
+  }
+
   /** Whether any lot is being drawn mid-way; for the CI check. */
   get active(): number {
     return this.slots.size;

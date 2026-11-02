@@ -130,3 +130,77 @@ export function glowMaterial(map: THREE.Texture) {
 export function glowGeometry(): THREE.BufferGeometry {
   return new THREE.PlaneGeometry(1, 1);
 }
+
+// Quads and sprites that each carry their own opacity, in an `alpha` attribute (a Batch `extra` of size 1). A sprite
+// faces the camera as in SPRITE_VERTEX; a quad lies where its matrix puts it.
+const TINT_VERTEX = (billboard: boolean) => /* glsl */ `
+attribute float alpha;
+varying vec2 vUv;
+varying float vAlpha;
+#include <fog_pars_vertex>
+void main() {
+  vUv = uv;
+  vAlpha = alpha;
+  ${
+    billboard
+      ? `vec4 mvPosition = modelViewMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0);
+  vec2 size = vec2(length(instanceMatrix[0].xyz), length(instanceMatrix[1].xyz));
+  mvPosition.xy += position.xy * size;`
+      : 'vec4 mvPosition = modelViewMatrix * instanceMatrix * vec4(position, 1.0);'
+  }
+  gl_Position = projectionMatrix * mvPosition;
+  #include <fog_vertex>
+}`;
+
+const TINT_FRAGMENT = /* glsl */ `
+uniform sampler2D map;
+uniform vec3 tint;
+uniform float opacity;
+varying vec2 vUv;
+varying float vAlpha;
+#include <common>
+#include <fog_pars_fragment>
+void main() {
+  vec4 texel = texture2D(map, vUv);
+  gl_FragColor = vec4(tint * texel.rgb, texel.a * opacity * vAlpha);
+  #include <tonemapping_fragment>
+  #include <colorspace_fragment>
+  #include <fog_fragment>
+}`;
+
+export interface TintOptions {
+  billboard: boolean;
+  additive: boolean;
+}
+
+/** `map` times the `tint` uniform, with the instance's `alpha` and the `opacity` uniform as its opacity. */
+export function tintMaterial(map: THREE.Texture, { billboard, additive }: TintOptions) {
+  return new THREE.ShaderMaterial({
+    uniforms: THREE.UniformsUtils.merge([
+      THREE.UniformsLib.fog,
+      { map: { value: map }, tint: { value: new THREE.Color(1, 1, 1) }, opacity: { value: 1 } },
+    ]),
+    vertexShader: TINT_VERTEX(billboard),
+    fragmentShader: TINT_FRAGMENT,
+    fog: true,
+    transparent: true,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+    blending: additive ? THREE.AdditiveBlending : THREE.NormalBlending,
+  });
+}
+
+/** A round soft spot, `color` at the middle and clear at the edge. */
+export function radialTexture(color: string): THREE.CanvasTexture {
+  const c = document.createElement('canvas');
+  c.width = c.height = 128;
+  const g = c.getContext('2d')!;
+  const grad = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+  grad.addColorStop(0, color);
+  grad.addColorStop(1, 'rgba(0,0,0,0)');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 128, 128);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}

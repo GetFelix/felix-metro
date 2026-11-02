@@ -91,7 +91,7 @@ connection, so a page opened with `?at` cannot play or rewind.
 
 | M   | Milestone           | State                                                                                                                                                                                                                                                                         |
 | --- | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 0   | The look, locked    | In progress: style frame, assets, daylight, post-processing, quality tiers, the UI shell (settings sheet, key list, first-visit hint, rolling clock), camera controls and instanced traffic done                                                                         |
+| 0   | The look, locked    | In progress: style frame, assets, daylight, post-processing, quality tiers, the UI shell (settings sheet, key list, first-visit hint, rolling clock), camera controls, instanced traffic and ambient life done                                                                |
 | 1   | A live city         | Done                                                                                                                                                                                                                                                                          |
 | 2   | Time travel         | In progress: keyframes, seeking, the timeline scrubber, rewind then follow, and backward playback with speeds built, smoothness not yet measured                                                                                                                              |
 | 3   | Follow a life       | Planned                                                                                                                                                                                                                                                                       |
@@ -112,6 +112,16 @@ A city the gateway refuses (a misspelled name, or no access) shows a message ins
 retrying. The city name in the top left opens a list of every city. The clock's digits roll as time moves, the button under it opens the settings sheet, and the `?` key opens the key list. Following a resident and the page's own
 building tools are not built yet; a command published to the city's command stream by any client with a
 builder's token is applied by the sim and shows up in the page, rising over 8 ticks of city time inside a scaffold (a demolished building scales down in a puff of dust). Rewind through it and it comes down again; the low quality tier skips the scaffold and the dust.
+
+## Ambient life
+
+Beyond the residents in the log, the city has a little life of its own: shop windows light while a shop is open (07:30 to
+22:00, each shop at its own hour), factory stacks smoke on work hours, birds sit on some roofs at dawn, traffic lights
+change at the crossroads, a garbage truck does a round in the morning, and delivery vans work the shopping streets by
+day. The sim does not log any of it. The page draws each from the tick on screen and the city's seed, so a seek or a
+rewind shows the right picture at once and the same tick always looks the same. The low quality tier keeps only the shop
+windows. [docs/art.md](docs/art.md#ambient-life) has the details and what it costs; `web/scripts/check-ambient.mjs`
+checks it in CI.
 
 ## Camera controls
 

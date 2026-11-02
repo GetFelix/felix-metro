@@ -47,6 +47,34 @@ fn times_are_jittered_and_follow_the_archetype() {
     assert!(night.blocks[1].leave > 19 * TICKS_PER_HOUR);
 }
 
+/// The quiet night the page shows is planned here, not drawn: the page does not thin walkers. Planned departures
+/// stay inside 04:30 to 23:30 for legs of up to an hour (the sim plans a leg at 5 ticks a tile). A departure can still
+/// be held back by an unfinished trip, which this does not model.
+#[test]
+fn nobody_plans_to_set_off_in_the_small_hours() {
+    for travel in [0, 60, 150, 240] {
+        for archetype in Archetype::ALL {
+            for i in 0..400 {
+                let mut rng = Rng::new(&format!("r{i}"));
+                let anchors = Anchors {
+                    home: 1,
+                    work: 2,
+                    shop: 3,
+                    park: 4,
+                };
+                let s = Schedule::new(archetype, &mut rng, &anchors, |_, _| travel);
+                for b in &s.blocks {
+                    assert!(
+                        (9 * TICKS_PER_HOUR / 2..47 * TICKS_PER_HOUR / 2).contains(&b.leave),
+                        "{archetype:?} with legs of {travel} ticks leaves at {}",
+                        b.leave
+                    );
+                }
+            }
+        }
+    }
+}
+
 #[test]
 fn the_same_seed_gives_the_same_day() {
     for a in Archetype::ALL {
