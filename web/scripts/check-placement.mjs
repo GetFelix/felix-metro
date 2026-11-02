@@ -216,24 +216,33 @@ async function use(page, tool, lot, { kind = null, touch = false, confirm = fals
     if (!confirm) {
       await page.touchscreen.tap(at.x, at.y);
     } else {
-      // A touch demolish picks the building with the first tap and takes it down with the second. A slow runner can
-      // let the pick lapse (the page drops it after a few seconds) or stretch a tap into a press, and then a tap only
-      // picks again. So tap until a command goes out: any tap on an unpicked lot picks, and one on the picked lot sends.
+      // A touch demolish picks the building with the first tap and takes it down with the second, which must come within
+      // a few seconds of the first (the page drops an unconfirmed pick after 5 s). On a slow runner every round trip to
+      // the page takes seconds, so taps go out back to back at the place the first one found, with a short wait for the
+      // command. A tap that came late only picks again, and the next one sends.
+      const first = Date.now();
       await page.touchscreen.tap(at.x, at.y);
       await until(page, (l) => window.__build.state().preview?.lot === l, lot, `the first tap never picked lot ${lot}`);
       const picked = await state(page);
       check(picked.sent === sent && picked.pending === 0, 'the first tap of a touch demolish sends nothing');
-      for (let tap = 0; tap < 4; tap++) {
-        const now = await page.evaluate((l) => window.__build.screenOf(l), lot);
-        await page.touchscreen.tap(now.x, now.y);
-        const went = await page
-          .waitForFunction((n) => window.__build.state().sent > n, sent, { polling: 100, timeout: 3000 })
-          .then(
-            () => true,
-            () => false,
-          );
+      const TAPS = 8;
+      for (let tap = 0; tap < TAPS; tap++) {
+        await page.touchscreen.tap(at.x, at.y);
+        const went = await within(
+          5000,
+          page
+            .waitForFunction((n) => window.__build.state().sent > n, sent, { polling: 100, timeout: 1200 })
+            .then(
+              () => true,
+              () => false,
+            ),
+          false,
+        );
+        console.log(
+          `tap ${tap + 2} of the demolish, ${Date.now() - first} ms after the first: ${went ? 'sent' : 'not sent'}`,
+        );
         if (went) break;
-        if (tap === 3)
+        if (tap === TAPS - 1)
           await fail(
             `${page.label}: no tap confirmed the demolish: ${JSON.stringify(await within(5000, state(page), null))}`,
           );
@@ -540,7 +549,21 @@ await Promise.all(
   await bp.touchscreen.tap(tile.x, tile.y);
   await until(bp, () => window.__build.state().road?.kind === 'remove', null, 'B’s first tap never picked the road');
   check((await state(bp)).sent === sentB, 'the first tap of a road removal sends nothing');
-  await bp.touchscreen.tap(tile.x, tile.y);
+  // As with the demolish, a confirming tap that comes after the pick lapsed only picks again, so tap until it is answered.
+  for (let tap = 0; tap < 6; tap++) {
+    await bp.touchscreen.tap(tile.x, tile.y);
+    const answered = await within(
+      5000,
+      bp
+        .waitForFunction((n) => window.__build.state().answered > n, beforeB, { polling: 100, timeout: 1500 })
+        .then(
+          () => true,
+          () => false,
+        ),
+      false,
+    );
+    if (answered) break;
+  }
   const gone = await answer(bp, beforeB);
   check(gone.status === 'Road taken away.', `B is told: ${gone.status}`);
   for (const p of [a, b]) {
