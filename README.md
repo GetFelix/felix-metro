@@ -45,7 +45,7 @@ and play forward from there.
 | Need                                          | Felix feature                                              |
 | --------------------------------------------- | ---------------------------------------------------------- |
 | A district's history, in order                | A durable stream, one shard per district                   |
-| Each tick written atomically, with its offset | `commit`                                                   |
+| Each tick written atomically, with its offset | `commit` on the district's shard (`commit_if_on_shard`)    |
 | Only one simulation writes a city             | `publish_if` / `commit` expected offset                    |
 | The newest keyframe                           | Stream state (`state_get`)                                 |
 | Loading a past moment                         | Bounded range reads (`read`)                               |

@@ -94,15 +94,20 @@ A trip is its legs, each with a speed percentage, and a depart tick; every leg's
 ### Districts are shards
 
 A city is a grid of districts, and each district is one shard of the city's
-event stream. The sim routes every commit with the district as its entity key.
-This keeps each district's history in order on its own shard and spreads a big
-city over brokers.
+event stream. This keeps each district's history in order on its own shard and
+spreads a big city over brokers.
 
-Felix maps an entity key to a shard by hashing it, and the keys `d00` to `d03`
-do not land on four different shards of a four-shard stream. So district `i`
-commits with `d<NN>` where that hashes to shard `i`, and with `d<NN>.<n>` for
-the first `n` that does where it does not. The stream needs a shard for every
-district, and district `i` is always shard `i`.
+District `i` is shard `i`. The sim names the shard in every commit
+(`commit_if_on_shard`) and every state read (`state_get_on_shard`), and the page
+names it in its `read`, `subscribe` and `state_get`, so nothing needs to know
+how the stream hashes entity keys. The commit still carries an entity key,
+`d<NN>`, but only as a label. The stream needs a shard for every district, and
+the sim refuses to start on one that has fewer.
+
+An earlier version salted the entity key (`d<NN>.<n>`) until it hashed to the
+district's shard. A log written that way reads the same, because each district's
+records and `keyframe` state are on the same shard either way. The salt was never
+part of a record or a state key.
 
 One sim task steps all districts of a city in lockstep. Each tick it commits one
 record per district, in parallel, and waits for all of them before the next

@@ -14,10 +14,9 @@ import type { City } from './layout';
 // The wasm decoder is not what is tested here: records travel as JSON text.
 vi.mock('./core/felix_metro_core.js', () => ({
   decodeRecord: (bytes: Uint8Array) => new TextDecoder().decode(bytes),
-  districtKey: (district: number, _shards: number, routing: string) => `${routing}.${district}`,
 }));
 vi.mock('./auth', () => ({ signIn: async () => 'token' }));
-const { follow, createFeeds, connectLive } = await import('./live');
+const { follow, createFeeds, connectLive, keyframeOffset } = await import('./live');
 
 const city = { lots: [] } as unknown as City;
 const trips: Trips = { trip: () => undefined };
@@ -41,6 +40,8 @@ class FakeGateway {
   subscribes = 0;
   reads: [number, number, number][] = [];
   stateFails = 0;
+  /** The shard of each `state_get`, in order. */
+  stateReads: number[] = [];
   stalled = false;
   /** The offset of each district's newest keyframe, which `state_get` points at; none until one is committed. */
   keyframes = new Map<number, number>();
@@ -85,9 +86,10 @@ class FakeGateway {
     for (let o = from; o < stop; o++) records.push({ offset: o, payload: log[o]! });
     return { records, nextOffset: stop };
   }
-  async stateGet(): Promise<StateValue> {
+  async stateGet(_stream: string, _key: string, shard: number): Promise<StateValue> {
+    this.stateReads.push(shard);
     if (this.stateFails-- > 0) throw new GatewayError('state_failed', 'no such shard');
-    const at = this.keyframes.get(0);
+    const at = this.keyframes.get(shard);
     if (at === undefined) return { payload: null, version: null, asOf: 0 };
     const payload = new Uint8Array(8);
     new DataView(payload.buffer).setBigUint64(0, BigInt(at), true);
@@ -161,12 +163,21 @@ describe('follow', () => {
     expect(gateway.subscribes).toBe(3);
   });
 
-  it('tries the other key routing when the first is refused', async () => {
+  it('starts from the beginning of the log when the keyframe read is refused', async () => {
     const { state } = await start(1, (g) => {
       commits(g, 2);
       g.stateFails = 1;
     });
     expect(state.ticks[0]).toBe(1);
+  });
+
+  it('reads each district keyframe from the district own shard', async () => {
+    const gateway = new FakeGateway(3);
+    for (let i = 0; i < 4; i++) gateway.commit(2, false, 0, i === 1);
+    gateway.commit(1, false);
+    expect(await keyframeOffset(gateway as unknown as Gateway, 2)).toBe(1);
+    expect(await keyframeOffset(gateway as unknown as Gateway, 1)).toBe(0);
+    expect(gateway.stateReads).toEqual([2, 1]);
   });
 
   it('gives up with an error when the log never gets it caught up', async () => {

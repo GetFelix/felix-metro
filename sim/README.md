@@ -82,21 +82,19 @@ Every city, when it starts, writes a `created` record (name, seed, districts a s
 so a repeated record is harmless. `SIM_ON_DEMAND` is how a city comes into being while pages are
 open; with the dev stack, `dev/city.sh lakeside` does it.
 
-## Entity keys
+## Shards
 
-District `i` lives on shard `i` of `metro.events.<city>`. Felix picks a shard from
-the entity key's hash, so plain `d00` to `d03` can put two districts on one shard and
-leave another empty. The sim salts them: a district's key is `d<NN>`, or `d<NN>.<n>`
-for the first `n` where the key routes to shard `NN`. The hash depends on the stream's
-routing mode (`modulo` or `jump_hash`), which the sim asks Felix for at start.
+District `i` lives on shard `i` of `metro.events.<city>`. The sim names the shard in
+every commit and state read (`commit_if_on_shard`, `state_get_on_shard`), so it does
+not depend on how the stream hashes entity keys, and the commit's entity key
+(`d<NN>`) is only a label. Anything else that reads a district, such as the web client
+through the gateway, names the shard the same way: `read`, `subscribe` and
+`state_get` all take a `shard`. This needs a broker that advertises explicit shards
+(Felix 0.6.1 or later) and, for the page, a gateway with the `shards` feature (0.8.0
+for `state_get`).
 
-Anything that publishes to or reads a district by key, such as the web client or a
-gateway subscriber, must use the same keys. `felix_metro_core::district_key(district,
-shards, routing)` computes them, and the WebAssembly build exports it as `districtKey`.
-Reading a shard by number needs no key.
-
-Changing a stream's shard count changes the keys and moves districts between shards,
-so it is unsupported: create a new city instead.
+The sim refuses to start on a stream with fewer shards than the city has districts.
+Changing a stream's shard count later is unsupported: create a new city instead.
 
 Each city needs its stream `metro.events.<city>` with a shard for every district,
 and its command stream `metro.commands.<city>`. Create them together: a new city

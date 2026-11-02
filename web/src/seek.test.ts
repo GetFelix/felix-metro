@@ -6,7 +6,6 @@ import type { City } from './layout';
 // The wasm decoder is not what is tested here: records travel as JSON text, as live.test.ts has them.
 vi.mock('./core/felix_metro_core.js', () => ({
   decodeRecord: (bytes: Uint8Array) => new TextDecoder().decode(bytes),
-  districtKey: (district: number, _shards: number, routing: string) => `${routing}.${district}`,
 }));
 vi.mock('./auth', () => ({ signIn: async () => 'token' }));
 const { Seeker, SeekError, fold, foldMore, continues, tryFoldMore } = await import('./seek');
@@ -112,12 +111,10 @@ class FakeHistory {
       this.flying.delete(key);
     }
   }
-  /** Answers only for the key the records are routed by (jump_hash here); any other key holds nothing. */
-  async stateGet(_stream: string, key: string, entity: string): Promise<StateValue> {
-    const none = { payload: null, version: null, asOf: 0 };
-    const [routing, d] = entity.split('.');
-    if (key !== 'keyframe' || routing !== 'jump_hash') return none;
-    const log = this.logs[Number(d)]!;
+  /** Answers for the `keyframe` key of the shard asked; any other key holds nothing. */
+  async stateGet(_stream: string, key: string, shard: number): Promise<StateValue> {
+    if (key !== 'keyframe') return { payload: null, version: null, asOf: 0 };
+    const log = this.logs[shard]!;
     const at = log.map((r) => r.keyframe !== null).lastIndexOf(true);
     const payload = new Uint8Array(8);
     new DataView(payload.buffer).setBigUint64(0, BigInt(at), true);

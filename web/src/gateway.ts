@@ -224,10 +224,10 @@ export class Gateway {
   }
 
   /**
-   * One key of a stream's state. `entity` is the key that picks the shard, as the writer's commit named it.
+   * One key of a stream's state, in `shard`. Needs the `shards` feature. The answer's offsets are that shard's.
    */
-  async stateGet(stream: string, key: string, entity: string): Promise<StateValue> {
-    const json = await this.request({ type: 'state_get', stream, key, entity });
+  async stateGet(stream: string, key: string, shard: number): Promise<StateValue> {
+    const json = await this.request({ type: 'state_get', stream, key, shard });
     return {
       payload: json.payload === null ? null : unbase64(String(json.payload)),
       version: (json.version as number | null) ?? null,

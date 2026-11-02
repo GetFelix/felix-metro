@@ -3,7 +3,6 @@ import { GatewayError, type EventFrame } from './gateway';
 
 vi.mock('./core/felix_metro_core.js', () => ({
   decodeRecord: (bytes: Uint8Array) => new TextDecoder().decode(bytes),
-  districtKey: (district: number) => `k${district}`,
 }));
 vi.mock('./auth', () => ({ signIn: async () => 'token' }));
 const { connect } = vi.hoisted(() => ({ connect: vi.fn() }));

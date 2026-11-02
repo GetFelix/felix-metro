@@ -223,10 +223,16 @@ describe('Gateway', () => {
     expect(sent()).toHaveLength(4);
   });
 
-  it('reads a state key under the entity that picks the shard', async () => {
+  it('reads a state key in the named shard, without an entity', async () => {
     const { gateway, socket } = await joined();
-    const value = gateway.stateGet('events', 'keyframe', 'd01.3');
-    expect(socket.sent[1]).toMatchObject({ type: 'state_get', stream: 'events', key: 'keyframe', entity: 'd01.3' });
+    const value = gateway.stateGet('events', 'keyframe', 3);
+    expect(socket.sent[1]).toEqual({
+      type: 'state_get',
+      stream: 'events',
+      key: 'keyframe',
+      shard: 3,
+      id: socket.sent[1]!.id,
+    });
     socket.say({
       type: 'state_value',
       id: socket.sent[1]!.id,
@@ -235,7 +241,7 @@ describe('Gateway', () => {
       as_of: 44,
     });
     expect(await value).toMatchObject({ version: 40, asOf: 44 });
-    const none = gateway.stateGet('events', 'keyframe', 'd02');
+    const none = gateway.stateGet('events', 'keyframe', 2);
     socket.say({ type: 'state_value', id: socket.sent[2]!.id, payload: null, version: null, as_of: 44 });
     expect((await none).payload).toBeNull();
   });
@@ -282,7 +288,7 @@ describe('Gateway', () => {
     gateway.onError = (e) => seen.push(e);
     const subscribed = gateway.subscribe('events', 'd00', 0, 'live', () => {});
     const reads = Array.from({ length: 6 }, () => gateway.read('events', 0, 0));
-    const state = gateway.stateGet('events', 'keyframe', 'd00');
+    const state = gateway.stateGet('events', 'keyframe', 0);
     socket.dispatchEvent(new Event('close'));
     for (const p of [subscribed, ...reads, state]) await expect(p).rejects.toMatchObject({ code: 'closed' });
     await expect(gateway.read('events', 0, 0)).rejects.toMatchObject({ code: 'closed' });
