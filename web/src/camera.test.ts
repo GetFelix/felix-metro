@@ -264,3 +264,18 @@ describe('the opening drift', () => {
     expect(camera.position.distanceTo(mid)).toBeLessThan(2);
   });
 });
+
+describe('drift', () => {
+  it('turns the view without counting as the person taking over', () => {
+    const { rig } = make();
+    const started = vi.fn();
+    rig.addEventListener('start', started);
+    const before = rig.state().azimuth;
+    for (let i = 0; i < 120; i++) {
+      rig.drift(0.05 / 60);
+      rig.update(1 / 60);
+    }
+    expect(rig.state().azimuth).not.toBeCloseTo(before, 2);
+    expect(started).not.toHaveBeenCalled();
+  });
+});

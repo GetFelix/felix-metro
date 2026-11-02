@@ -254,6 +254,71 @@ for (const [size, tag] of [
   }
 }
 
+// 8. Photo mode hides every control, including the tip, and H or Esc brings them back.
+{
+  const { context, page } = await open('tier=low&still&t=12&hud', DESKTOP);
+  const shown = () =>
+    page.evaluate(
+      () =>
+        [...document.querySelectorAll('.chip, .corner, .toasts, .hud, #settings-button')].filter((el) =>
+          el.checkVisibility(),
+        ).length,
+    );
+  check((await shown()) > 0, 'the controls are on screen before photo mode');
+  await page.evaluate(() => window.__ui.offerHint());
+  await page.keyboard.press('h');
+  check((await shown()) === 0, 'H hides every control, the tip and the frame times');
+  await page.screenshot({ path: join(out, 'photo-day-1280.png') });
+  await page.keyboard.press('h');
+  check((await shown()) > 0, 'H brings them back');
+  await page.keyboard.press('h');
+  await page.keyboard.press('Escape');
+  check((await shown()) > 0, 'Esc brings them back');
+  await page.keyboard.press('?');
+  await page.keyboard.press('h');
+  check(await visible(page, '#sheet'), 'H does nothing under an open sheet');
+  await context.close();
+}
+
+// 9. A shared view is where the camera starts, with no opening drift.
+{
+  const { context, page } = await open('tier=low&t=12&cam=3,-2,15,1.2,0.9', DESKTOP);
+  await settle(page, 300);
+  const state = await page.evaluate(() => window.__camera.state());
+  check(
+    state.x === 3 && state.z === -2 && state.distance === 15 && state.azimuth === 1.2 && state.polar === 0.9,
+    `?cam puts the camera there (${JSON.stringify(state)})`,
+  );
+  await context.close();
+}
+
+// 10. Attract mode: untouched, the camera turns; a mouse move stops it.
+{
+  const { context, page } = await open('tier=low&t=12&attract=2', DESKTOP);
+  const azimuth = () => page.evaluate(() => window.__camera.state().azimuth);
+  // The opening drift ends on its own; wait it out, then see whether the camera holds.
+  await settle(page, 2500);
+  const first = await azimuth();
+  await settle(page, 1500);
+  const second = await azimuth();
+  check(second !== first, `the camera turns after the quiet (${first} to ${second})`);
+  await page.mouse.move(400, 300);
+  await settle(page, 400);
+  const held = await azimuth();
+  await page.mouse.move(420, 310);
+  await settle(page, 1000);
+  check((await azimuth()) === held, 'a mouse move stops the turn');
+  await context.close();
+}
+{
+  const { context, page } = await open('tier=low&t=12&attract=0', DESKTOP);
+  await settle(page, 3000);
+  const first = await page.evaluate(() => window.__camera.state().azimuth);
+  await settle(page, 1500);
+  check((await page.evaluate(() => window.__camera.state().azimuth)) === first, '?attract=0 keeps the camera still');
+  await context.close();
+}
+
 await browser.close();
 if (problems.length) {
   console.error(`\n${problems.length} problem(s):\n${problems.join('\n')}`);

@@ -2,6 +2,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { HINT_TEXT } from './hint';
 import { SHORTCUTS } from './keys';
+import { SHARE_LABEL } from './share';
 import { CHOICES } from './settings';
 
 // docs/ui.md sets the copy rules: plain words, none of the system's own, and no em dashes.
@@ -9,6 +10,7 @@ const JARGON = /\b(logs?|streams?|offsets?|ticks?|shards?|keyframes?|districts?)
 
 const words = [
   HINT_TEXT,
+  SHARE_LABEL,
   ...CHOICES.flatMap((c) => [c.label, c.hint]),
   ...SHORTCUTS.flatMap((g) => [g.title, g.when ?? '', ...g.rows.map((r) => r.action)]),
 ];

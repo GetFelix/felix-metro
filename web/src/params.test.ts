@@ -16,6 +16,8 @@ describe('parseParams', () => {
       live: true,
       gateway: null,
       at: null,
+      cam: null,
+      attract: 60,
       trace: false,
       capture: false,
     });
@@ -66,5 +68,17 @@ describe('parseParams', () => {
     for (const bad of ['?at=', '?at=-5', '?at=1.5', '?at=soon']) expect(parseParams(bad).at).toBeNull();
     // `t` stays the frozen hour.
     expect(parseParams('?t=18.5&at=40')).toMatchObject({ frozenHour: 18.5, at: 40 });
+  });
+
+  it('reads a shared view and the idle wait', () => {
+    expect(parseParams('?at=900&cam=1,2,20,0.5,0.8&attract=15')).toMatchObject({
+      at: 900,
+      cam: { x: 1, z: 2, distance: 20, azimuth: 0.5, polar: 0.8 },
+      attract: 15,
+    });
+    expect(parseParams('?cam=1,2,3').cam).toBeNull();
+    expect(parseParams('?attract=0').attract).toBe(0);
+    expect(parseParams('?attract=soon').attract).toBe(60);
+    expect(parseParams('?attract=-5').attract).toBe(60);
   });
 });
