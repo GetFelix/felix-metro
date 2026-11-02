@@ -11,6 +11,12 @@
   applied commands), so a command sent while the sim was down runs when it comes back and none runs twice. A new city now
   reads its command stream from the start. The epoch in the tick header stays the same across a restart.
 
+- The city has funds. It starts with $100,000; each city day residents and businesses pay tax and roads and parks cost
+  upkeep, and building or demolishing takes a price when the command applies. A command the city cannot pay for is
+  refused with result 10. The sim records a `ledger` event per district per day and per paid command, and a `balance`
+  event per district on every keyframe tick; a restart restores the account. The page shows the funds beside the clock,
+  and shows the funds of the moment you scrub to.
+
 ### Added
 
 - Moments: a **Share this moment** button copies a link such as `/?at=<tick>&cam=<x,z,distance,azimuth,polar>#harbor`

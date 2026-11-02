@@ -4,7 +4,9 @@
 use std::collections::HashMap;
 
 use anyhow::{Context, Result, bail, ensure};
-use felix_metro_core::record::{BuildingDiff, Doing, Event, Keyframe, Leg, NO_BUILDING, Vehicle};
+use felix_metro_core::record::{
+    BuildingDiff, Doing, Event, Keyframe, LEDGER_DAY, Leg, NO_BUILDING, Vehicle,
+};
 use felix_metro_core::{City, Mode, TICKS_PER_DAY};
 
 use super::{Person, State, World, activity_kind, count_car};
@@ -20,8 +22,9 @@ pub(crate) struct Departure {
 
 impl World {
     /// The world as it stood at the end of tick `at`, which `frames` (one
-    /// keyframe per district, taken at `at`) describe. `departures` holds the
-    /// latest `trip` event of every resident who was on the road.
+    /// keyframe per district, taken at `at`) describe. `balances` is each
+    /// district's share of the account then, and `departures` the latest `trip`
+    /// event of every resident who was on the road.
     ///
     /// Stepping the result gives the records the original would have, as long
     /// as the builds after `at` are applied to it first. A keyframe does not
@@ -31,9 +34,17 @@ impl World {
         city: City,
         at: u32,
         frames: &[Keyframe],
+        balances: &[i64],
         departures: &HashMap<u32, Departure>,
     ) -> Result<World> {
         let mut world = World::new(city);
+        ensure!(
+            balances.len() == world.districts(),
+            "{} balances for {} districts",
+            balances.len(),
+            world.districts()
+        );
+        world.accounts = balances.to_vec();
         ensure!(
             frames.len() == world.districts(),
             "{} keyframes for {} districts",
@@ -106,10 +117,15 @@ impl World {
         Ok(world)
     }
 
-    /// Carries out what a `built` or `demolished` event in the log says. Other
-    /// events change nothing a restart has to rebuild: stepping makes them.
-    pub(crate) fn apply_logged(&mut self, event: &Event) {
+    /// Carries out what a `built`, `demolished` or command `ledger` event in
+    /// `district`'s record says. Other events change nothing a restart has to
+    /// rebuild: stepping makes them, a day's `ledger` included.
+    pub(crate) fn apply_logged(&mut self, district: usize, event: &Event) {
         let diff = match *event {
+            Event::Ledger { reason, spent, .. } if reason != LEDGER_DAY => {
+                self.accounts[district] -= spent as i64;
+                return;
+            }
             Event::Built {
                 lot,
                 kind,
