@@ -26,6 +26,11 @@ const EV_SPEED: u8 = 11;
 const EV_COMMAND_CURSOR: u8 = 12;
 /// An `arrived` and the same resident's `activity` that follows it, which is every arrival the sim makes.
 const EV_ARRIVAL: u8 = 13;
+/// A rare event goes under this tag with a kind varint ahead of its fields, so the few tags that fit
+/// [`EVENT_TAG_BITS`] stay for events a tick writes in bulk. Tag 14 is still free.
+const EV_EXTENDED: u8 = 15;
+const EXT_LEDGER: u64 = 1;
+const EXT_BALANCE: u64 = 2;
 
 const CMD_PLACE_ROAD: u8 = 1;
 const CMD_ZONE: u8 = 2;
@@ -336,6 +341,22 @@ fn put_event(w: &mut Writer, e: &Event, tick: u32) -> Result<(), EncodeError> {
             b.varint(*next);
             Ok(())
         }),
+        Event::Ledger {
+            reason,
+            earned,
+            spent,
+        } => w.framed(EV_EXTENDED, EVENT_TAG_BITS, |b| {
+            b.varint(EXT_LEDGER);
+            b.u8(*reason);
+            b.varint(*earned);
+            b.varint(*spent);
+            Ok(())
+        }),
+        Event::Balance { amount } => w.framed(EV_EXTENDED, EVENT_TAG_BITS, |b| {
+            b.varint(EXT_BALANCE);
+            b.svarint(*amount);
+            Ok(())
+        }),
     }
 }
 
@@ -409,6 +430,17 @@ fn get_entry(r: &mut Reader, tick: u32, out: &mut Vec<Event>) -> Result<(), Deco
             ticks_per_second: r.u8()?,
         },
         EV_COMMAND_CURSOR => Event::CommandCursor { next: r.varint()? },
+        EV_EXTENDED => match r.varint()? {
+            EXT_LEDGER => Event::Ledger {
+                reason: r.u8()?,
+                earned: r.varint()?,
+                spent: r.varint()?,
+            },
+            EXT_BALANCE => Event::Balance {
+                amount: r.svarint()?,
+            },
+            _ => return Ok(()),
+        },
         _ => return Ok(()),
     };
     out.push(event);

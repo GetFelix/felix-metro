@@ -11,12 +11,14 @@
   applied commands), so a command sent while the sim was down runs when it comes back and none runs twice. A new city now
   reads its command stream from the start. The epoch in the tick header stays the same across a restart.
 
+- The city has funds. It starts with $100,000; each city day residents and businesses pay tax and roads and parks cost
+  upkeep, and building or demolishing takes a price when the command applies. A command the city cannot pay for is
+  refused with result 10. The sim records a `ledger` event per district per day and per paid command, and a `balance`
+  event per district on every keyframe tick; a restart restores the account. The page shows the funds beside the clock,
+  and shows the funds of the moment you scrub to.
+
 ### Added
 
-- City stats: a panel on the left edge shows the residents, how many are on the road (in cars and on foot) and the
-  buildings by kind (homes, shops and offices, towers, factories) for the moment on screen, so the numbers change as you
-  scrub, rewind or seek. Press `C` or use the switch in the settings sheet; the choice is remembered. A test follows the
-  sim's own log of a morning and checks the count against the sim at every tick.
 - Moments: a **Share this moment** button copies a link such as `/?at=<tick>&cam=<x,z,distance,azimuth,polar>#harbor`
   that opens the city at that tick from that camera view (`?cam` is new). `H` is photo mode and hides every control.
   A page left alone for 60 seconds turns the camera slowly (`?attract=<seconds>`, `0` turns it off).

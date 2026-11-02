@@ -172,17 +172,19 @@ guess.
 A car's position every tick would cost around 4 MB/s for 10,000 cars. The sim
 writes decisions instead, and the client works out positions:
 
-| Event                  | Fields                                                                         | Meaning                                    |
-| ---------------------- | ------------------------------------------------------------------------------ | ------------------------------------------ |
-| `trip`                 | resident, vehicle kind, depart tick, route (segment ids with a speed each)     | Leaves now along this route                |
-| `replan`               | resident, from segment, new route                                              | A jam or a closed road changed the route   |
-| `arrived`              | resident, lot                                                                  | Reached a building                         |
-| `activity`             | resident, kind (sleep, work, shop, ...), until tick                            | What they are doing inside                 |
-| `left` / `entered`     | resident, other district; `entered` adds the vehicle state with the route left | Crossed into another district              |
-| `built` / `demolished` | lot, building kind, rotation                                                   | A building changed                         |
-| `road`                 | segment, change (closed, opened, added, removed)                               | A road changed                             |
-| `command`              | principal hash, builder name, command id, result                               | A builder's command was applied or refused |
-| `speed`                | ticks per second                                                               | The city's speed changed; 0 is paused      |
+| Event                  | Fields                                                                         | Meaning                                             |
+| ---------------------- | ------------------------------------------------------------------------------ | --------------------------------------------------- |
+| `trip`                 | resident, vehicle kind, depart tick, route (segment ids with a speed each)     | Leaves now along this route                         |
+| `replan`               | resident, from segment, new route                                              | A jam or a closed road changed the route            |
+| `arrived`              | resident, lot                                                                  | Reached a building                                  |
+| `activity`             | resident, kind (sleep, work, shop, ...), until tick                            | What they are doing inside                          |
+| `left` / `entered`     | resident, other district; `entered` adds the vehicle state with the route left | Crossed into another district                       |
+| `built` / `demolished` | lot, building kind, rotation                                                   | A building changed                                  |
+| `road`                 | segment, change (closed, opened, added, removed)                               | A road changed                                      |
+| `command`              | principal hash, builder name, command id, result                               | A builder's command was applied or refused          |
+| `speed`                | ticks per second                                                               | The city's speed changed; 0 is paused               |
+| `ledger`               | reason (day, build, demolish), earned, spent                                   | Money moved in or out of the city's funds           |
+| `balance`              | amount                                                                         | A district's share of the funds, each keyframe tick |
 
 A route is its segment ids from the road graph and one speed byte per segment,
 a percentage of the segment class's speed. A trip of 12 segments is under 40
@@ -266,8 +268,16 @@ skips.
 | 12  | `command_cursor` | next command stream offset, varint                               |
 | 13  | `arrival`        | resident, lot, kind `u8`, until: an `arrived` and its `activity` |
 
-The tag is four bits, so only tags 14 and 15 remain free for new event kinds.
-Past those, a wider tag would be a new record kind.
+The tag is four bits, so only tag 14 is free for a new event kind. Tag 15,
+`extended`, holds the rare events: its body starts with a kind varint, then the
+fields.
+
+| Kind | Event     | Fields                                                                |
+| ---- | --------- | --------------------------------------------------------------------- |
+| 1    | `ledger`  | reason `u8` (0 day, 1 build, 2 demolish), earned varint, spent varint |
+| 2    | `balance` | amount, a zigzag varint (may be negative)                             |
+
+A reader skips an extended kind it does not know.
 
 Every arrival the sim makes is an `arrived` followed by the same resident's
 `activity`, so the encoder writes the pair as one `arrival` entry and the decoder
@@ -359,6 +369,44 @@ figure went from 9.6 to 9.8 KB/s. It would also cost the page its instant previe
 keyframe while scrubbing, which needs every district's keyframe on one tick, so
 keyframes stay on the hour.
 
+### Money
+
+The city has one account, its funds. It starts at $100,000. Every change to it is an event in the district that
+caused it, so the budget can be read back, and scrubbed, like everything else.
+
+| In                                                   | Out                                                                                                           |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| $4 per resident per city day, to their home district | $1 per tile of road per city day                                                                              |
+| $30 per shop, office and factory per city day        | $20 per lot of park land per city day                                                                         |
+|                                                      | A build or demolition, once: $300 a house, $500 a shop, $1,500 a skyscraper, $800 a factory, $100 to demolish |
+
+These numbers are placeholders until the economy has been played. A shop, office or factory pays tax for as long as
+the building stands; opening hours arrive with policies.
+
+- **A day's ledger.** When a city day ends (the first tick of the next day), every district writes one `ledger` event
+  with reason 0: what its residents and businesses paid, and what its roads and parks cost. A command that builds or
+  demolishes writes one with reason 1 or 2, spent only, next to its `built` or `demolished` event.
+- **Shares.** The account is kept as one share per district, because a district's records must be followable on their
+  own. A district's share starts at its part of the opening funds, and its `ledger` events move it. The city's funds are
+  the sum of the shares, and a share can be negative while the sum is not. Only the sum decides what the city can afford.
+- **Balance.** Every keyframe tick, each district also writes a `balance` event with its share at the end of the tick.
+  That is what a keyframe carries of the account; it is an event rather than a keyframe field so the keyframe layout
+  does not change. A page that starts from a keyframe sets the share from it and adds the `ledger` events after. A
+  keyframe tick written half by an older sim and half by this one would leave some shares unknown; a restart then
+  gives those districts their opening share.
+- **No funds.** A `build` or `demolish` the funds cannot pay for is refused with result 10 and changes nothing.
+  The city does not lose; it cannot build until its days bring the account back up. A city can also run at a loss, for
+  instance after demolishing the businesses that paid for it, and then it stays short.
+- **Restart.** The restart takes each district's share from its newest keyframe tick and adds the `ledger` events of
+  builds and demolitions after it. A day's `ledger` is not read back; stepping makes it again. A log written before the
+  account existed starts it at the opening funds.
+
+The page shows the funds beside the clock. They are the funds as of the newest record the page has applied, which can
+run a few ticks ahead of the tick on screen, and after a scrub they are the funds of the moment scrubbed to.
+
+Cost to the log: one small event per district per city day, one per build, and a `balance` of a few bytes per district per
+city hour. `report_load` on the harbor city moves the day mean from 656.4 to 656.7 B/s.
+
 ### Commands and the registry
 
 A command record is the kind byte, a command id `u32`, the builder's display
@@ -370,8 +418,8 @@ hash and the log never holds the principal.
 
 The sim reads the stream in order and applies commands before it
 steps the next tick, at most 256 a tick. That tick's records carry the `command`
-event, then what it changed (`built` or `demolished`), in the district of the
-lot, and its keyframe already shows the change. A refused command records only
+event, then what it changed (`built` or `demolished`, and the `ledger` event that
+paid for it), in the district of the lot, and its keyframe already shows the change. A refused command records only
 the `command` event, with a result code, and the city steps as if it had not
 been sent. A command with no district, such as a malformed record or a lot past
 the last, is recorded in district 0.

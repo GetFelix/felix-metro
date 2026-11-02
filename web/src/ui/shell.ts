@@ -124,12 +124,20 @@ export function createShell(quality: Quality, stats: StatsPanel): Shell {
         ? (radios.find((r) => r.checked) ?? radios[0]!)
         : root.querySelector<HTMLElement>('[data-back]');
   };
+  // Funds and the council sit above the gear, so the sheet opens just under wherever the gear is.
+  const place = () => {
+    const top = Math.round(button.getBoundingClientRect().bottom) + 8;
+    root.style.top = `${top}px`;
+    root.style.maxHeight = `calc(100dvh - ${top + 16}px)`;
+  };
   const openSettings = () => {
     refresh();
+    place();
     button.setAttribute('aria-expanded', 'true');
     sheet.open(show('settings'));
   };
   const openKeys = () => {
+    place();
     button.setAttribute('aria-expanded', 'true');
     sheet.open(show('keys'));
   };
