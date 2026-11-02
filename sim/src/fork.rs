@@ -111,7 +111,7 @@ impl<'a> ForkGate<'a> {
         incoming: &[Incoming],
     ) -> Result<Option<ForkGate<'a>>> {
         let Some(forks) = forks else { return Ok(None) };
-        let kept = !asks_to_fork(incoming) || history_kept(log, districts, retry).await?;
+        let kept = !asks_to_fork(city, incoming) || history_kept(log, districts, retry).await?;
         Ok(Some(ForkGate { forks, city, kept }))
     }
 }
@@ -206,28 +206,48 @@ pub(crate) fn forked_in(events: &[Event]) -> Vec<(u32, String, u64)> {
         .collect()
 }
 
-/// Whether a batch of commands holds a `fork`.
-pub(crate) fn asks_to_fork(incoming: &[Incoming]) -> bool {
+/// Whether a batch of commands holds a `fork` of `city` that its name does not
+/// already refuse, so a bad one costs no read.
+pub(crate) fn asks_to_fork(city: &str, incoming: &[Incoming]) -> bool {
     incoming.iter().any(|item| {
         item.command
             .as_ref()
-            .is_some_and(|record| matches!(record.command, Command::Fork { .. }))
+            .is_some_and(|record| match &record.command {
+                Command::Fork { name, .. } => lineage(city, name).is_ok(),
+                _ => false,
+            })
     })
 }
 
 /// Whether every district of `log` still holds offset 0, where a fork's copy
-/// starts. Retention trims a log from the front.
+/// starts. Retention trims a log from the front, and Felix answers a read below
+/// what it kept with a `TooOld` cursor error, which retrying cannot change.
 pub(crate) async fn history_kept<L: Log>(log: &L, districts: usize, retry: Retry) -> Result<bool> {
     for district in 0..districts {
-        let first = retrying(retry, "read the first record of a district", || {
-            log.read(district as u16, 0)
-        })
+        let first = retrying(
+            retry,
+            "read the first record of a district",
+            || async move {
+                match log.read(district as u16, 0).await {
+                    Err(err) if is_too_old(&err) => Ok(None),
+                    read => read,
+                }
+            },
+        )
         .await?;
         if first.is_none() {
             return Ok(false);
         }
     }
     Ok(true)
+}
+
+fn is_too_old(err: &anyhow::Error) -> bool {
+    err.chain().any(|cause| {
+        cause
+            .downcast_ref::<felix_client::SubscribeCursorError>()
+            .is_some_and(|cursor| cursor.reason == felix_wire::CursorErrorReason::TooOld)
+    })
 }
 
 /// Copies every district's records `0..=through` from `parent` to `child`.

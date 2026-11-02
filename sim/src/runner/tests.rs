@@ -157,8 +157,15 @@ impl Log for Memory {
     }
 
     async fn read(&self, district: u16, offset: u64) -> Result<Option<Vec<u8>>> {
-        if offset < self.floor(district) {
-            return Ok(None);
+        let floor = self.floor(district);
+        if offset < floor {
+            // What Felix answers for an offset retention has passed.
+            return Err(felix_client::SubscribeCursorError {
+                reason: felix_wire::CursorErrorReason::TooOld,
+                requested: offset,
+                available: floor,
+            }
+            .into());
         }
         let shards = self.shards.lock().unwrap();
         Ok(shards
