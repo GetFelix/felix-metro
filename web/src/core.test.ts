@@ -1,7 +1,14 @@
 import { readFileSync } from 'node:fs';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { parseMarkers } from './markers';
-import { Metro, decodeRecord, hash as cityHash, initSync, residentDayHash } from './core/felix_metro_core.js';
+import {
+  Metro,
+  decodeRecord,
+  hash as cityHash,
+  initSync,
+  residentDayHash,
+  residentName,
+} from './core/felix_metro_core.js';
 
 const built = (name: string) => readFileSync(new URL(`./core/${name}`, import.meta.url));
 
@@ -121,5 +128,33 @@ describe('records in WebAssembly', () => {
       expect(() => decodeRecord(whole.subarray(0, n))).toThrow();
     }
     expect(() => decodeRecord(new Uint8Array([99, 0, 0]))).toThrow('unknown record kind 99');
+  });
+});
+
+describe('a resident’s card', () => {
+  const metro = () => new Metro('harbor', 2);
+
+  it('names the resident and lists a day that closes on the first block', () => {
+    const m = metro();
+    expect(m.population()).toBeGreaterThan(100);
+    const p = JSON.parse(m.profile(3)!);
+    expect(p).toMatchObject({ id: 3, name: residentName('harbor', 3) });
+    expect(['office', 'shift', 'shopkeeper', 'student', 'retiree', 'night']).toContain(p.archetype);
+    expect(p.blocks.length).toBeGreaterThanOrEqual(2);
+    for (const b of p.blocks) expect(['home', 'work', 'school', 'shop', 'leisure']).toContain(b.activity);
+    const leaves: number[] = p.blocks.map((b: { leave: number }) => b.leave);
+    expect(leaves).toEqual([...leaves].sort((a, b) => a - b));
+    expect(leaves.at(-1)!).toBeLessThan(5760);
+  });
+
+  it('is the same from one Metro to the next, and different between residents', () => {
+    expect(metro().profile(10)).toBe(metro().profile(10));
+    expect(metro().profile(10)).not.toBe(metro().profile(11));
+  });
+
+  it('has nothing for a resident the city does not have', () => {
+    const m = metro();
+    expect(m.profile(m.population())).toBeUndefined();
+    expect(m.profile(4_000_000_000)).toBeUndefined();
   });
 });

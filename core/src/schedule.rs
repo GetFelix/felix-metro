@@ -34,6 +34,18 @@ impl Archetype {
         Archetype::Night,
     ];
 
+    /// The lower-case name the browser shows and reads.
+    pub fn name(self) -> &'static str {
+        match self {
+            Archetype::Office => "office",
+            Archetype::Shift => "shift",
+            Archetype::Shopkeeper => "shopkeeper",
+            Archetype::Student => "student",
+            Archetype::Retiree => "retiree",
+            Archetype::Night => "night",
+        }
+    }
+
     /// Picks from a roll of 0 to 99 by population share.
     pub(crate) fn from_roll(roll: usize) -> Archetype {
         match roll {
@@ -54,6 +66,19 @@ pub enum Activity {
     School,
     Shop,
     Leisure,
+}
+
+impl Activity {
+    /// The lower-case name the browser shows and reads.
+    pub fn name(self) -> &'static str {
+        match self {
+            Activity::Home => "home",
+            Activity::Work => "work",
+            Activity::School => "school",
+            Activity::Shop => "shop",
+            Activity::Leisure => "leisure",
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
