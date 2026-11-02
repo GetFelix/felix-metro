@@ -37,7 +37,7 @@ await page.goto(`${appUrl}#harbor`, { waitUntil: 'load', timeout: 5 * MINUTE });
 await page
   .waitForFunction(() => Number.isFinite(window.__live?.tick), null, { polling: 250, timeout: 5 * MINUTE })
   .catch(() => fail('the live city never drew a tick'));
-const day = Math.floor((await page.evaluate(() => window.__live.tick)) / TICKS_PER_DAY);
+const today = Math.floor((await page.evaluate(() => window.__live.tick)) / TICKS_PER_DAY);
 
 // The log as a plain client reads it: every district from its first record, until all have reached the tick on screen.
 const reader = new Session('harbor', 'viewer', { name: 'check-day' });
@@ -64,14 +64,21 @@ const expected = (resident, which) =>
     )
     .sort(byTick);
 
-// The resident with the most trips that day: enough to have a day worth checking.
-const trips = new Map();
+// The day to check is the newest one anyone made trips in: just after midnight nobody has yet.
+const tripsByDay = new Map();
 for (const r of reader.records) {
-  if (r.tick < day * TICKS_PER_DAY || r.tick > upTo) continue;
-  for (const e of r.events) if (e.type === 'trip') trips.set(e.resident, (trips.get(e.resident) ?? 0) + 1);
+  if (r.tick > upTo) continue;
+  const d = Math.floor(r.tick / TICKS_PER_DAY);
+  for (const e of r.events) {
+    if (e.type !== 'trip') continue;
+    const trips = tripsByDay.get(d) ?? new Map();
+    trips.set(e.resident, (trips.get(e.resident) ?? 0) + 1);
+    tripsByDay.set(d, trips);
+  }
 }
-const [resident, count] = [...trips].sort((a, b) => b[1] - a[1] || a[0] - b[0])[0] ?? [];
-if (resident === undefined) await fail(`nobody made a trip on day ${day + 1} up to tick ${upTo}`);
+const day = Math.max(-1, ...tripsByDay.keys());
+if (day < 0) await fail(`nobody made a trip up to tick ${upTo}`);
+const [resident, count] = [...tripsByDay.get(day)].sort((a, b) => b[1] - a[1] || a[0] - b[0])[0];
 console.log(`following resident ${resident}: ${count} trips on day ${day + 1} up to tick ${upTo}`);
 
 const rowsOnCard = () =>
@@ -111,15 +118,20 @@ async function matchesLog(which, what) {
   await fail(`${what}: the card lists\n${got}\nbut the log has\n${want}`);
 }
 
-await page.evaluate((r) => window.__following.start(r), resident);
-await page
-  .waitForFunction(() => document.querySelectorAll('#follow [data-log] li').length > 0, null, {
+const labelIs = (n) =>
+  page.waitForFunction((n) => document.querySelector('#follow [data-label]')?.textContent.startsWith(`Day ${n}`), n, {
     polling: 250,
     timeout: 2 * MINUTE,
-  })
-  .catch(async () => fail(`the card never listed a day: ${await page.locator('#follow').innerText()}`));
-const label = await page.locator('#follow [data-label]').textContent();
-if (!label.startsWith(`Day ${day + 1}`)) await fail(`the card shows "${label}", not day ${day + 1}`);
+  });
+await page.evaluate((r) => window.__following.start(r), resident);
+// The card opens on the day the city is in; the arrows walk it back to the day being checked.
+await labelIs(today + 1).catch(async () =>
+  fail(`the card never showed day ${today + 1}: ${await page.locator('#follow').innerText()}`),
+);
+for (let d = today; d > day; d--) {
+  await page.locator('#follow [data-prev]').click();
+  await labelIs(d);
+}
 const rows = await matchesLog(day, `day ${day + 1}`);
 console.log(`day ${day + 1}: ${rows.length} entries match the log`);
 await page.screenshot({ path: join(out, 'day.png') });
