@@ -146,6 +146,11 @@ two places: the latest `trip` or `replan` event of everyone on the road, found i
 each trip against the keyframe's vehicle and refuses to start if they disagree, rather than guess. The cars on each
 road, which new routes are planned around, are counted again from the trips under way.
 
+**Replaying roads.** A built road takes the next segment id when the sim lays it, and the restart lays it again at the id
+its `roadwork` event names. Within a tick it applies the roads in segment order, not district by district: two roads
+laid in one tick can be in different districts, and the one laid first need not be in the lower district. A logged road
+that does not land at its id, or a removal of a segment that is not a live built road, stops the restart with a message.
+
 The city is deterministic, so stepping the rebuilt world gives the records a run that never stopped would have
 given. The sim's tests check that: a log that was stopped and started again is the same as one that was not, apart
 from the wall clock.
@@ -163,8 +168,8 @@ stopped reading.
 
 **When it refuses.** The restart stops the sim with a message when a district holds a record
 but no keyframe (another sim's data), when a district's ticks are not consecutive, or when a resident on the road in
-the keyframe has no `trip` event anywhere in the log or one that disagrees with the keyframe. Fix or remove the log; the sim does not
-guess.
+the keyframe has no `trip` event anywhere in the log or one that disagrees with the keyframe, or when a `roadwork` event
+cannot be replayed at its segment id. Fix or remove the log; the sim does not guess.
 
 ## Records
 
@@ -824,11 +829,13 @@ Road upkeep counts the segments that are in the graph, so a built road costs $1 
 Park land that a road covers stops costing park upkeep.
 
 **Replanning.** A trip is planned on the graph as it is, so a road added later only changes the trips that start after
-it. A removed road is different: a vehicle may be on it or about to be. In the tick after the removal (the tick the
-command is applied in), every vehicle on the road whose remaining route, from the leg it is on, includes the removed
-segment is planned again, and its district writes a `replan` event. The vehicle is moved to the node at the end of the
-leg it is on, and drives a new route to the same door from there, as the same kind of trip (a walker stays one). The jump
-is short and happens in one tick, which is better than a car on a road that is gone. A route is planned from a node
+it. A removed road is different: a vehicle may be on it or about to be. The command is applied before its tick is
+stepped, and that step plans again every vehicle on the road whose remaining route, from the leg it is on, includes the
+removed segment; its district writes a `replan` event. The vehicle is moved to the node at the end of the leg it is on,
+and drives a new route to the same door from there, as the same kind of trip (a walker stays one). The jump is at most
+the length of one segment (a built one is at most 12 tiles) and happens in one tick, which is better than a car on a
+road that is gone. The graph stays connected, so a new route should always exist; if none is found the sim logs a
+warning and the vehicle keeps its old route. A route is planned from a node
 as a trip from a door at that end of the first generated segment that meets the node, so the page and the sim agree on it
 without knowing which roads were removed when. The `replan` event is written in the district the vehicle is in. No
 position the sim writes after the removal is on a removed segment.
@@ -843,6 +850,19 @@ looks for the trip a vehicle on the road is on.
 and `Metro.setRoads` gives core's copy the same roads so a trip or a replan on a built segment resolves. Road tiles are
 redrawn when the set changes. A `replan` ends the vehicle's drawn trip and starts the new one at the node. A rewind folds
 from a keyframe, so a road built after the tick on screen is not there, and a road removed after it is.
+
+A seek folds one district's records at a time, so two things can come out of order. A trip can run on a road whose
+district is folded later, so the seek first tells the state every road its records name (`CityState.foresee`), and core
+resolves trips with those; the roads drawn still follow the records taken. And a `trip` event can be folded after the
+`replan` that took it over, or a `replan` after the resident's next trip. The state keeps each resident's latest replan
+tick, and an older trip or replan does not replace the newer one. The live city and a moment on screen share one core
+`Metro`; it keeps the last few cities it laid, so switching between their road lists does not copy the city again.
+
+**Known limits.**
+
+- The council counts a replanned trip's travel time from the replan tick, not from when the trip first left.
+- After a restart, a replanned trip is matched to its schedule block by the replan tick, so where two blocks lead to the
+  same lot the restart picks the one due most recently before it.
 
 ### The page's building tools
 

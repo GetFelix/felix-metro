@@ -12,6 +12,7 @@ use felix_metro_core::{
     Activity, BuildingKind, City, Congestion, Mode, Places, Resident, TICKS_PER_DAY,
     TICKS_PER_HOUR, Trip,
 };
+use tracing::warn;
 
 pub(crate) use council::Council;
 pub(crate) use economy::opening_share;
@@ -303,24 +304,32 @@ impl World {
                             .any(|l| removed.contains(&l.segment));
                         // A removed segment is a whole leg ahead or the one being driven, and either way the
                         // leg being driven ends at a node.
-                        if hit
-                            && let Some(node) = trip.leg_end_node(city, leg)
-                            && let Some(new) = person.resident.replan(
+                        if hit && let Some(node) = trip.leg_end_node(city, leg) {
+                            match person.resident.replan(
                                 city,
                                 person.block,
                                 node,
                                 tick,
                                 &cong,
                                 trip.mode,
-                            )
-                        {
-                            out[usize::from(*district)].events.push(Event::Replan {
-                                resident: id,
-                                vehicle: *vehicle,
-                                node,
-                                route: new.legs(),
-                            });
-                            *trip = new;
+                            ) {
+                                Some(new) => {
+                                    out[usize::from(*district)].events.push(Event::Replan {
+                                        resident: id,
+                                        vehicle: *vehicle,
+                                        node,
+                                        route: new.legs(),
+                                    });
+                                    *trip = new;
+                                }
+                                // Not expected while the graph stays connected. Keeping the old route leaves the
+                                // vehicle on a road that is gone, but the log stays one the page can draw.
+                                None => warn!(
+                                    resident = id,
+                                    node,
+                                    "no route from the node after a road was removed; the trip goes on"
+                                ),
+                            }
                         }
                     }
                     // The last step can end in another district, so cross before

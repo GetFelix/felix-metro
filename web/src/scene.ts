@@ -374,6 +374,7 @@ export async function createCity(
       if (first) {
         jobs.push(
           lamp.then((o) => {
+            if (mine.gone) return;
             lamps.push(o);
             lampTile.set(o, mine);
           }),
@@ -390,12 +391,25 @@ export async function createCity(
       roadDrawn.delete(key);
       mine.gone = true;
       for (const job of mine.jobs) void job.then((o) => scene.remove(o));
+      // A lamp of the generated city that is not lit yet stays dark.
+      for (const [lamp, tile] of lampTile) {
+        if (tile !== mine) continue;
+        lampTile.delete(lamp);
+        lamps.splice(lamps.indexOf(lamp), 1);
+      }
+      // The lights are this lamp's own; the models share their geometry and materials with the cache.
       for (const o of mine.extras) {
         scene.remove(o);
         const at = glows.indexOf(o);
         if (at >= 0) glows.splice(at, 1);
+        if (o instanceof THREE.Mesh) o.geometry.dispose();
       }
-      if (mine.light) lampLights.splice(lampLights.indexOf(mine.light), 1);
+      if (mine.light) {
+        lampLights.splice(lampLights.indexOf(mine.light), 1);
+        mine.light.pool.dispose();
+        mine.light.glow.dispose();
+        mine.light.bulb.dispose();
+      }
     };
     for (const r of c.roads) drawRoad(r, true);
 
@@ -785,6 +799,7 @@ export async function createCity(
   await Promise.all(jobs);
 
   for (const lamp of lamps) hangLamp(lamp, lampTile.get(lamp) ?? null);
+  lampTile.clear();
 
   // Bulbs, glows and pools hang off the lamp models' arms. Each lamp has its own materials so it can switch on alone.
   function hangLamp(lamp: THREE.Object3D, tile: RoadDrawn | null) {
