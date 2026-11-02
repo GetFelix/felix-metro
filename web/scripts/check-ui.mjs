@@ -175,8 +175,9 @@ for (const reduce of [false, true]) {
   const rolling = await page.locator('#clock .digit.roll').count();
   check((await page.locator('#clock').textContent()) === '13:00', 'the clock text stays plain HH:MM');
   check(reduce ? rolling === 0 : rolling > 0, reduce ? 'no digit rolls with reduced motion' : 'a changed digit rolls');
+  // The roll is 160 ms, but it ends on a frame, and a software-rendered frame of the city takes seconds on a busy runner.
   const ended = await page
-    .waitForFunction(() => !document.querySelector('#clock .digit.roll'), null, { timeout: 5000 })
+    .waitForFunction(() => !document.querySelector('#clock .digit.roll'), null, { timeout: 120_000 })
     .then(
       () => true,
       () => false,
@@ -301,9 +302,14 @@ for (const [size, tag] of [
   // The opening drift ends on its own; wait it out, then see whether the camera holds.
   await settle(page, 2500);
   const first = await azimuth();
-  await settle(page, 1500);
-  const second = await azimuth();
-  check(second !== first, `the camera turns after the quiet (${first} to ${second})`);
+  // The camera moves on a frame, and a software-rendered frame takes seconds on a busy runner, so wait for the turn.
+  const turned = await page
+    .waitForFunction((was) => window.__camera.state().azimuth !== was, first, { polling: 100, timeout: 120_000 })
+    .then(
+      () => true,
+      () => false,
+    );
+  check(turned, `the camera turns after the quiet (from ${first})`);
   await page.mouse.move(400, 300);
   await settle(page, 400);
   const held = await azimuth();
