@@ -35,7 +35,7 @@ enough to keep days of it.
 
 1. **Rewind to any moment, quickly.** From any position on the timeline, the city is drawn at that moment in under a second.
 2. **Rewind, then follow live with no gap.** Playing forward from the past joins live delivery without a missing or repeated event.
-3. **A small log.** At 4 ticks a second, a city of 20,000 residents writes about 5.1 KB/s averaged over a day and 9.96 KB/s in the busiest minute of the rush, so a week of history is about 3 GB on one broker. These are extrapolated from measured cities of 522 and 5,568 residents; see the "Log size" section.
+3. **A small log.** At 4 ticks a second, a city of 20,000 residents writes about 5.2 KB/s averaged over a day and 9.99 KB/s in the busiest minute of the rush, so a week of history is about 3 GB on one broker. These are extrapolated from measured cities of 522 and 5,568 residents; see the "Log size" section.
 4. **One authority that survives a restart.** The simulation is fenced at the broker, and a replacement picks up from the log where the last one stopped.
 5. **Forks are cheap.** A branch starts as a copy of the parent's history up to the fork tick and owes it nothing after that.
 
