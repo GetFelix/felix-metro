@@ -3,7 +3,8 @@
 // district at one tick) with buildings in it, the city is never held at one moment while the handle crosses hours, and
 // at rest the folded state is at the handle's tick with the clock saying that tick. A step forward inside an hour
 // equals a fresh fold of that tick. Live records keep arriving while the past is shown. "Back to live" returns to the
-// live city, including when a slow seek is still running. Screenshots of the bar live, while dragging and in the past
+// live city, including when a slow seek is still running. With the stats panel on, its figures at rest are what the
+// state on screen holds, and the residents never change. Screenshots of the bar live, while dragging and in the past
 // are written to the out dir. Usage: node scripts/check-scrub.mjs <page url> <out dir>
 // where the page url has no hash. The sim should have run long enough to hold a few city hours.
 import { mkdirSync } from 'node:fs';
@@ -73,6 +74,33 @@ const wholeProblem = (r) => {
   return null;
 };
 
+// The stats panel, switched on after the page is ready, shows what the folded state holds at the tick on screen. The
+// panel is redrawn a few times a second, so a figure is given time to settle. Residents never change.
+let residents = null;
+const statsProblem = async (what) => {
+  const settled = await page
+    .waitForFunction(
+      () => {
+        const s = window.__stats?.();
+        if (!s || s.cars === null || s.population === null) return false;
+        const cell = (name) => document.querySelector(`#stats [data-stat=${name}]`).textContent;
+        const fmt = (n) => n.toLocaleString('en-US');
+        return cell('road') === fmt(s.cars + s.walkers) && cell('population') === fmt(s.population);
+      },
+      null,
+      { polling: 100, timeout: 5000 },
+    )
+    .then(
+      () => true,
+      () => false,
+    );
+  if (!settled) await fail(`${what}: the stats panel does not show what the state on screen holds`);
+  const now = await page.evaluate(() => window.__stats().population);
+  if (!(now > 0)) await fail(`${what}: the city has ${now} residents`);
+  if (residents !== null && residents !== now) await fail(`${what}: the residents went from ${residents} to ${now}`);
+  residents = now;
+};
+
 let samples = 0;
 /** `rest`: the handle has stopped, so the clock must say the folded state's tick. */
 const sample = async (what, rest = false) => {
@@ -84,6 +112,7 @@ const sample = async (what, rest = false) => {
   const clockTick = rest ? (r.shown.past ?? Math.floor(r.drawn)) : r.at;
   const gap = Math.abs(minutesOf(r.clock) - tickMinutes(clockTick));
   if (gap > 1 && gap < 24 * 60 - 1) await fail(`${what}: the clock says ${r.clock} with the city at tick ${clockTick}`);
+  if (rest) await statsProblem(what);
   return r;
 };
 
@@ -155,6 +184,8 @@ const live = await read();
 if (live.mode !== 'live') await fail(`the page opens in "${live.mode}", not live`);
 console.log(`timeline spans ticks ${live.min} to ${live.max}`);
 grown = live.shown.buildings > 0;
+await page.keyboard.press('c');
+if (!(await page.locator('#stats').isVisible())) await fail('C did not show the stats panel');
 console.log(`the live city has ${live.shown.buildings} buildings`);
 await page.locator('#timeline').screenshot({ path: join(out, 'bar-live.png') });
 await page.screenshot({ path: join(out, 'live.png') });

@@ -4,3 +4,4 @@ package-lock.json
 frames
 src/core
 src/day-fixture.json
+src/stats-fixture.json

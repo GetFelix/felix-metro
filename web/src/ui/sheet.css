@@ -89,6 +89,9 @@
   font-size: 12px;
   font-weight: 500;
 }
+.toggle {
+  margin-top: var(--space-3);
+}
 .running {
   margin: var(--space-2) var(--space-3) 0;
   color: var(--muted);
