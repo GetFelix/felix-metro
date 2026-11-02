@@ -50,6 +50,26 @@ fn keyframes_come_every_city_hour_and_hold_every_resident() {
     }
 }
 
+/// The page previews a whole-city keyframe while scrubbing, which needs every district's keyframe on
+/// one tick.
+#[test]
+fn every_district_keyframes_on_the_same_tick() {
+    let mut world = World::new(City::generate("harbor", 2).unwrap());
+    let districts = world.districts();
+    let mut keyframe_ticks = Vec::new();
+    for tick in 0..2 * KEYFRAME_EVERY + 1 {
+        let with = world.step().iter().filter(|d| d.keyframe.is_some()).count();
+        assert!(
+            with == 0 || with == districts,
+            "tick {tick}: {with} of {districts}"
+        );
+        if with > 0 {
+            keyframe_ticks.push(tick);
+        }
+    }
+    assert_eq!(keyframe_ticks, [0, KEYFRAME_EVERY, 2 * KEYFRAME_EVERY]);
+}
+
 #[test]
 fn a_day_has_trips_and_each_one_arrives() {
     let (world, ticks) = day("harbor", 2);
@@ -316,6 +336,8 @@ fn state_at_is_the_keyframe_the_step_commits() {
 /// with residents: the 20,000 figures extrapolate from this city's population that way and spread
 /// it over 16 districts.
 struct Load {
+    /// Bytes of a record with nothing in it, at the largest tick and offset a live run reaches.
+    header: usize,
     residents: usize,
     districts: usize,
     day_mean: f64,
@@ -343,7 +365,26 @@ fn measure_load(world: &World, ticks: &[Vec<DistrictTick>]) -> Load {
     // Bytes of each district's record at each tick, and the keyframe's share of it.
     let mut bytes = vec![vec![0usize; districts]; ticks.len()];
     let mut key = bytes.clone();
-    let mut header = 0;
+    // A live run's tick and keyframe offset grow, and each is a varint. Measure the header at the
+    // size it has after 2^21 ticks (about six days), its largest, and charge every record that.
+    let header_len = |tick: u32, keyframe_offset: u64| {
+        TickRecord {
+            header: Header {
+                epoch: 1,
+                district: 0,
+                tick,
+                speed: 4,
+                keyframe_offset,
+                wall_us: 0,
+            },
+            keyframe: None,
+            events: Vec::new(),
+        }
+        .encode()
+        .unwrap()
+        .len()
+    };
+    let header = header_len(1 << 21, 1 << 21);
     for (tick, step) in ticks.iter().enumerate() {
         for (d, t) in step.iter().enumerate() {
             let record = TickRecord {
@@ -358,17 +399,15 @@ fn measure_load(world: &World, ticks: &[Vec<DistrictTick>]) -> Load {
                 keyframe: None,
                 events: t.events.clone(),
             };
-            let plain = record.encode().unwrap().len();
+            let measured = record.encode().unwrap().len();
+            let plain = measured - header_len(tick as u32, 0) + header;
             bytes[tick][d] = plain;
-            if t.events.is_empty() {
-                header = plain;
-            }
             if let Some(k) = &t.keyframe {
                 let with = TickRecord {
                     keyframe: Some(k.clone()),
                     ..record
                 };
-                key[tick][d] = with.encode().unwrap().len() - plain;
+                key[tick][d] = with.encode().unwrap().len() - measured;
             }
         }
     }
@@ -429,6 +468,7 @@ fn measure_load(world: &World, ticks: &[Vec<DistrictTick>]) -> Load {
         })
         .collect();
     Load {
+        header,
         residents,
         districts,
         day_mean: day_total as f64 / seconds,
@@ -439,8 +479,8 @@ fn measure_load(world: &World, ticks: &[Vec<DistrictTick>]) -> Load {
 
 fn print_load(label: &str, load: &Load) {
     println!(
-        "{label}: {} residents, {} districts: day mean {:.1} B/s; at 20,000 residents in 16 districts {:.0} B/s",
-        load.residents, load.districts, load.day_mean, load.day_mean_at_20k
+        "{label}: {} residents, {} districts, {} B header: day mean {:.1} B/s; at 20,000 residents in 16 districts {:.0} B/s",
+        load.residents, load.districts, load.header, load.day_mean, load.day_mean_at_20k
     );
     for r in &load.rushes {
         println!(
@@ -478,6 +518,7 @@ fn report_load() {
 fn the_busiest_minute_of_a_rush_stays_under_ten_kilobytes_a_second() {
     let (world, ticks) = day("harbor", 2);
     let load = measure_load(&world, &ticks);
+    assert_eq!(load.header, 22, "the header is charged at its largest");
     for r in &load.rushes {
         assert!(r.at_20k < 10_000.0, "{}: {:.0} B/s", r.name, r.at_20k);
     }

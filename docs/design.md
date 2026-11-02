@@ -35,7 +35,7 @@ enough to keep days of it.
 
 1. **Rewind to any moment, quickly.** From any position on the timeline, the city is drawn at that moment in under a second.
 2. **Rewind, then follow live with no gap.** Playing forward from the past joins live delivery without a missing or repeated event.
-3. **A small log.** A city of 20,000 residents writes about 4.8 KB/s averaged over a day and 9.6 KB/s in the busiest minute of the rush, so a week of history is under 3 GB on one broker. See "Log size" under Byte layouts.
+3. **A small log.** At 4 ticks a second, a city of 20,000 residents writes about 5.1 KB/s averaged over a day and 9.96 KB/s in the busiest minute of the rush, so a week of history is about 3 GB on one broker. These are extrapolated from measured cities of 522 and 5,568 residents; see the "Log size" section.
 4. **One authority that survives a restart.** The simulation is fenced at the broker, and a replacement picks up from the log where the last one stopped.
 5. **Forks are cheap.** A branch starts from a keyframe of the parent and owes it nothing after that.
 
@@ -174,7 +174,10 @@ to the end of an event without a new kind.
 
 Kind 4 replaced kind 1 to shrink the log (see "Log size"). A log written under
 kind 1 is not readable: the decoder refuses it by its kind byte, and the dev
-stack keeps no state between runs, so there is nothing to migrate.
+stack keeps no state between runs, so there is nothing to migrate. A page that
+meets a kind 1 record on a broker that kept its log says so once ("start a fresh
+city") and draws without that district's history; an operator with a persistent
+broker creates a new city instead of reusing the old name.
 
 ### Tick records
 
@@ -195,7 +198,7 @@ that.
 | entries           | varint | the number of event entries                                                    |
 |                   |        | the keyframe if bit 0 is set, then the entries                                 |
 
-A tick with nothing in it is 16 bytes.
+A tick with nothing in it is 16 to 22 bytes: `tick` and `keyframe_offset` are varints, 1 byte each at first, 2 after 128 ticks, 3 after 16,384 and 4 after 2^21 (about six days at 4 ticks a second).
 
 An event is a frame: a varint of the body length shifted left four bits with
 the tag in the low four, then the body. A body under eight bytes has a one-byte
@@ -218,6 +221,9 @@ skips.
 | 10  | `command`    | principal `u64`, name, id `u32`, result `u8`                        |
 | 11  | `speed`      | ticks per second `u8`                                               |
 | 12  | `arrival`    | resident, lot, kind `u8`, until: an `arrived` and its `activity`    |
+
+The tag is four bits, so only tags 13 to 15 remain free for new event kinds.
+Past those, a wider tag would be a new record kind.
 
 Every arrival the sim makes is an `arrived` followed by the same resident's
 `activity`, so the encoder writes the pair as one `arrival` entry and the decoder
@@ -258,8 +264,11 @@ the residents. The counts are what the stats sparkline plots.
 
 ### Log size
 
-The goal is about 10 KB/s for a city of 20,000 residents, in its busiest
-minute and not only on average. `report_load` measures it:
+The goal is about 10 KB/s for a city of 20,000 residents at 4 ticks a second,
+in its busiest minute and not only on average. The sim also accepts 8 and 16 ticks
+a second, which multiplies every figure here. The keyframe argument below also
+depends on 4 ticks a second: one city hour is then 60 seconds, so a minute holds
+one keyframe of each district. `report_load` measures it:
 
 ```sh
 cargo test -p felix-metro-sim --release report_load -- --ignored --nocapture
@@ -270,19 +279,22 @@ encodes every district's record of every tick, and prints the bytes per second
 of the whole day and of the busiest minute of each rush. A record's header is
 the same size whatever happens in the tick, and everything else grows with
 residents, so it scales the figures to 20,000 residents in 16 districts by
-that rule. A second line does the same for the city with 64 residents a home
+that rule. Nothing that large has run, so the 20,000 figures are extrapolated.
+A second line does the same for the city with 64 residents a home
 (5,568 residents), which has about the load per district of 20,000 in 16 and
-agrees with the first. The same bound is a test,
+agrees with the first. The measurement charges every record the header it has
+after 2^21 ticks (22 bytes), so it holds on a long-lived log. The same bound is a test,
 `the_busiest_minute_of_a_rush_stays_under_ten_kilobytes_a_second`.
 
-| At 20,000 residents in 16 districts | Harbor city | 64 residents a home |
-| ----------------------------------- | ----------- | ------------------- |
-| Mean over a day                     | 4.8 KB/s    | 5.0 KB/s            |
-| Busiest minute, 07:45 to 08:15      | 7.8 KB/s    | 8.5 KB/s            |
-| Busiest minute, 17:00 to 17:30      | 9.6 KB/s    | 9.5 KB/s            |
+| Extrapolated to 20,000 residents in 16 districts, at 4 ticks a second | Harbor city (522 residents) | 64 residents a home (5,568) |
+| --------------------------------------------------------------------- | --------------------------- | --------------------------- |
+| Mean over a day                                                       | 5.1 KB/s                    | 5.3 KB/s                    |
+| Busiest minute, 07:45 to 08:15                                        | 8.1 KB/s                    | 8.9 KB/s                    |
+| Busiest minute, 17:00 to 17:30                                        | 9.96 KB/s                   | 9.86 KB/s                   |
 
 That is under 0.5 GB a day. The header of each district's record, every tick,
-is 1 KB/s of it (16 bytes, 16 districts, 4 ticks a second). A resident costs
+is 1.4 KB/s of it (22 bytes, 16 districts, 4 ticks a second; 1 KB/s on a young
+log, where it is 16). The evening rush has under 0.5% of headroom. A resident costs
 about 0.19 B/s on top: 0.075 for events and 0.11 for the hourly keyframe, about
 6.7 bytes each.
 
@@ -297,8 +309,8 @@ tick is the district's keyframe: about 1.5 KB in the harbor city and 15 to 20 KB
 at 1,250 residents a district, against 120 to 430 bytes for a tick without one.
 Moving each district's keyframe to a different tick of the hour would flatten
 that burst but not the busiest minute, because any minute holds one keyframe of
-every district: measured with four offsets, the evening figure went from 9.6
-to 9.8 KB/s. It would also cost the page its instant preview of a whole-city
+every district: measured with four offsets and 16-byte headers, the evening
+figure went from 9.6 to 9.8 KB/s. It would also cost the page its instant preview of a whole-city
 keyframe while scrubbing, which needs every district's keyframe on one tick, so
 keyframes stay on the hour.
 

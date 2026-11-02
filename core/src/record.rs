@@ -6,9 +6,9 @@
 //! ticks that are usually small are LEB128 varints, and lists of ids are
 //! zigzag deltas. Layouts are in `docs/design.md`.
 //!
-//! Events and keyframe resident entries are a tag, a length and a body, so a
-//! reader skips a tag it does not know and ignores bytes appended to a body it
-//! does. Header flag bits select the layout and stay strict. Decoding never
+//! Events and keyframe resident entries are one varint holding the body length
+//! and a tag, then the body, so a reader skips a tag it does not know and
+//! ignores bytes appended to a body it does. Header flag bits select the layout and stay strict. Decoding never
 //! panics: truncated bytes, unknown kinds, short bodies, bad UTF-8, trailing
 //! bytes and non-canonical varints are all errors.
 
