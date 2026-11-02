@@ -186,3 +186,93 @@ fn only_shops_residents_go_to_count_as_shops() {
     });
     assert_eq!(world.shops_standing(), standing - 1);
 }
+
+/// A run of the chapter city to the first tick after its last day is scored, with the speed limits raised to
+/// the roads' own on the first tick or left as the chapter opened them.
+fn chapter_run(raise: bool) -> World {
+    use felix_metro_core::chapter_for;
+    use felix_metro_core::record::{
+        Command, POLICY_AVENUE_LIMIT, POLICY_STREET_LIMIT, RESULT_APPLIED,
+    };
+
+    let chapter = chapter_for("pier").unwrap();
+    let mut world = World::new(City::generate(chapter.seed, chapter.districts_per_side).unwrap());
+    if raise {
+        for kind in [POLICY_AVENUE_LIMIT, POLICY_STREET_LIMIT] {
+            let command = Command::Policy {
+                kind: kind as u8,
+                value: 100,
+            };
+            assert_eq!(world.apply(&command).result, RESULT_APPLIED);
+        }
+    }
+    run_to(&mut world, TICKS_PER_DAY * chapter.days + 1);
+    assert_eq!(world.council.days, chapter.days);
+    world
+}
+
+#[test]
+fn the_chapter_city_opens_with_a_commute_too_long_and_recalls_a_mayor_who_does_nothing() {
+    let chapter = felix_metro_core::chapter_for("pier").unwrap();
+    let world = chapter_run(false);
+    let commuters = &world.council.standings[FACTION_COMMUTERS];
+    assert!(commuters.measure > chapter.commute_ticks);
+    assert_eq!(commuters.unhappy_days, PATIENCE);
+}
+
+#[test]
+fn raising_both_limits_meets_the_chapters_goals() {
+    let chapter = felix_metro_core::chapter_for("pier").unwrap();
+    let world = chapter_run(true);
+    let commuters = &world.council.standings[FACTION_COMMUTERS];
+    assert!(commuters.measure <= chapter.commute_ticks);
+    assert!(world.council.standings.iter().all(|s| s.unhappy_days == 0));
+    assert!(world.funds() > 0);
+}
+
+/// `web/src/chapter-fixture.json` is what the page's goal tests read: the chapter table and the council and funds
+/// after each run above. Rewrite it with `METRO_WRITE_FIXTURE=1 cargo test -p felix-metro-sim the_chapter_fixture`.
+#[test]
+fn the_chapter_fixture_is_what_the_sim_writes() {
+    let run = |raise| {
+        let world = chapter_run(raise);
+        let standings: Vec<String> = world
+            .council
+            .standings
+            .iter()
+            .map(|s| {
+                format!(
+                    "{{\"demand\":{},\"measure\":{},\"satisfaction\":{},\"unhappyDays\":{}}}",
+                    s.demand, s.measure, s.satisfaction, s.unhappy_days
+                )
+            })
+            .collect();
+        format!(
+            "{{\"council\":{{\"type\":\"council\",\"days\":{},\"patience\":{PATIENCE},\"standings\":[{}]}},\"funds\":{}}}",
+            world.council.days,
+            standings.join(","),
+            world.funds()
+        )
+    };
+    let chapters: Vec<String> = felix_metro_core::CHAPTERS
+        .iter()
+        .map(felix_metro_core::Chapter::to_json)
+        .collect();
+    let json = format!(
+        "{{\"chapters\":[{}],\"ignored\":{},\"raised\":{}}}\n",
+        chapters.join(","),
+        run(false),
+        run(true)
+    );
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../web/src/chapter-fixture.json"
+    );
+    if std::env::var_os("METRO_WRITE_FIXTURE").is_some() {
+        std::fs::write(path, &json).unwrap();
+    }
+    assert!(
+        std::fs::read_to_string(path).is_ok_and(|now| now == json),
+        "web/src/chapter-fixture.json is out of date; rewrite it with METRO_WRITE_FIXTURE=1"
+    );
+}

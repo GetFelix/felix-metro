@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { goalsView } from './goals';
 import {
   councilSummary,
   councilView,
@@ -118,6 +119,10 @@ class Fake {
   click() {
     for (const fn of this.listeners) fn();
   }
+  insertBefore(node: Fake, before: Fake) {
+    node.parent = this;
+    this.children.splice(this.children.indexOf(before), 0, node);
+  }
   querySelector(selector: string): Fake | null {
     if (selector === 'summary > span') return this.all('summary')[0]?.children.find((c) => c.tag === 'span') ?? null;
     if (selector.startsWith('.')) return this.allBy((c) => c.className === selector.slice(1))[0] ?? null;
@@ -211,5 +216,46 @@ describe('renderCouncil policies', () => {
     expect(root.all('details')[0]?.children.filter((c) => c.className === 'policies')).toHaveLength(1);
     renderCouncil(el, view, false, []);
     expect(root.all('details')[0]?.children.filter((c) => c.className === 'policies')).toHaveLength(0);
+  });
+});
+
+describe('renderCouncil goals', () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const chapter = { seed: 'pier', days: 3, commuteTicks: 64 };
+  const sections = (root: Fake) => root.all('details')[0]!.children.map((c) => c.className);
+
+  it('lists the goals between the factions and the policies, with how each stands', () => {
+    vi.stubGlobal('document', { createElement: (tag: string) => new Fake(tag) });
+    const root = new Fake('div');
+    const view = councilView(event(1, calm), 1);
+    const goals = goalsView(chapter, event(1, [standing({ measure: 96 }), ...calm.slice(1)]), 100_000);
+    renderCouncil(
+      root as unknown as HTMLElement,
+      view,
+      true,
+      [{ name: 'Shop hours', value: 'Usual', again: null }],
+      goals,
+    );
+    expect(sections(root)).toEqual(['', '', 'goals', 'policies']);
+    const items = root.allBy((c) => c.className === 'goals')[0]!.children;
+    expect(items.map((li) => li.className)).toEqual(['', 'open', 'met', 'met']);
+    expect(items[0]!.all('span')[0]?.textContent).toBe('Day 2 of 3');
+  });
+
+  it('adds, redraws and drops the goals in place, ahead of the policies', () => {
+    vi.stubGlobal('document', { createElement: (tag: string) => new Fake(tag) });
+    const root = new Fake('div');
+    const el = root as unknown as HTMLElement;
+    const view = councilView(event(1, calm), 1);
+    const rows = [{ name: 'Shop hours', value: 'Usual', again: null }];
+    renderCouncil(el, view, false, rows, null);
+    expect(sections(root)).toEqual(['', '', 'policies']);
+    renderCouncil(el, view, false, rows, goalsView(chapter, event(1, calm), 100_000));
+    expect(sections(root)).toEqual(['', '', 'goals', 'policies']);
+    renderCouncil(el, view, false, rows, goalsView(chapter, event(3, calm), -1));
+    expect(sections(root)).toEqual(['', '', 'goals', 'policies']);
+    expect(root.allBy((c) => c.className === 'goals')[0]!.children[0]!.all('span')[0]?.textContent).toBe('Lost');
+    renderCouncil(el, view, false, rows, null);
+    expect(sections(root)).toEqual(['', '', 'policies']);
   });
 });

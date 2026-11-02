@@ -467,6 +467,26 @@ async fn a_policy_set_before_a_restart_still_holds_after_it() {
     }
 }
 
+/// A chapter city opens with slow roads and writes no `policy` event until the mayor changes one, so a restart has to
+/// know the opening limits. Commuters leave before 08:00; a restart that forgot the limits would route them faster.
+#[tokio::test(start_paused = true)]
+async fn a_chapter_city_restarted_before_its_first_policy_change_keeps_its_opening_limits() {
+    const TOTAL: u32 = 2600;
+    let pier = || City::generate("pier", 2).unwrap();
+    let run = |log: Memory, stop: u32| async move {
+        run_city("pier", pier(), quick(stop), log).await.unwrap()
+    };
+    let whole_log = Memory::healthy();
+    run(whole_log.clone(), TOTAL).await;
+    let whole = records(&whole_log);
+    for stop in [1500, 1900] {
+        let log = Memory::healthy();
+        run(log.clone(), stop).await;
+        run(log.clone(), TOTAL).await;
+        assert!(records(&log) == whole, "stopped at tick {stop}");
+    }
+}
+
 #[tokio::test(start_paused = true)]
 async fn the_command_stream_resumes_where_the_sim_stopped_reading() {
     let world = World::new(harbor());

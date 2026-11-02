@@ -17,7 +17,7 @@ import { createPost, passesFor } from './post';
 import { createQuality, settingsFor } from './quality';
 import { createRenderer } from './renderer';
 import { createCity, move } from './scene';
-import init, { generate, Metro } from './core/felix_metro_core.js';
+import init, { chapter as chapterJson, generate, Metro } from './core/felix_metro_core.js';
 import { parseCity, type City } from './layout';
 import { RoadsOnScreen } from './roads-drawn';
 import { beforeSignIn, fetchOidc, signIn } from './auth';
@@ -44,6 +44,7 @@ import { createBuildBar } from './ui/build-bar';
 import { Placement, type CommandLink } from './placement';
 import { createPlacementView } from './placement-view';
 import { note, toast } from './ui/toast';
+import { goalsView, readChapter, type Chapter } from './goals';
 import { councilView, fitCouncil, renderCouncil, TALL_SCREEN, type CouncilEvent } from './council';
 import { policyRows, USUAL_POLICY, type PolicyEvent } from './policy';
 import { money } from './money';
@@ -419,6 +420,8 @@ async function main() {
 
   const renderer = createRenderer(quality.tier);
   let city: City | null = null;
+  /** The chapter this city plays, if its seed names one. */
+  let chapter: Chapter | null = null;
   let state: CityState | null = null;
   let link: Link = { down: false };
   /** How commands leave the page, once the live connection exists. */
@@ -466,6 +469,7 @@ async function main() {
   if (layout === 'city') {
     await init();
     city = parseCity(generate(seed, districts));
+    chapter = readChapter(chapterJson(seed));
     document.title = `Felix Metro: ${seed}`;
     document.getElementById('subtitle')!.textContent = displayName(seed);
     let past: { state: CityState; result: SeekResult; seekMs: number } | null = null;
@@ -631,6 +635,7 @@ async function main() {
   const councilChip = document.getElementById('council-chip')!;
   let councilShown: CouncilEvent | null = null;
   let policyShown: PolicyEvent | null = null;
+  let councilFunds: number | null = null;
   let liveInfo: NonNullable<Window['__live']> | null = null;
   if (state && traffic) {
     liveInfo = {
@@ -1533,9 +1538,10 @@ async function main() {
           fundsChip.classList.toggle('short', funds !== null && funds < 0);
           if (funds !== null) fundsText.textContent = money(funds);
         }
-        if (state.council !== councilShown || state.policy !== policyShown) {
+        if (state.council !== councilShown || state.policy !== policyShown || (chapter && funds !== councilFunds)) {
           councilShown = state.council;
           policyShown = state.policy;
+          councilFunds = funds;
           councilChip.classList.toggle('hidden', councilShown === null);
           if (councilShown) {
             const rows = policyRows(policyShown ?? USUAL_POLICY, tick);
@@ -1544,6 +1550,7 @@ async function main() {
               councilView(councilShown, city?.shore ?? null),
               window.innerHeight >= TALL_SCREEN,
               rows,
+              chapter ? goalsView(chapter, councilShown, funds) : null,
             );
           }
         }

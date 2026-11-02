@@ -2,8 +2,9 @@
 //! something the mayor has to fix, and a goal to reach by a deadline.
 //!
 //! The sim applies the opening and the page judges the goal. The two must agree
-//! on the numbers, so this table is the one place they live; the sim writes it to
-//! `web/src/chapter-fixture.json` for the page.
+//! on the numbers, so this table is the one place they live. The page reads it
+//! through `wasm::chapter`, and the sim writes it to `web/src/chapter-fixture.json`
+//! for the page's tests.
 
 #[cfg(test)]
 mod tests;
@@ -23,6 +24,16 @@ pub struct Chapter {
     pub days: u32,
     /// The longest average trip to work or school, in ticks, that meets the commute goal.
     pub commute_ticks: u32,
+}
+
+impl Chapter {
+    /// The numbers the page judges the goals by, as JSON.
+    pub fn to_json(&self) -> String {
+        format!(
+            "{{\"seed\":\"{}\",\"days\":{},\"commuteTicks\":{}}}",
+            self.seed, self.days, self.commute_ticks
+        )
+    }
 }
 
 /// Every chapter, in the order a player meets them.

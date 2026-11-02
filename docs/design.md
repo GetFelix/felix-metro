@@ -476,10 +476,10 @@ notice that on the next scored day, which is what makes the limits a trade.
   12 and starts no cooldown. A policy that changed less than a city day ago (5,760 ticks) is refused with result 11.
   The cooldown is per policy, so changing one does not hold the others. A refusal changes nothing.
 - **The event.** A `policy` command that applies records the new settings in a `policy` event in district 0, and every
-  keyframe tick carries the same event once any policy has changed (a city that never changed one writes none). It holds each value and the tick of its last change, so the cooldown survives a
+  keyframe tick carries the same event once a policy differs from how the city opened (a city that never changed one writes none). It holds each value and the tick of its last change, so the cooldown survives a
   restart. The page reads the newest one.
 - **Restart.** The restart takes the policies from the newest keyframe tick, then applies any `policy` event after
-  it before stepping. A log from before policies starts with the usual hours and no limits.
+  it before stepping. A log with no `policy` event has the policies the city opened with: the usual hours and no limits, or a chapter's opening (see Chapters).
 - **In the schedule.** Shop hours move only the leave tick of a shopkeeper's workday (`Resident::leave_tick`), so the
   schedules themselves, which come from the seed, are not rewritten. A shopkeeper kept late waits at work; a restart
   that finds one there recomputes the wait from the policy, not from when the keyframe was taken, so lowering the hours
@@ -492,6 +492,33 @@ The page lists the policies under the factions in the same folded panel, each wi
 again from.
 
 Cost to the log: nothing until a policy is first changed, then one `policy` event of a few bytes per keyframe tick (one per hour of city time).
+
+### Chapters
+
+A chapter is a city with a story: a seed whose city opens with something wrong and a goal to reach by a deadline. The
+table is `CHAPTERS` in `core/src/chapter.rs`, so the sim that plays the opening and the page that judges the goals read
+the same numbers. The page asks core for the chapter of the city it opened (`chapter(seed)` in the wasm build); a city
+that is not a chapter has none and shows no goals.
+
+| Chapter | City           | Opens with                         | Days | Commute goal |
+| ------- | -------------- | ---------------------------------- | ---- | ------------ |
+| Pier    | `pier`, 2 by 2 | Avenue limit 40%, street limit 60% | 3    | 64 ticks     |
+
+- **The opening.** `Policy::opening(seed)` is the policy a city starts with: the usual one, or the chapter's. A
+  `policy` event is written once the policies differ from the opening, so a city that has not changed anything writes
+  none, and a restart that finds none reads the opening, not the usual policy. A restart that read the usual one would
+  quietly give a chapter its limits back.
+- **No warm-up.** A chapter's first tick is the sim's first tick, so the three days are the player's. The sim skips the
+  warm-up for a seed with a chapter.
+- **The goals.** Judged by the page from the `council` event and the funds at the tick on screen: the commuters'
+  measure of the last scored day is at most the commute goal, no standing has been unhappy for the council's patience,
+  and funds are above zero. Nothing is judged before a day is scored. A recall or an empty account loses at once;
+  the other goals are judged once `days` have been scored, so scrubbing back shows the chapter as it stood then. The
+  page lists them under the factions, with the day or the outcome beside the heading.
+- **Tested against the sim.** `web/src/chapter-fixture.json` holds the chapter table and the council and funds that the
+  sim reaches after three days with the limits left alone and with both raised. The sim's test rewrites it
+  (`METRO_WRITE_FIXTURE=1 cargo test -p felix-metro-sim the_chapter_fixture`) and fails when it is stale; the page's tests
+  judge both runs from it.
 
 ### Commands and the registry
 
