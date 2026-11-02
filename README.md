@@ -33,7 +33,7 @@ and play forward from there.
 ## What you will be able to do
 
 - Look around the city: turn, tilt, slide and zoom with a mouse, trackpad, touch or the keyboard (see [Camera controls](#camera-controls))
-- Watch a generated city go about its day in 3D: residents commute, shop and go home, and the sun rises and sets. Rush hour at 08:00 and 17:15 puts about 23 to 29 cars and 24 to 36 walkers on the streets of the busiest district, and about 70 cars and 70 walkers across the harbor city at 2 by 2 (522 residents; `cargo run --release -p felix-metro-core --example density -- harbor 2` prints the counts). The log is estimated at about 8 KB/s averaged over a day at 20,000 residents (`design.md` has the arithmetic); the measured harbor city of 522 residents in 4 districts averages 656 B/s, and scaled to 20,000 residents in 16 districts the busiest minute of the rush peaks near 17 KB/s, from the hourly snapshots of each district landing together, which #95 tracks (`cargo test -p felix-metro-sim --release report_load -- --ignored --nocapture` measures it).
+- Watch a generated city go about its day in 3D: residents commute, shop and go home, and the sun rises and sets. Rush hour at 08:00 and 17:15 puts about 23 to 29 cars and 24 to 36 walkers on the streets of the busiest district, and about 70 cars and 70 walkers across the harbor city at 2 by 2 (522 residents; `cargo run --release -p felix-metro-core --example density -- harbor 2` prints the counts). The log is small: extrapolated to 20,000 residents in 16 districts (nothing that size has run), it averages 5.1 KB/s over a day and writes 9.96 KB/s in the busiest minute of the rush, just under the 10 KB/s goal, at 4 ticks a second. That is scaled from the measured harbor city of 522 residents in 4 districts, which averages 449 B/s, and from a city of 5,568 residents. The figure counts a record header of 22 bytes, the most it reaches (it is 16 on a young log). `cargo test -p felix-metro-sim --release report_load -- --ignored --nocapture` prints it, and `docs/design.md` has the arithmetic.
 - Drag the timeline back to any moment the log holds and see the city exactly as it was
 - Let go and watch it play forward and catch up to live
 - Follow one resident or car through their day
@@ -343,6 +343,17 @@ The Felix release this repo builds on is in [`.felix-version`](.felix-version).
 When Felix publishes a release, a bot opens a "chore: use Felix <version>" PR
 that moves every pin listed in [`.github/felix-bump.sh`](.github/felix-bump.sh)
 and the lockfiles, and merges it once CI passes. Prereleases are skipped.
+
+Every night a workflow
+([`felix-nightly.yml`](.github/workflows/felix-nightly.yml)) points the Felix
+crates listed in `.felix-version` at the commit behind Felix's `nightly` tag and
+runs [`.github/felix-nightly.sh`](.github/felix-nightly.sh): it starts the sim's
+test stack and the dev stack from the `:nightly` Felix images, runs a city for a
+day, and runs the dev-stack checks that need no browser. When a run on `main`
+fails it opens an issue labelled `felix-nightly`, and a green run closes it, so
+a Felix change that breaks this repo shows up before the next release. See the
+latest run with `gh run list -R GetFelix/felix-metro --workflow "Felix nightly"
+--limit 1`, or start one from the Actions tab.
 
 ## Contributing
 

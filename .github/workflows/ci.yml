@@ -40,6 +40,8 @@ jobs:
       - run: npm test
       # The builder bot's turn on a lot, with a stand-in for the sim.
       - run: node --test ../dev/lib/turn.test.mjs
+      # The dev scripts' tick decoder, on records built by hand.
+      - run: node --test ../dev/lib/gateway.test.mjs
       - run: npm run build
       # Serve it with `python3 -m http.server` from the download.
       - uses: actions/upload-artifact@v4

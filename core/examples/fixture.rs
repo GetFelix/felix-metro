@@ -84,7 +84,6 @@ fn records() -> Vec<(&'static str, Vec<u8>)> {
             Event::Left {
                 resident: 5,
                 district: 3,
-                vehicle: vehicle.clone(),
             },
             Event::Entered {
                 resident: 6,

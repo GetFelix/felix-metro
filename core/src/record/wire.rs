@@ -50,17 +50,19 @@ impl Writer {
         Ok(())
     }
 
-    /// A tag, then a varint length and the body `put` writes, so a reader
-    /// can skip a tag it does not know.
+    /// A varint of the body length shifted past `tag_bits` bits of tag, then the
+    /// body `put` writes, so a reader can skip a tag it does not know. A short
+    /// body costs one byte of framing.
     pub(super) fn framed(
         &mut self,
         tag: u8,
+        tag_bits: u32,
         put: impl FnOnce(&mut Writer) -> Result<(), EncodeError>,
     ) -> Result<(), EncodeError> {
+        debug_assert!(u32::from(tag) < 1 << tag_bits);
         let mut body = Writer(Vec::new());
         put(&mut body)?;
-        self.u8(tag);
-        self.varint(body.0.len() as u64);
+        self.varint(((body.0.len() as u64) << tag_bits) | u64::from(tag));
         self.0.extend_from_slice(&body.0);
         Ok(())
     }
@@ -73,10 +75,6 @@ pub(super) struct Reader<'a> {
 impl<'a> Reader<'a> {
     pub(super) fn new(bytes: &'a [u8]) -> Self {
         Self { bytes }
-    }
-
-    pub(super) fn remaining(&self) -> usize {
-        self.bytes.len()
     }
 
     pub(super) fn finish(self) -> Result<(), DecodeError> {
@@ -105,11 +103,13 @@ impl<'a> Reader<'a> {
         Ok(head)
     }
 
-    /// A tag and the body that follows its length. A reader of the body that
-    /// stops early leaves the rest unread, so fields can be appended later.
-    pub(super) fn framed(&mut self) -> Result<(u8, Reader<'a>), DecodeError> {
-        let tag = self.u8()?;
-        let len = usize::try_from(self.varint()?).map_err(|_| DecodeError::Truncated)?;
+    /// A tag and the body that follows it; see [`Writer::framed`]. A reader of
+    /// the body that stops early leaves the rest unread, so fields can be
+    /// appended later.
+    pub(super) fn framed(&mut self, tag_bits: u32) -> Result<(u8, Reader<'a>), DecodeError> {
+        let head = self.varint()?;
+        let tag = (head & ((1 << tag_bits) - 1)) as u8;
+        let len = usize::try_from(head >> tag_bits).map_err(|_| DecodeError::Truncated)?;
         Ok((tag, Reader::new(self.slice(len)?)))
     }
 

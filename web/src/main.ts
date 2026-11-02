@@ -14,7 +14,7 @@ import { parseCity, type City } from './layout';
 import { beforeSignIn, fetchOidc, signIn } from './auth';
 import { CityState, type Building } from './city';
 import { TICKS_PER_HOUR, TickClock, cityTime } from './clock';
-import { connectLive } from './live';
+import { connectLive, onOldLog } from './live';
 import { Gateway, GatewayError } from './gateway';
 import { Playback, handOver } from './playback';
 import { IDLE_MS, SeekError, Seeker, fold, tryFoldMore, type SeekResult } from './seek';
@@ -189,6 +189,12 @@ async function follow(
     state.onRecord = (d, t, r) => window.__trace!.push([d, t, r]);
   }
   const picker = createPicker(name, DEFAULT_DISTRICTS);
+  onOldLog(() => {
+    const notice = document.getElementById('notice')!;
+    notice.textContent =
+      'This city’s log was written before the compact tick layout and can’t be read. Start a fresh city.';
+    notice.classList.remove('hidden');
+  });
   const live = await connectLive({
     url,
     oidc,

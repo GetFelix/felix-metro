@@ -8,8 +8,9 @@ use super::{
 };
 use crate::city::City;
 
-/// Bytes of a tick record before its first event: the kind byte and the header.
-pub const TICK_HEADER_LEN: usize = 31;
+/// Bits of tag in the framing of an event and of a keyframe's resident entry. A tag has to fit.
+const EVENT_TAG_BITS: u32 = 4;
+const ENTRY_TAG_BITS: u32 = 2;
 
 const EV_TRIP: u8 = 1;
 const EV_REPLAN: u8 = 2;
@@ -23,8 +24,13 @@ const EV_ROAD: u8 = 9;
 const EV_COMMAND: u8 = 10;
 const EV_SPEED: u8 = 11;
 const EV_COMMAND_CURSOR: u8 = 12;
-const EV_LEDGER: u8 = 13;
-const EV_BALANCE: u8 = 14;
+/// An `arrived` and the same resident's `activity` that follows it, which is every arrival the sim makes.
+const EV_ARRIVAL: u8 = 13;
+/// Tag 14 is free. An event that is rare, like those below, goes under this tag with a kind varint ahead of its
+/// fields, so the few tags that fit [`EVENT_TAG_BITS`] stay for events a tick writes in bulk.
+const EV_EXTENDED: u8 = 15;
+const EXT_LEDGER: u64 = 1;
+const EXT_BALANCE: u64 = 2;
 
 const CMD_PLACE_ROAD: u8 = 1;
 const CMD_ZONE: u8 = 2;
@@ -53,27 +59,30 @@ pub fn building_diffs(city: &City, current: &[BuildingDiff]) -> Vec<BuildingDiff
 }
 
 pub(super) fn encode_tick(r: &TickRecord) -> Result<Vec<u8>, EncodeError> {
-    let events = u16::try_from(r.events.len()).map_err(|_| EncodeError::TooManyEvents)?;
-    let mut w = Writer(Vec::with_capacity(TICK_HEADER_LEN + 32 * r.events.len()));
+    if r.events.len() > usize::from(u16::MAX) {
+        return Err(EncodeError::TooManyEvents);
+    }
+    let mut w = Writer(Vec::with_capacity(24 + 16 * r.events.len()));
     let h = &r.header;
     w.u8(KIND_TICK);
-    w.u32(h.epoch);
-    w.u16(h.district);
-    w.u32(h.tick);
+    w.varint(u64::from(h.epoch));
+    w.varint(u64::from(h.district));
+    w.varint(u64::from(h.tick));
     w.u8(h.speed);
     w.u8(if r.keyframe.is_some() {
         FLAG_KEYFRAME
     } else {
         0
     });
-    w.u64(h.keyframe_offset);
+    w.varint(h.keyframe_offset);
     w.u64(h.wall_us);
-    w.u16(events);
+    let entries = entries(&r.events);
+    w.varint(entries.len() as u64);
     if let Some(k) = &r.keyframe {
-        put_keyframe(&mut w, k)?;
+        put_keyframe(&mut w, k, h.tick)?;
     }
-    for e in &r.events {
-        put_event(&mut w, e)?;
+    for e in entries {
+        put_entry(&mut w, e, h.tick)?;
     }
     Ok(w.0)
 }
@@ -81,25 +90,25 @@ pub(super) fn encode_tick(r: &TickRecord) -> Result<Vec<u8>, EncodeError> {
 pub(super) fn decode_tick(bytes: &[u8]) -> Result<TickRecord, DecodeError> {
     let mut r = Reader::new(bytes);
     expect_kind(&mut r, KIND_TICK)?;
-    let epoch = r.u32()?;
-    let district = r.u16()?;
-    let tick = r.u32()?;
+    let epoch = r.varint_u32()?;
+    let district = u16::try_from(r.varint()?).map_err(|_| DecodeError::Invalid("district"))?;
+    let tick = r.varint_u32()?;
     let speed = r.u8()?;
     let flags = r.u8()?;
     if flags & !FLAG_KEYFRAME != 0 {
         return Err(DecodeError::Invalid("unknown header flag"));
     }
-    let keyframe_offset = r.u64()?;
+    let keyframe_offset = r.varint()?;
     let wall_us = r.u64()?;
-    let n = usize::from(r.u16()?);
+    let n = r.count()?;
     let keyframe = if flags & FLAG_KEYFRAME != 0 {
-        Some(get_keyframe(&mut r)?)
+        Some(get_keyframe(&mut r, tick)?)
     } else {
         None
     };
-    let mut events = Vec::with_capacity(n.min(r.remaining()));
+    let mut events = Vec::with_capacity(n);
     for _ in 0..n {
-        events.extend(get_event(&mut r)?);
+        get_entry(&mut r, tick, &mut events)?;
     }
     r.finish()?;
     Ok(TickRecord {
@@ -179,17 +188,75 @@ fn put_building(w: &mut Writer, lot: u32, kind: u16, rotation: u8) {
     w.u8(rotation);
 }
 
-fn put_event(w: &mut Writer, e: &Event) -> Result<(), EncodeError> {
+/// What is written for the events of a tick: an `arrived` followed by the same resident's `activity` is one entry.
+enum Entry<'a> {
+    Event(&'a Event),
+    Arrival {
+        resident: u32,
+        lot: u32,
+        kind: u8,
+        until: u32,
+    },
+}
+
+fn entries(events: &[Event]) -> Vec<Entry<'_>> {
+    let mut out = Vec::with_capacity(events.len());
+    let mut i = 0;
+    while i < events.len() {
+        if let (
+            Event::Arrived { resident, lot },
+            Some(Event::Activity {
+                resident: same,
+                kind,
+                until,
+            }),
+        ) = (&events[i], events.get(i + 1))
+            && resident == same
+        {
+            out.push(Entry::Arrival {
+                resident: *resident,
+                lot: *lot,
+                kind: *kind,
+                until: *until,
+            });
+            i += 2;
+            continue;
+        }
+        out.push(Entry::Event(&events[i]));
+        i += 1;
+    }
+    out
+}
+
+fn put_entry(w: &mut Writer, entry: Entry<'_>, tick: u32) -> Result<(), EncodeError> {
+    match entry {
+        Entry::Arrival {
+            resident,
+            lot,
+            kind,
+            until,
+        } => w.framed(EV_ARRIVAL, EVENT_TAG_BITS, |b| {
+            b.varint(u64::from(resident));
+            b.varint(u64::from(lot));
+            b.u8(kind);
+            b.delta(tick, until);
+            Ok(())
+        }),
+        Entry::Event(e) => put_event(w, e, tick),
+    }
+}
+
+fn put_event(w: &mut Writer, e: &Event, tick: u32) -> Result<(), EncodeError> {
     match e {
         Event::Trip {
             resident,
             vehicle,
             depart,
             route,
-        } => w.framed(EV_TRIP, |b| {
-            b.u32(*resident);
+        } => w.framed(EV_TRIP, EVENT_TAG_BITS, |b| {
+            b.varint(u64::from(*resident));
             b.u8(*vehicle);
-            b.u32(*depart);
+            b.delta(tick, *depart);
             put_route(b, route);
             Ok(())
         }),
@@ -197,44 +264,39 @@ fn put_event(w: &mut Writer, e: &Event) -> Result<(), EncodeError> {
             resident,
             from_segment,
             route,
-        } => w.framed(EV_REPLAN, |b| {
-            b.u32(*resident);
-            b.u32(*from_segment);
+        } => w.framed(EV_REPLAN, EVENT_TAG_BITS, |b| {
+            b.varint(u64::from(*resident));
+            b.varint(u64::from(*from_segment));
             put_route(b, route);
             Ok(())
         }),
-        Event::Arrived { resident, lot } => w.framed(EV_ARRIVED, |b| {
-            b.u32(*resident);
-            b.u32(*lot);
+        Event::Arrived { resident, lot } => w.framed(EV_ARRIVED, EVENT_TAG_BITS, |b| {
+            b.varint(u64::from(*resident));
+            b.varint(u64::from(*lot));
             Ok(())
         }),
         Event::Activity {
             resident,
             kind,
             until,
-        } => w.framed(EV_ACTIVITY, |b| {
-            b.u32(*resident);
+        } => w.framed(EV_ACTIVITY, EVENT_TAG_BITS, |b| {
+            b.varint(u64::from(*resident));
             b.u8(*kind);
-            b.u32(*until);
+            b.delta(tick, *until);
             Ok(())
         }),
-        Event::Left {
-            resident,
-            district,
-            vehicle,
-        } => w.framed(EV_LEFT, |b| {
-            b.u32(*resident);
-            b.u16(*district);
-            put_vehicle(b, vehicle);
+        Event::Left { resident, district } => w.framed(EV_LEFT, EVENT_TAG_BITS, |b| {
+            b.varint(u64::from(*resident));
+            b.varint(u64::from(*district));
             Ok(())
         }),
         Event::Entered {
             resident,
             district,
             vehicle,
-        } => w.framed(EV_ENTERED, |b| {
-            b.u32(*resident);
-            b.u16(*district);
+        } => w.framed(EV_ENTERED, EVENT_TAG_BITS, |b| {
+            b.varint(u64::from(*resident));
+            b.varint(u64::from(*district));
             put_vehicle(b, vehicle);
             Ok(())
         }),
@@ -242,7 +304,7 @@ fn put_event(w: &mut Writer, e: &Event) -> Result<(), EncodeError> {
             lot,
             kind,
             rotation,
-        } => w.framed(EV_BUILT, |b| {
+        } => w.framed(EV_BUILT, EVENT_TAG_BITS, |b| {
             put_building(b, *lot, *kind, *rotation);
             Ok(())
         }),
@@ -250,11 +312,11 @@ fn put_event(w: &mut Writer, e: &Event) -> Result<(), EncodeError> {
             lot,
             kind,
             rotation,
-        } => w.framed(EV_DEMOLISHED, |b| {
+        } => w.framed(EV_DEMOLISHED, EVENT_TAG_BITS, |b| {
             put_building(b, *lot, *kind, *rotation);
             Ok(())
         }),
-        Event::Road { segment, change } => w.framed(EV_ROAD, |b| {
+        Event::Road { segment, change } => w.framed(EV_ROAD, EVENT_TAG_BITS, |b| {
             b.u32(*segment);
             b.u8(*change);
             Ok(())
@@ -264,18 +326,18 @@ fn put_event(w: &mut Writer, e: &Event) -> Result<(), EncodeError> {
             name,
             id,
             result,
-        } => w.framed(EV_COMMAND, |b| {
+        } => w.framed(EV_COMMAND, EVENT_TAG_BITS, |b| {
             b.u64(*principal);
             b.str(name)?;
             b.u32(*id);
             b.u8(*result);
             Ok(())
         }),
-        Event::Speed { ticks_per_second } => w.framed(EV_SPEED, |b| {
+        Event::Speed { ticks_per_second } => w.framed(EV_SPEED, EVENT_TAG_BITS, |b| {
             b.u8(*ticks_per_second);
             Ok(())
         }),
-        Event::CommandCursor { next } => w.framed(EV_COMMAND_CURSOR, |b| {
+        Event::CommandCursor { next } => w.framed(EV_COMMAND_CURSOR, EVENT_TAG_BITS, |b| {
             b.varint(*next);
             Ok(())
         }),
@@ -283,52 +345,65 @@ fn put_event(w: &mut Writer, e: &Event) -> Result<(), EncodeError> {
             reason,
             earned,
             spent,
-        } => w.framed(EV_LEDGER, |b| {
+        } => w.framed(EV_EXTENDED, EVENT_TAG_BITS, |b| {
+            b.varint(EXT_LEDGER);
             b.u8(*reason);
             b.varint(*earned);
             b.varint(*spent);
             Ok(())
         }),
-        Event::Balance { amount } => w.framed(EV_BALANCE, |b| {
+        Event::Balance { amount } => w.framed(EV_EXTENDED, EVENT_TAG_BITS, |b| {
+            b.varint(EXT_BALANCE);
             b.svarint(*amount);
             Ok(())
         }),
     }
 }
 
-/// The next event, or `None` for a tag this build does not know.
-fn get_event(r: &mut Reader) -> Result<Option<Event>, DecodeError> {
-    let (tag, mut r) = r.framed()?;
+/// Reads the next entry into `out`; a tag this build does not know adds nothing.
+fn get_entry(r: &mut Reader, tick: u32, out: &mut Vec<Event>) -> Result<(), DecodeError> {
+    let (tag, mut r) = r.framed(EVENT_TAG_BITS)?;
     let r = &mut r;
-    Ok(Some(match tag {
+    let event = match tag {
+        EV_ARRIVAL => {
+            let resident = r.varint_u32()?;
+            out.push(Event::Arrived {
+                resident,
+                lot: r.varint_u32()?,
+            });
+            Event::Activity {
+                resident,
+                kind: r.u8()?,
+                until: r.delta(tick)?,
+            }
+        }
         EV_TRIP => Event::Trip {
-            resident: r.u32()?,
+            resident: r.varint_u32()?,
             vehicle: r.u8()?,
-            depart: r.u32()?,
+            depart: r.delta(tick)?,
             route: get_route(r)?,
         },
         EV_REPLAN => Event::Replan {
-            resident: r.u32()?,
-            from_segment: r.u32()?,
+            resident: r.varint_u32()?,
+            from_segment: r.varint_u32()?,
             route: get_route(r)?,
         },
         EV_ARRIVED => Event::Arrived {
-            resident: r.u32()?,
-            lot: r.u32()?,
+            resident: r.varint_u32()?,
+            lot: r.varint_u32()?,
         },
         EV_ACTIVITY => Event::Activity {
-            resident: r.u32()?,
+            resident: r.varint_u32()?,
             kind: r.u8()?,
-            until: r.u32()?,
+            until: r.delta(tick)?,
         },
         EV_LEFT => Event::Left {
-            resident: r.u32()?,
-            district: r.u16()?,
-            vehicle: get_vehicle(r)?,
+            resident: r.varint_u32()?,
+            district: district(r)?,
         },
         EV_ENTERED => Event::Entered {
-            resident: r.u32()?,
-            district: r.u16()?,
+            resident: r.varint_u32()?,
+            district: district(r)?,
             vehicle: get_vehicle(r)?,
         },
         EV_BUILT => Event::Built {
@@ -355,19 +430,28 @@ fn get_event(r: &mut Reader) -> Result<Option<Event>, DecodeError> {
             ticks_per_second: r.u8()?,
         },
         EV_COMMAND_CURSOR => Event::CommandCursor { next: r.varint()? },
-        EV_LEDGER => Event::Ledger {
-            reason: r.u8()?,
-            earned: r.varint()?,
-            spent: r.varint()?,
+        EV_EXTENDED => match r.varint()? {
+            EXT_LEDGER => Event::Ledger {
+                reason: r.u8()?,
+                earned: r.varint()?,
+                spent: r.varint()?,
+            },
+            EXT_BALANCE => Event::Balance {
+                amount: r.svarint()?,
+            },
+            _ => return Ok(()),
         },
-        EV_BALANCE => Event::Balance {
-            amount: r.svarint()?,
-        },
-        _ => return Ok(None),
-    }))
+        _ => return Ok(()),
+    };
+    out.push(event);
+    Ok(())
 }
 
-fn put_keyframe(w: &mut Writer, k: &Keyframe) -> Result<(), EncodeError> {
+fn district(r: &mut Reader) -> Result<u16, DecodeError> {
+    u16::try_from(r.varint()?).map_err(|_| DecodeError::Invalid("district"))
+}
+
+fn put_keyframe(w: &mut Writer, k: &Keyframe, tick: u32) -> Result<(), EncodeError> {
     w.varint(k.buildings.len() as u64);
     let mut prev = 0;
     for b in &k.buildings {
@@ -389,13 +473,15 @@ fn put_keyframe(w: &mut Writer, k: &Keyframe) -> Result<(), EncodeError> {
         w.delta(prev, res.id);
         prev = res.id;
         match &res.doing {
-            Doing::Activity { kind, lot, until } => w.framed(DOING_ACTIVITY, |b| {
-                b.u8(*kind);
-                b.u32(*lot);
-                b.varint(u64::from(*until));
-                Ok(())
-            })?,
-            Doing::Trip(v) => w.framed(DOING_TRIP, |b| {
+            Doing::Activity { kind, lot, until } => {
+                w.framed(DOING_ACTIVITY, ENTRY_TAG_BITS, |b| {
+                    b.u8(*kind);
+                    b.varint(u64::from(*lot));
+                    b.delta(tick, *until);
+                    Ok(())
+                })?
+            }
+            Doing::Trip(v) => w.framed(DOING_TRIP, ENTRY_TAG_BITS, |b| {
                 put_vehicle(b, v);
                 Ok(())
             })?,
@@ -408,7 +494,7 @@ fn put_keyframe(w: &mut Writer, k: &Keyframe) -> Result<(), EncodeError> {
     Ok(())
 }
 
-fn get_keyframe(r: &mut Reader) -> Result<Keyframe, DecodeError> {
+fn get_keyframe(r: &mut Reader, tick: u32) -> Result<Keyframe, DecodeError> {
     let n = r.count()?;
     let mut prev = 0;
     let mut buildings = Vec::with_capacity(n);
@@ -435,13 +521,13 @@ fn get_keyframe(r: &mut Reader) -> Result<Keyframe, DecodeError> {
     let mut residents = Vec::with_capacity(n);
     for _ in 0..n {
         prev = r.delta(prev)?;
-        let (tag, mut b) = r.framed()?;
+        let (tag, mut b) = r.framed(ENTRY_TAG_BITS)?;
         let b = &mut b;
         let doing = match tag {
             DOING_ACTIVITY => Doing::Activity {
                 kind: b.u8()?,
-                lot: b.u32()?,
-                until: b.varint_u32()?,
+                lot: b.varint_u32()?,
+                until: b.delta(tick)?,
             },
             DOING_TRIP => Doing::Trip(get_vehicle(b)?),
             _ => continue,

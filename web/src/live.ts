@@ -38,11 +38,25 @@ export interface LiveOptions {
 
 const slot = (district: number) => `d${String(district).padStart(2, '0')}`;
 
+/** Record kind 1 is the tick layout before the compact one; a log written under it can no longer be read. */
+const OLD_TICK_KIND = 1;
+let oldLog: (() => void) | null = null;
+
+/** Called once, with the first record in the old layout that {@link parse} meets; replaces any earlier listener. */
+export function onOldLog(listener: () => void): void {
+  oldLog = listener;
+}
+
 export function parse(bytes: Uint8Array): TickRecord | null {
   try {
     const record = JSON.parse(decodeRecord(bytes));
     return record.kind === 'tick' ? (record as TickRecord) : null;
   } catch (err) {
+    if (bytes[0] === OLD_TICK_KIND && oldLog) {
+      const tell = oldLog;
+      oldLog = null;
+      tell();
+    }
     console.error('a record did not decode', err);
     return null;
   }
