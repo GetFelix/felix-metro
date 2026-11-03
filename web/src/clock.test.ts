@@ -57,6 +57,18 @@ describe('TickClock', () => {
     }
   });
 
+  it('runs on to the newest tick when the city is paused, so the picture shows where the sim stopped', () => {
+    for (const speed of [4, 16]) {
+      const clock = new TickClock();
+      clock.advance(0, 100, speed);
+      for (let i = 0; i < 10; i++) clock.advance(1 / 60, 100, speed);
+      // The pause: the newest tick is the last one, and the speed is now 0.
+      expect(clock.now).toBeLessThan(100);
+      for (let i = 0; i < 60 * 3; i++) clock.advance(1 / 60, 100, 0);
+      expect(clock.now).toBe(100);
+    }
+  });
+
   it('never passes the newest tick, and a pause stops it there', () => {
     const clock = new TickClock();
     clock.advance(0, 10, 0);

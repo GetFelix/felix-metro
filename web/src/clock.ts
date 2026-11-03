@@ -12,6 +12,9 @@ export const TICKS_PER_DAY = 5760;
  */
 const PLAYOUT_SECONDS = 0.5;
 
+/** How fast a paused city's clock closes the gap to the newest tick, in ticks a second. */
+const DRAIN_TICKS_PER_SECOND = 8;
+
 /** The ticks of lag the clock steers to: the playout delay at this speed, and never less than one tick. */
 export function playoutLag(speed: number): number {
   return Math.max(1, speed * PLAYOUT_SECONDS);
@@ -57,6 +60,11 @@ export class TickClock {
     if (this.now > latest) return this.now;
     const aim = playoutLag(speed);
     if (Number.isNaN(this.now)) this.now = Math.max(0, latest - aim);
+    // A paused city has no tick to wait for: run on to the newest one so the picture shows where the sim stopped.
+    if (speed <= 0) {
+      this.now = Math.min(latest, this.now + dt * DRAIN_TICKS_PER_SECOND);
+      return this.now;
+    }
     let lag = latest - this.now;
     // After a hidden tab or a long stall the page is too far behind to catch up by steering: jump.
     if (lag > Math.max(aim + 1, speed * SNAP_SECONDS)) {

@@ -7,8 +7,8 @@ export const LANE = 0.17;
 export const PAVEMENT = 0.38;
 /** Ticks a trip spends turning in from the road at each end; a trip shorter than two of them gives half to each end. */
 export const TURN_TICKS = 1;
-/** Tiles from a lot's middle to its door: the edge of the tile, where a trip starts and ends and is hidden by the building. */
-export const DOOR_SETBACK = 0.5;
+/** Tiles from a lot's middle to its door, just inside the 0.45 tile edge of a building (`LOT` in models.ts), where a trip starts and ends and the building hides most of it. */
+export const DOOR_SETBACK = 0.35;
 
 /**
  * How far from the road to its lot's door a trip is at `tick`: 0 on the road, 1 at the door. It falls over the first

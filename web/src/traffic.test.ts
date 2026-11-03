@@ -221,11 +221,11 @@ describe('Traffic', () => {
       ] as const) {
         // Leaves lot ends[0], arrives at lot ends[1]: the other side of the road.
         const start = drawn(trip(0, 10, [...ends], vehicle), 0.01);
-        // The door is the lot's near edge, half a tile from its middle; full size all the way there.
-        expect(start.z).toBeCloseTo(side * DOOR_SETBACK, 1);
+        // The door is a little inside the lot's near edge; full size all the way there.
+        expect(start.z).toBeCloseTo(side * (1 - DOOR_SETBACK), 1);
         expect(start.scale).toBe(1);
         const end = drawn(trip(0, 10, [...ends], vehicle), 9.99);
-        expect(end.z).toBeCloseTo(-side * DOOR_SETBACK, 1);
+        expect(end.z).toBeCloseTo(-side * (1 - DOOR_SETBACK), 1);
         expect(end.scale).toBe(1);
       }
     }
@@ -234,8 +234,8 @@ describe('Traffic', () => {
   it('turns in on the same side at both ends of a round trip on one lot', () => {
     const out = drawn(trip(0, 10, [0, 0]), 0.01);
     const back = drawn(trip(20, 30, [0, 4]), 29.99);
-    expect(out.z).toBeCloseTo(-DOOR_SETBACK, 1);
-    expect(back.z).toBeCloseTo(-DOOR_SETBACK, 1);
+    expect(out.z).toBeCloseTo(-(1 - DOOR_SETBACK), 1);
+    expect(back.z).toBeCloseTo(-(1 - DOOR_SETBACK), 1);
   });
 
   it('drives in its lane mid-trip and walks on the pavement', () => {
@@ -407,7 +407,7 @@ describe('arriving and leaving', () => {
     // The same resident's next trip starts at its own door, not where the last one ended.
     traffic.update(20.01, 0, [first, second]);
     expect(placed).toHaveLength(1);
-    expect(placed[0]!.z).toBeCloseTo(DOOR_SETBACK, 1);
+    expect(placed[0]!.z).toBeCloseTo(1 - DOOR_SETBACK, 1);
     expect(placed[0]!.x).toBeCloseTo(20, 1);
   });
 

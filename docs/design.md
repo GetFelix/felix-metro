@@ -734,7 +734,7 @@ lose a record:
    reconnect can read from the keyframe again.
 
 The page draws a little behind the newest tick every district has, so a car
-always has both ends of its motion. The delay is half a second of city time,
+always has both ends of its motion. The delay is half a second of real time,
 which is 2 ticks at 4 ticks a second and 8 at 16, and never under 1 tick:
 records arrive about every 250 ms at the default speed with tens of ms of
 jitter, and a clock one tick behind ran out of road whenever one was late. The
