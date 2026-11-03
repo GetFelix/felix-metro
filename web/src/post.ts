@@ -59,17 +59,19 @@ export function createPost(
   };
 
   if (has('render')) composer.addPass(new RenderPass(scene, camera));
+  let ao: GTAOPass | null = null;
   if (has('ao')) {
-    const ao = withSeededRandom(() => new GTAOPass(scene, camera, innerWidth, innerHeight));
+    ao = withSeededRandom(() => new GTAOPass(scene, camera, innerWidth, innerHeight));
     ao.updateGtaoMaterial({ radius: 0.35, distanceExponent: 1.5, thickness: 1.0, scale: 1.0 });
     ao.blendIntensity = 0.85;
-    const render = ao.render.bind(ao);
-    ao.render = (...args: Parameters<typeof render>) => {
+    const aoPass = ao;
+    const render = aoPass.render.bind(aoPass);
+    aoPass.render = (...args: Parameters<typeof render>) => {
       const show = hide();
       render(...args);
       show();
     };
-    composer.addPass(ao);
+    composer.addPass(aoPass);
   }
   let bloom: UnrealBloomPass | null = null;
   if (has('bloom')) {
@@ -83,14 +85,21 @@ export function createPost(
   let depthRT: THREE.WebGLRenderTarget | null = null;
   let depthMat: THREE.MeshBasicMaterial | null = null;
   if (has('tilt-shift')) {
-    const rt = new THREE.WebGLRenderTarget(innerWidth, innerHeight);
-    rt.depthTexture = new THREE.DepthTexture(innerWidth, innerHeight);
-    depthRT = rt;
-    depthMat = new THREE.MeshBasicMaterial({ colorWrite: false });
+    // The occlusion pass already draws the scene's depth from this camera, with the same glows hidden; reading that
+    // saves a whole extra draw of the scene. Without occlusion the depth is drawn here, before the chain runs.
+    let depth: THREE.Texture;
+    if (ao) depth = ao.depthTexture;
+    else {
+      const rt = new THREE.WebGLRenderTarget(innerWidth, innerHeight);
+      rt.depthTexture = new THREE.DepthTexture(innerWidth, innerHeight);
+      depthRT = rt;
+      depthMat = new THREE.MeshBasicMaterial({ colorWrite: false });
+      depth = rt.depthTexture;
+    }
     tilt = new ShaderPass({
       uniforms: {
         tDiffuse: { value: null },
-        tDepth: { value: rt.depthTexture },
+        tDepth: { value: depth },
         resolution: { value: new THREE.Vector2(innerWidth, innerHeight) },
         cameraNear: { value: camera.near },
         cameraFar: { value: camera.far },
@@ -151,8 +160,13 @@ export function createPost(
     depthRT?.setSize(innerWidth, innerHeight);
   }
 
-  // The focus follows the orbit target every frame; the depth pre-pass runs only when tilt-shift does.
+  // The focus follows the orbit target every frame; the depth pre-pass runs only when tilt-shift does without occlusion.
   function render(target: THREE.Vector3) {
+    // Every pass that draws the scene would draw the sun's shadow map again; the first one does it for the frame.
+    if (renderer.shadowMap.enabled) {
+      renderer.shadowMap.autoUpdate = false;
+      renderer.shadowMap.needsUpdate = true;
+    }
     if (tilt && depthRT && depthMat) {
       const show = hide();
       scene.overrideMaterial = depthMat;
@@ -165,6 +179,8 @@ export function createPost(
         scene.overrideMaterial = null;
         show();
       }
+    }
+    if (tilt) {
       const focus = camera.position.distanceTo(target);
       tilt.uniforms.focus!.value = focus;
       // The sharp band grows with the zoom, so a far camera over a big city keeps most of it sharp.

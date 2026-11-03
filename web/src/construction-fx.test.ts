@@ -19,6 +19,7 @@ function access() {
   const objects = new Map<number, THREE.Object3D[]>();
   const ghosts = new Map<number, THREE.Object3D[]>();
   const ghostSet = new Set<number>();
+  const changed: number[] = [];
   const box = () => {
     const o = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1));
     o.position.y = 0.5;
@@ -36,9 +37,10 @@ function access() {
         ghosts.delete(l);
       }
     },
+    changed: (l) => changed.push(l),
     centre: (l) => [l, 0],
   };
-  return { lots, objects, ghostSet, box };
+  return { lots, objects, ghostSet, changed, box };
 }
 
 const fx = (effects = true) => {
@@ -48,6 +50,17 @@ const fx = (effects = true) => {
 };
 const shown = (scene: THREE.Scene, kind: 'Mesh' | 'Sprite') =>
   scene.children.filter((c) => c.visible && (c as { type: string }).type === kind).length;
+
+describe('a scene that draws lots as instances', () => {
+  it('is told when a rising lot is scaled, and when its scale is put back', () => {
+    const { fx: f, objects, box, changed } = fx();
+    objects.set(7, [box()]);
+    f.update(101, new Map([[7, { kind: 1, rotation: 0, tick: 100 }]]), new Map());
+    expect(changed).toEqual([7]);
+    f.update(1000, new Map(), new Map());
+    expect(changed).toEqual([7, 7]);
+  });
+});
 
 describe('many builds at once', () => {
   it('draws 30 rises with 24 scaffolds, and a lot that found the pool full stays without for its window', () => {
