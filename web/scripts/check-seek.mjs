@@ -177,13 +177,17 @@ for (const t of targets) {
       await fail(`the camera is not on resident ${mover} at tick ${at} after ${took}: ${JSON.stringify(onRoad)}`);
     if (!/^(Driving|Walking) to /.test(onRoad.doing))
       await fail(`the card says "${onRoad.doing}" for a resident on the road`);
-    console.log(`  following resident ${mover} at tick ${at}: "${onRoad.doing}", card and camera on them after ${took}`);
+    console.log(
+      `  following resident ${mover} at tick ${at}: "${onRoad.doing}", card and camera on them after ${took}`,
+    );
     for (const t of [7, Math.floor(newest / 2), at]) {
       await page.evaluate((tick) => window.__metro.seek(tick), t);
       const settled = await settle(mover);
       const now = await here(mover);
       if (!now.shown || now.who !== mover || now.doing === '')
-        await fail(`the follow of resident ${mover} did not survive a seek to tick ${t} after ${settled}: ${JSON.stringify(now)}`);
+        await fail(
+          `the follow of resident ${mover} did not survive a seek to tick ${t} after ${settled}: ${JSON.stringify(now)}`,
+        );
       if (!Number.isFinite(now.c.x) || !Number.isFinite(now.c.z))
         await fail(`the camera lost resident ${mover} at tick ${t}`);
       if (now.w && Math.hypot(now.c.x - now.w.x, now.c.z - now.w.z) > 0.5)
