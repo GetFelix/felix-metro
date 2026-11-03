@@ -1,0 +1,1 @@
+- A sign-in that cannot build is told who it is and the way out: `Signed in as viewer, who can only watch. Open ?as=mayor in a new tab to build.` with `?as=mayor` a link on the dev stack, and the build role to ask for with a real provider. A city whose sim has not started says `Pier is not running. Start it with dev/city.sh pier.` instead of refusing the build.

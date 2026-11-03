@@ -23,6 +23,11 @@
   text-align: center;
   animation: lift var(--quick) var(--ease);
 }
+/* The toasts region lets clicks through to the city; a link in a message still takes one. */
+.toast a {
+  color: var(--cyan);
+  pointer-events: auto;
+}
 .toast.hint::before {
   content: '';
   display: inline-block;

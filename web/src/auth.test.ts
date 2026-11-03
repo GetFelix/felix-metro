@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest';
-import { authorizeUrl, challengeFor, userFrom } from './auth';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { askedFor, authorizeUrl, challengeFor, signIn, signedInAs, userFrom } from './auth';
+import { subjectOf } from './identity';
 
 const oidc = { issuer: 'http://127.0.0.1:9400', client_id: 'felix-metro', scopes: 'openid profile' };
 
@@ -42,5 +43,90 @@ describe('userFrom', () => {
     expect(userFrom('?as=')).toBe('viewer');
     expect(userFrom('?tier=low&as=mayor')).toBe('mayor');
     expect(userFrom('?as= architect ')).toBe('architect');
+  });
+});
+
+describe('askedFor', () => {
+  it('is the user the address names, or null', () => {
+    expect(askedFor('')).toBeNull();
+    expect(askedFor('?as=')).toBeNull();
+    expect(askedFor('?tier=low&as= mayor ')).toBe('mayor');
+  });
+});
+
+describe('signedInAs', () => {
+  it('sets ?as and keeps the rest of the address', () => {
+    expect(signedInAs('http://127.0.0.1:8088/?tier=low&as=viewer#harbor', 'mayor')).toBe(
+      'http://127.0.0.1:8088/?tier=low&as=mayor#harbor',
+    );
+    expect(signedInAs('http://127.0.0.1:8088/#pier', 'mayor')).toBe('http://127.0.0.1:8088/?as=mayor#pier');
+  });
+});
+
+const token = (claims: object, exp = Math.floor(Date.now() / 1000) + 3600) =>
+  `h.${btoa(JSON.stringify({ exp, ...claims }))}.s`;
+
+describe('subjectOf', () => {
+  it('reads the sub claim', () => {
+    expect(subjectOf(token({ sub: 'mayor' }))).toBe('mayor');
+    expect(subjectOf(token({}))).toBeNull();
+    expect(subjectOf('nonsense')).toBeNull();
+  });
+});
+
+describe('signIn with a token the tab already holds', () => {
+  const store = new Map<string, string>();
+  const sent: string[] = [];
+
+  /** A tab on `search` that holds `held`, signing in at `issuer`. */
+  const tab = (search: string, held: string | null, issuer: string) => {
+    store.clear();
+    sent.length = 0;
+    if (held) store.set('metro.token', held);
+    vi.stubGlobal('sessionStorage', {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => void store.set(k, v),
+      removeItem: (k: string) => void store.delete(k),
+    });
+    vi.stubGlobal('location', {
+      href: `http://127.0.0.1:8088/${search}`,
+      search,
+      hash: '',
+      assign: (url: string) => void sent.push(url),
+    });
+    vi.stubGlobal(
+      'fetch',
+      async () =>
+        new Response(
+          JSON.stringify({ authorization_endpoint: `${issuer}/authorize`, token_endpoint: `${issuer}/token` }),
+        ),
+    );
+    return signIn({ ...oidc, issuer });
+  };
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  const viewer = token({ sub: 'viewer' });
+
+  it('keeps it when the address asks for no one', async () => {
+    expect(await tab('', viewer, oidc.issuer)).toBe(viewer);
+    expect(sent).toEqual([]);
+  });
+
+  it('keeps it when ?as names the user it is for', async () => {
+    expect(await tab('?as=viewer', viewer, oidc.issuer)).toBe(viewer);
+    expect(sent).toEqual([]);
+  });
+
+  it('drops it and signs in again when ?as names someone else, on the stand-in', async () => {
+    void tab('?as=mayor', viewer, oidc.issuer);
+    await vi.waitFor(() => expect(sent).toHaveLength(1));
+    expect(new URL(sent[0]!).searchParams.get('sub')).toBe('mayor');
+    expect(store.has('metro.token')).toBe(false);
+  });
+
+  it('ignores ?as with a real provider', async () => {
+    expect(await tab('?as=mayor', viewer, 'https://login.example.com')).toBe(viewer);
+    expect(sent).toEqual([]);
   });
 });

@@ -1,11 +1,12 @@
 // The building tools' controls: build, demolish and road buttons beside the settings button, and under them, while a
 // tool is held, a panel to pick the building, turn it and read what became of the last thing sent. What the tools do is
 // `placement.ts`; this is the markup and the keys.
+import { signedInAs } from '../auth';
 import { buildAction } from '../build-keys';
 import { families } from '../build';
 import { PHOTO_CLASS } from './photo';
 import type { Placement, Tool } from '../placement';
-import { note } from './toast';
+import { note, setMessage, type MessageLink } from './toast';
 
 const HOUSE = `<path d="M3 17V9l7-5 7 5v8z"/>`;
 const BUILD_ICON = `<svg viewBox="0 0 20 20" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8"
@@ -92,6 +93,11 @@ export function createBuildBar(tools: HTMLElement, placement: Placement, sheetOp
     select.append(group);
   }
 
+  const messageLink = (): MessageLink | null => {
+    const fix = placement.fix();
+    return fix && { label: fix.label, href: signedInAs(location.href, fix.user) };
+  };
+
   let doneTimer: ReturnType<typeof setTimeout> | null = null;
   let shownStatus = '';
   const showStatus = () => {
@@ -99,7 +105,7 @@ export function createBuildBar(tools: HTMLElement, placement: Placement, sheetOp
     const text = s.state === 'idle' ? '' : s.text;
     if (text === shownStatus) return;
     shownStatus = text;
-    status.textContent = text;
+    setMessage(status, text, messageLink());
     status.dataset.state = s.state;
     if (doneTimer) clearTimeout(doneTimer);
     doneTimer = null;
@@ -144,7 +150,7 @@ export function createBuildBar(tools: HTMLElement, placement: Placement, sheetOp
     const now = performance.now();
     if (text === said.text && now - said.at < SAY_AGAIN_MS) return;
     said = { text, at: now };
-    note(text);
+    note(text, messageLink());
   };
 
   const pick = (tool: Tool) => {

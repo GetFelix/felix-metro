@@ -267,7 +267,7 @@ async function answer(page, before) {
   const { context, page } = await open('viewer', viewer);
   await until(page, () => window.__build.state().unavailable !== null, null, 'the viewer was never judged');
   const s = await state(page);
-  check(/cannot build/.test(s.unavailable ?? ''), `a viewer is told: ${s.unavailable}`);
+  check(/can only watch/.test(s.unavailable ?? ''), `a viewer is told: ${s.unavailable}`);
   check((await page.getAttribute('#build-button', 'aria-disabled')) === 'true', 'a viewer’s build button is off');
   await page.keyboard.press('b');
   check(
