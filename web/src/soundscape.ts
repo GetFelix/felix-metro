@@ -1,7 +1,7 @@
-// The ambient sound, made with the Web Audio API so the page ships no audio files. Day is filtered noise for traffic,
-// night is pulsed tones for crickets, and a rewind is a swept noise burst. The browser only lets a page start audio
-// from a click or key press, so nothing here exists until `enable` is called from one.
-import { mixAt } from './soundscape-mix';
+// The ambient sound, made with the Web Audio API. Day is filtered noise for traffic, night is a field recording of
+// crickets (one small Ogg file, see prototype/assets/CREDITS.md), and a rewind is a swept noise burst. The browser only
+// lets a page start audio from a click or key press, so nothing here exists until `enable` is called from one.
+import { mixAt, nextSwell, startOffset } from './soundscape-mix';
 
 export interface Soundscape {
   /** Whether the sound is switched on. */
@@ -22,6 +22,17 @@ export interface Soundscape {
 
 type ContextFactory = () => AudioContext;
 
+/** Fetches and decodes the night recording. Rejects when the file is missing; the page then has no crickets. */
+type ClipLoader = (ctx: AudioContext) => Promise<AudioBuffer>;
+
+const CRICKETS_URL = 'assets/audio/night-crickets.ogg';
+
+const fetchCrickets: ClipLoader = async (ctx) => {
+  const res = await fetch(CRICKETS_URL);
+  if (!res.ok) throw new Error(`${CRICKETS_URL}: ${res.status}`);
+  return ctx.decodeAudioData(await res.arrayBuffer());
+};
+
 /** A new context from the page's own audio; throws when the browser has none. */
 function pageAudio(): AudioContext {
   const Ctor = window.AudioContext ?? (window as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
@@ -33,6 +44,8 @@ const MASTER = 0.5;
 /** Seconds a layer takes to settle on a new level, so the hour never makes a step. */
 const EASE = 1.2;
 const FADE = 0.25;
+/** How loud the recording plays at full night, before the master level. */
+const CRICKETS_LEVEL = 0.5;
 
 /**
  * Two seconds of brown noise, which loops without a click; brown noise is the low rumble a street makes. The walk runs
@@ -66,35 +79,13 @@ function whiteNoise(ctx: AudioContext): AudioBuffer {
   return buffer;
 }
 
-/** A tone that chirps: a carrier gated by a fast pulse, itself gated by a slow one. */
-function cricket(ctx: AudioContext, into: AudioNode, pitch: number, pulse: number, burst: number): void {
-  const carrier = ctx.createOscillator();
-  carrier.frequency.value = pitch;
-  const fast = ctx.createGain();
-  const slow = ctx.createGain();
-  fast.gain.value = 0.5;
-  slow.gain.value = 0.5;
-  for (const [rate, gain] of [
-    [pulse, fast],
-    [burst, slow],
-  ] as const) {
-    const lfo = ctx.createOscillator();
-    lfo.type = 'square';
-    lfo.frequency.value = rate;
-    const depth = ctx.createGain();
-    depth.gain.value = 0.5;
-    lfo.connect(depth).connect(gain.gain);
-    lfo.start();
-  }
-  carrier.connect(fast).connect(slow).connect(into);
-  carrier.start();
-}
-
 interface Graph {
   ctx: AudioContext;
   master: GainNode;
   traffic: GainNode;
   crickets: GainNode;
+  /** Wanders the crickets' level so the recording never sounds like the same bar twice. */
+  texture: GainNode;
   hum: AudioBuffer;
   hiss: AudioBuffer;
 }
@@ -129,13 +120,15 @@ function build(ctx: AudioContext): Graph {
   const crickets = ctx.createGain();
   crickets.gain.value = 0;
   crickets.connect(master);
+  // The recording sits well under the traffic bed; it is a texture, not a feature.
   const level = ctx.createGain();
-  level.gain.value = 0.06;
+  level.gain.value = CRICKETS_LEVEL;
   level.connect(crickets);
-  cricket(ctx, level, 4300, 17, 1.3);
-  cricket(ctx, level, 4750, 14, 0.9);
+  const texture = ctx.createGain();
+  texture.gain.value = 1;
+  texture.connect(level);
 
-  return { ctx, master, traffic, crickets, hum, hiss: whiteNoise(ctx) };
+  return { ctx, master, traffic, crickets, texture, hum, hiss: whiteNoise(ctx) };
 }
 
 /** What the ambient sound needs to know about the page being on screen. */
@@ -156,6 +149,8 @@ const START_MS = 300;
 export function createSoundscape(
   open: ContextFactory = pageAudio,
   visibility: PageVisibility | null = pageVisibility(),
+  loadClip: ClipLoader = fetchCrickets,
+  random: () => number = Math.random,
 ): Soundscape {
   let graph: Graph | null = null;
   let on = false;
@@ -163,6 +158,38 @@ export function createSoundscape(
   let watching = false;
   let parked: ReturnType<typeof setTimeout> | undefined;
   let starting: Promise<boolean> = Promise.resolve(false);
+  let wander: ReturnType<typeof setTimeout> | undefined;
+  let heard = false;
+
+  // The recording loops from a random point, and its level drifts at random gaps, so a long night has no fixed beat.
+  const drift = (g: Graph) => {
+    const { gap, level } = nextSwell(random);
+    g.texture.gain.setTargetAtTime(level, g.ctx.currentTime, gap / 3);
+    wander = setTimeout(() => drift(g), gap * 1000);
+  };
+
+  const hear = (g: Graph) => {
+    if (heard) return;
+    heard = true;
+    loadClip(g.ctx).then(
+      (clip) => {
+        if (graph !== g) return;
+        const source = g.ctx.createBufferSource();
+        source.buffer = clip;
+        source.loop = true;
+        // A soft roll-off keeps the highest insects from glinting.
+        const soft = g.ctx.createBiquadFilter();
+        soft.type = 'lowpass';
+        soft.frequency.value = 6500;
+        source.connect(soft).connect(g.texture);
+        source.start(0, startOffset(random, clip.duration));
+      },
+      // No file, no crickets; the night is traffic and quiet, and the next `enable` tries again.
+      () => {
+        heard = false;
+      },
+    );
+  };
 
   const mix = () => {
     if (!graph || !on) return;
@@ -208,6 +235,9 @@ export function createSoundscape(
         watch();
         starting = resume(graph.ctx);
         on = true;
+        hear(graph);
+        clearTimeout(wander);
+        drift(graph);
         graph.master.gain.setTargetAtTime(MASTER, graph.ctx.currentTime, FADE);
         mix();
         return true;
@@ -215,12 +245,14 @@ export function createSoundscape(
         // The next attempt may do better, so nothing is remembered about this one.
         graph = null;
         on = false;
+        heard = false;
         return false;
       }
     },
     settled: () => starting,
     disable() {
       on = false;
+      clearTimeout(wander);
       if (!graph) return;
       const { ctx, master } = graph;
       try {
