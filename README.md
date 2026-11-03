@@ -155,10 +155,11 @@ short note saying why, when:
   by default, who cannot build; `/?as=mayor#harbor` signs in as `mayor`, who can. The `?as` parameter only picks which
   login the stand-in gives you. It grants nothing, and a real provider ignores it. A tab that already holds a token for
   another user drops it and signs in again as the user `?as` names, so a duplicated or Cmd-clicked tab works. With a
-  real provider the page names the role instead, such as `metro-harbor-build`, which the city's administrator grants;
+  real provider the page names the build role instead, such as `role:metro-harbor-build`, which the city's administrator grants;
 - the city is not running. The dev stack holds `lakeside` and `pier` back until you start them, and a city whose sim
-  has not ticked has nothing to build in. The page says `Pier is not running. Start it with dev/city.sh pier.` Run
-  that from the repo root ([Run it locally](#run-it-locally) explains the held-back cities);
+  has not ticked has nothing to build in. The page says `Pier is not running. Start it with dev/city.sh pier
+(./city.sh pier in the release bundle).` Run that from the repo root or the bundle's folder ([Run it
+  locally](#run-it-locally) explains the held-back cities);
 - the connection to the city is down.
 
 The tools do not exist under `?ui=0` or `?capture`. Zones are not built yet, since a zone has no record in the log;

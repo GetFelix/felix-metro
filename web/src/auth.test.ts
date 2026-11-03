@@ -71,6 +71,7 @@ describe('subjectOf', () => {
     expect(subjectOf(token({ sub: 'mayor' }))).toBe('mayor');
     expect(subjectOf(token({}))).toBeNull();
     expect(subjectOf('nonsense')).toBeNull();
+    expect(subjectOf(`h.${btoa(String.fromCharCode(...new TextEncoder().encode('{"sub":"José"}')))}.s`)).toBe('José');
   });
 });
 
@@ -79,8 +80,8 @@ describe('signIn with a token the tab already holds', () => {
   const sent: string[] = [];
 
   /** A tab on `search` that holds `held`, signing in at `issuer`. */
-  const tab = (search: string, held: string | null, issuer: string) => {
-    store.clear();
+  const tab = (search: string, held: string | null, issuer: string, keep = false) => {
+    if (!keep) store.clear();
     sent.length = 0;
     if (held) store.set('metro.token', held);
     vi.stubGlobal('sessionStorage', {
@@ -123,6 +124,12 @@ describe('signIn with a token the tab already holds', () => {
     await vi.waitFor(() => expect(sent).toHaveLength(1));
     expect(new URL(sent[0]!).searchParams.get('sub')).toBe('mayor');
     expect(store.has('metro.token')).toBe(false);
+  });
+
+  it('does not ask again when the provider answered a different user than asked for', async () => {
+    store.set('metro.asked', 'mayor');
+    expect(await tab('?as=mayor', viewer, oidc.issuer, true)).toBe(viewer);
+    expect(sent).toEqual([]);
   });
 
   it('ignores ?as with a real provider', async () => {

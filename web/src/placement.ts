@@ -113,7 +113,7 @@ const SENDING = 'Sending…';
 const WAITING = 'Waiting for the city…';
 
 /** The role that may build in a city, as the dev stack's seed names it. A fork has the role of the city it began from. */
-const buildRole = (city: string) => `metro-${city.split(/[_~]/)[0]}-build`;
+const buildRole = (city: string) => `role:metro-${city.split(/[_~]/)[0]}-build`;
 
 /** The words `watchOnly` links, when it links anything. */
 export const FIX_LABEL = `?as=${BUILDER}`;
@@ -123,12 +123,13 @@ export function watchOnly(who: SignedIn): string {
   const first = `Signed in as ${who.user}, who can only watch.`;
   return who.standIn
     ? `${first} Open ${FIX_LABEL} in a new tab to build.`
-    : `${first} Building here needs the ${buildRole(who.city)} role.`;
+    : `${first} Building here needs the build role, ${buildRole(who.city)}.`;
 }
 
 /** What to do about a city the sim has not started. */
 export function notRunning(city: string): string {
-  return `${displayName(city)} is not running. Start it with dev/city.sh ${city}.`;
+  const name = city.replaceAll('_', '~');
+  return `${displayName(name)} is not running. Start it with dev/city.sh ${name} (./city.sh ${name} in the release bundle).`;
 }
 
 /** Why the tools are not usable now, in plain words, or null when they are. */

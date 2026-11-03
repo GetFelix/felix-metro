@@ -6,6 +6,7 @@ import { GatewayError } from './gateway';
 import {
   ANSWER_MS,
   Placement,
+  notRunning,
   whyNot,
   type Blocked,
   type CommandLink,
@@ -75,10 +76,16 @@ describe('when the tools can be used', () => {
     const real: SignedIn = { user: 'Ana', standIn: false, city: 'harbor_bridge-closed' };
     const link = { name: 'Ana', signedIn: real, blocked: () => 'viewer' as Blocked | null, send: async () => {} };
     expect(whyNot({ ...base, link })).toBe(
-      'Signed in as Ana, who can only watch. Building here needs the metro-harbor-build role.',
+      'Signed in as Ana, who can only watch. Building here needs the build role, role:metro-harbor-build.',
     );
     const { placement } = setup({ link });
     expect(placement.fix()).toBeNull();
+  });
+
+  it('names a fork by its lineage in the command to start it', () => {
+    expect(notRunning('harbor_bridge')).toBe(
+      'Harbor~bridge is not running. Start it with dev/city.sh harbor~bridge (./city.sh harbor~bridge in the release bundle).',
+    );
   });
 
   it('links ?as=mayor only on the stand-in', () => {
@@ -93,7 +100,9 @@ describe('when the tools can be used', () => {
       blocked: () => 'idle' as Blocked | null,
       send: async () => {},
     };
-    expect(whyNot({ ...base, link })).toBe('Pier is not running. Start it with dev/city.sh pier.');
+    expect(whyNot({ ...base, link })).toBe(
+      'Pier is not running. Start it with dev/city.sh pier (./city.sh pier in the release bundle).',
+    );
   });
 
   it('will not pick a tool while blocked, and puts it away if the page leaves the tip', () => {

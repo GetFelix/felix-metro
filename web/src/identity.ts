@@ -12,7 +12,10 @@ export function isStandIn(issuer: string): boolean {
 /** The `sub` claim of an ID token, or `null` when it has none. */
 export function subjectOf(token: string): string | null {
   try {
-    const claims = JSON.parse(atob(token.split('.')[1]!.replace(/-/g, '+').replace(/_/g, '/')));
+    const bytes = Uint8Array.from(atob(token.split('.')[1]!.replace(/-/g, '+').replace(/_/g, '/')), (c) =>
+      c.charCodeAt(0),
+    );
+    const claims = JSON.parse(new TextDecoder().decode(bytes));
     return typeof claims.sub === 'string' ? claims.sub : null;
   } catch {
     return null;

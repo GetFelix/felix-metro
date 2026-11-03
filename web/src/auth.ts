@@ -16,6 +16,8 @@ interface Discovery {
 
 const TOKEN_KEY = 'metro.token';
 const FLOW_KEY = 'metro.auth';
+/** Whom the sign-in that produced the held token asked for with `?as`, so a provider that answers otherwise is not asked again. */
+const ASKED_KEY = 'metro.asked';
 
 const b64url = (bytes: Uint8Array) =>
   btoa(String.fromCharCode(...bytes))
@@ -114,7 +116,7 @@ function remembered(oidc: Oidc): string | null {
     const token = sessionStorage.getItem(TOKEN_KEY);
     if (!token || expiry(token) <= Date.now() + 60_000) return null;
     const asked = askedFor(location.search);
-    if (asked && isStandIn(oidc.issuer) && subjectOf(token) !== asked) {
+    if (asked && isStandIn(oidc.issuer) && subjectOf(token) !== asked && sessionStorage.getItem(ASKED_KEY) !== asked) {
       sessionStorage.removeItem(TOKEN_KEY);
       return null;
     }
@@ -162,6 +164,7 @@ export async function signIn(oidc: Oidc): Promise<string> {
     if (!response.ok) throw new Error(`sign-in failed: ${response.status}`);
     const token = String((await response.json()).id_token);
     sessionStorage.setItem(TOKEN_KEY, token);
+    sessionStorage.setItem(ASKED_KEY, askedFor(flow.search) ?? '');
     history.replaceState(null, '', redirectUri + flow.search + flow.hash);
     return token;
   }
