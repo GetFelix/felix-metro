@@ -104,6 +104,36 @@ setInterval(async () => {
 }, 15_000).unref();
 
 /**
+ * Software WebGL draws every page on one GPU process, and a page that is drawing keeps a loading one from ever drawing.
+ * So the open pages park their frames while another loads. They stay signed in and live.
+ */
+const parkFrames = () => {
+  const real = window.requestAnimationFrame.bind(window);
+  const parked = [];
+  let held = false;
+  window.requestAnimationFrame = (cb) => (held ? (parked.push(cb), 0) : real(cb));
+  window.__holdFrames = (on) => {
+    held = on;
+    if (!on) for (const cb of parked.splice(0)) real(cb);
+  };
+};
+const holdFrames = (on) =>
+  Promise.all(
+    pages.map((page) =>
+      within(
+        5000,
+        page
+          .evaluate((h) => window.__holdFrames(h), on)
+          .then(
+            () => true,
+            () => true,
+          ),
+        null,
+      ).then((done) => done ?? console.log(`${page.label}: frames not ${on ? 'parked' : 'released'} in 5 s`)),
+    ),
+  );
+
+/**
  * A page signed in as `who`, once its city is drawn and the live connection has caught up. A page that does not get
  * there in READY_MS is thrown away and opened again; a page that is really broken fails every try, and the failure says
  * what the page was doing. The deadline is ours, not Playwright's: on CI a renderer has hung outright (its connection
@@ -113,6 +143,7 @@ const READY_MS = 120_000;
 const OPEN_TRIES = 3;
 async function open(name, who, options = {}) {
   for (let attempt = 1; ; attempt++) {
+    await holdFrames(true);
     const started = Date.now();
     progress(`opening ${name}`);
     let context = null;
@@ -124,6 +155,7 @@ async function open(name, who, options = {}) {
       context = mine;
       if (dead) return mine.close().then(() => 'abandoned');
       await mine.addInitScript((t) => sessionStorage.setItem('metro.token', t), who);
+      await mine.addInitScript(parkFrames);
       const tab = await mine.newPage();
       page = tab;
       if (dead) return mine.close().then(() => 'abandoned');
@@ -147,6 +179,7 @@ async function open(name, who, options = {}) {
     );
     if (why !== null) dead = true;
     if (why === null) {
+      await holdFrames(false);
       progress(`opened ${name}`);
       console.log(`opened ${name} in ${Date.now() - started} ms${attempt > 1 ? ` (try ${attempt})` : ''}`);
       pages.push(page);
@@ -282,11 +315,9 @@ async function answer(page, before) {
 }
 
 // 2. Two builders. Pick two bare lots in the development area from what A sees.
-// Opened together: a page that is already drawing starves one still loading (50 s against about 10 s).
-const [a, b] = await Promise.all([
-  open('A (mayor, mouse)', mayor),
-  open('B (architect, touch)', architect, { hasTouch: true }),
-]);
+// One after the other, so the first is parked while the second loads.
+const b = await open('B (architect, touch)', architect, { hasTouch: true });
+const a = await open('A (mayor, mouse)', mayor);
 for (const { page } of [a, b]) {
   await until(page, () => window.__build.state().unavailable === null, null, 'the builder was never allowed');
 }
