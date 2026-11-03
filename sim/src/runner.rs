@@ -13,8 +13,9 @@ use tokio::task::JoinSet;
 use tokio::time::{Instant, MissedTickBehavior};
 use tracing::{info, warn};
 
-use crate::commands::{Incoming, MAX_HELD, MAX_PER_TICK, MAX_REFUSED, apply_all, refuse_busy};
+use crate::commands::{Incoming, MAX_HELD, MAX_PER_TICK, MAX_REFUSED, apply_all_with, refuse_busy};
 use crate::control::check_speed;
+use crate::fork::{ForkGate, Forks, forked_in};
 use crate::latency::Window;
 use crate::markers::{self, Marked, Today};
 use crate::resume::{History, LOOKBACK, read_history, retrying};
@@ -112,6 +113,9 @@ pub struct Settings {
     /// say when the city went live. The runner clears it, also when there is
     /// no warm-up to do.
     pub warming: Option<watch::Sender<bool>>,
+    /// What lets the city carry out a `fork` command. Without it the command
+    /// is refused as unsupported.
+    pub forks: Option<Forks>,
 }
 
 impl Default for Settings {
@@ -130,6 +134,7 @@ impl Default for Settings {
             max_permanent: 30,
             warmup_ticks: 0,
             warming: None,
+            forks: None,
         }
     }
 }
@@ -265,6 +270,10 @@ pub async fn run_with_history<L: Log>(
     };
     let mut queue: VecDeque<Incoming> = VecDeque::new();
     let mut refused: VecDeque<Incoming> = VecDeque::new();
+    if let (Some(forks), Some(history)) = (&settings.forks, &history) {
+        // Forks the log says were made may not have been finished before the sim stopped.
+        forks.resume(name, world.city.districts_per_side, history.forks());
+    }
     if let Some(history) = &history {
         for tick in history.unfinished() {
             let (at, changed) = history.speed_at(tick);
@@ -280,7 +289,18 @@ pub async fn run_with_history<L: Log>(
             let said = history.cursor_event(tick);
             cursor = said.or(cursor);
             let mut wanted = at;
-            let commanded = apply_all(&mut world, incoming, &mut wanted);
+            let districts = world.districts();
+            let fork_gate = ForkGate::of(
+                settings.forks.as_ref(),
+                name,
+                &log,
+                districts,
+                retry,
+                &incoming,
+            )
+            .await?;
+            let commanded = apply_all_with(&mut world, incoming, &mut wanted, fork_gate);
+            let forked = forked_in(&commanded[0]);
             let marked = mark(&mut today, tick, &commanded)?;
             let step = world.step();
             let tick_retries = commit_tick(
@@ -302,6 +322,9 @@ pub async fn run_with_history<L: Log>(
             )
             .await?;
             retries += tick_retries;
+            if let Some(forks) = &settings.forks {
+                forks.resume(name, world.city.districts_per_side, forked);
+            }
         }
         info!(
             city = name,
@@ -405,7 +428,17 @@ pub async fn run_with_history<L: Log>(
         let taken: Vec<Incoming> = queue.drain(..queue.len().min(MAX_PER_TICK)).collect();
         let room = MAX_PER_TICK - taken.len();
         let mut moved = advance(&mut cursor, &taken);
-        let mut commanded = apply_all(&mut world, taken, &mut wanted);
+        let districts = world.districts();
+        let fork_gate = ForkGate::of(
+            settings.forks.as_ref(),
+            name,
+            &log,
+            districts,
+            retry,
+            &taken,
+        )
+        .await?;
+        let mut commanded = apply_all_with(&mut world, taken, &mut wanted, fork_gate);
         // Commands the paused city had no room for are refused once its queue is clear.
         if queue.is_empty() {
             let busy: Vec<Incoming> = refused.drain(..refused.len().min(room)).collect();
@@ -433,6 +466,7 @@ pub async fn run_with_history<L: Log>(
             timer.tick().await;
         }
         let started = Instant::now();
+        let forked = forked_in(&commanded[0]);
         let marked = mark(&mut today, tick, &commanded)?;
         let step = world.step();
         let keyframe = step[0].keyframe.is_some();
@@ -456,6 +490,10 @@ pub async fn run_with_history<L: Log>(
         .await?;
         retries += attempts;
         report.retried += attempts;
+        // Handed over once the tick that records them is in every district.
+        if let Some(forks) = &settings.forks {
+            forks.resume(name, world.city.districts_per_side, forked);
+        }
         parked = speed == 0;
         let took = started.elapsed();
         report.latency.record(took);
@@ -827,7 +865,7 @@ fn is_permanent(err: &anyhow::Error) -> bool {
 }
 
 /// Sends `bytes` until the log has it, and returns how many sends that took.
-async fn commit_until_written<L: Log>(
+pub(crate) async fn commit_until_written<L: Log>(
     log: &L,
     district: u16,
     expected: u64,

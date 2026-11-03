@@ -58,6 +58,20 @@ fn generation_is_deterministic() {
 }
 
 #[test]
+fn a_fork_has_its_parents_layout() {
+    let parent = City::generate("pinecrest", 2).unwrap();
+    for fork in ["pinecrest~bridge", "pinecrest~bridge~night"] {
+        let city = City::generate(fork, 2).unwrap();
+        assert_eq!(city.hash(), parent.hash(), "{fork}");
+        assert_eq!(city.seed, "pinecrest");
+    }
+    assert_ne!(
+        City::generate("lakeside~bridge", 2).unwrap().hash(),
+        parent.hash()
+    );
+}
+
+#[test]
 fn seeds_are_restricted() {
     for ok in [
         "harbor",

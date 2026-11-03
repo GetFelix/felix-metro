@@ -294,6 +294,22 @@ node scripts/check-traffic.mjs http://127.0.0.1:4173/traffic-load.html high 0,10
 
 It is a dev page, built into `dist` next to `models.html` and `construction.html`, and nothing links to it.
 
+To measure on a real GPU, open the page in a browser and keep it drawing with `?run=1`. It writes the frame rate, the
+draw calls and the triangles over the city twice a second. `?districts=4` makes the city 4 by 4 districts (the 16 of the
+scale goal), `?tier=medium` forces the tier, and `?cap=tier` holds the movers drawn to the tier's cap as the live page
+does; without it every mover asked for is drawn. About 5,400 movers is the rush hour of 20,000 residents, scaled from the
+harbor city's 70 cars and 70 walkers for 522 residents (`?n=5400`).
+
+```
+cd web && npm run build && npx vite preview --port 4173
+# then open http://127.0.0.1:4173/traffic-load.html?run=1&districts=4&tier=medium&n=5400
+```
+
+The frame rate is capped by the display's refresh rate. A 16 district city at medium, with 160 movers, was 17,108 draw
+calls and 9.3 million triangles on SwiftShader. A 2 by 2 city with no movers was 4,274 calls (the table below, from an
+earlier build, has 4,240), and 160 movers add about 150. What is left to cut at scale is the static city, which is
+placed one model at a time, and not the cars and walkers, whose cost is flat.
+
 The numbers below are in headless Chromium on SwiftShader, which draws with the CPU, at 1280 by 720, on an Apple M4 Max
 shared with other jobs. Draw calls are exact. "Submit" is the median ms over 20 frames the page spent in its own code
 and in WebGL calls, which is what draw calls cost on a real GPU. "Frame" waits for SwiftShader to finish drawing, which
@@ -367,7 +383,7 @@ choice through `setTier()`. Choosing Automatic there calls `setAutomatic()`,
 which forgets the saved tier and judges frame times again from high. Automatic
 choices are not saved: a slow first load should not pin a device to low for good.
 
-`?hud` shows the median and 95th percentile frame time over the last 120
+`?hud` shows the frame rate, the median and 95th percentile frame time over the last 120
 frames, draw calls and triangles for the last frame, and the tier with whether
 it was chosen automatically, forced, or fixed because the scene is frozen.
 `?slow=40` adds 40 ms to every frame so CI can exercise the step-down.

@@ -8,7 +8,12 @@ const SHARED: Record<string, string> = {
   assets: fileURLToPath(new URL('../prototype/assets/', import.meta.url)),
   brand: fileURLToPath(new URL('../docs/brand/', import.meta.url)),
 };
-const TYPES: Record<string, string> = { '.glb': 'model/gltf-binary', '.png': 'image/png', '.md': 'text/markdown' };
+const TYPES: Record<string, string> = {
+  '.glb': 'model/gltf-binary',
+  '.png': 'image/png',
+  '.ogg': 'audio/ogg',
+  '.md': 'text/markdown',
+};
 
 // Served from the repo in dev, copied into dist for build and preview.
 function sharedAssets(): Plugin {

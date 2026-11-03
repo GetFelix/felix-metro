@@ -88,6 +88,19 @@ pub const REFUSED_ROAD_EXISTS: u8 = 24;
 pub const REFUSED_ROAD_BLOCKED: u8 = 25;
 /// `remove road` of a segment that is generated or already removed.
 pub const REFUSED_NOT_BUILT: u8 = 26;
+/// `fork` with a name that is not 1 to 32 of `a-z`, `0-9` and `-`.
+pub const REFUSED_FORK_NAME: u8 = 16;
+/// `fork` whose lineage name `<parent>~<name>` is longer than a name can be.
+pub const REFUSED_FORK_TOO_DEEP: u8 = 17;
+/// `fork` at a tick the city has not committed yet.
+pub const REFUSED_FORK_TICK: u8 = 18;
+/// `fork` of a name the parent already has a fork of.
+pub const REFUSED_FORK_EXISTS: u8 = 19;
+/// `fork` of a city whose log no longer holds its first records, which a fork
+/// copies from.
+pub const REFUSED_FORK_TRIMMED: u8 = 20;
+/// `fork` of a city whose root already has the most forks the sim allows.
+pub const REFUSED_FORK_LIMIT: u8 = 21;
 
 /// `policy` command result: the same policy changed less than a cooldown ago.
 pub const REFUSED_COOLDOWN: u8 = 11;
@@ -336,6 +349,15 @@ pub enum Event {
     Balance {
         amount: i64,
     },
+    /// The city was forked: a new city named `name` is made from this one's
+    /// history through `tick`. Written in district 0 of the tick that applied
+    /// the command, which is what a restarted sim finds a half-made fork by.
+    Forked {
+        tick: u32,
+        name: String,
+        /// [`principal_hash`] of who sent the command.
+        principal: u64,
+    },
     /// Where the council's factions stand, written by district 0 on every
     /// keyframe tick. `days` is how many city days have been scored; until the
     /// first one is, the standings are not real. `tally` is the open day's
@@ -524,6 +546,8 @@ pub enum RegistryRecord {
         parent: String,
         tick: u32,
         wall_us: u64,
+        /// [`principal_hash`] of who forked it.
+        principal: u64,
     },
 }
 

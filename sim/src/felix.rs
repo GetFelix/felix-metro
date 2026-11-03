@@ -76,7 +76,7 @@ async fn resolve(brokers: &[String]) -> Result<Vec<SocketAddr>> {
 
 /// The name of a city's event stream.
 pub fn events_stream(city: &str) -> String {
-    format!("metro.events.{city}")
+    format!("metro.events.{}", crate::fork::felix_name(city))
 }
 
 /// The entity key a district's commits carry. With an explicit shard it only

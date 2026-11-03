@@ -1,1 +1,0 @@
-- The placement check taps a touch demolish again when a slow runner lets the first tap's pick lapse, instead of waiting two minutes for an answer to a command that was never sent.

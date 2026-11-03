@@ -114,12 +114,15 @@ The page has an optional ambient sound. It is off until you turn it on: nothing 
 - Click the speaker button under the clock, or press `M`, to turn it on or off. The button shows a cross while the
   sound is off. Your choice is kept in this browser. Browsers only let a page make sound after a click or key press, so
   if you left it on, it starts again at your first click or key press on the next visit.
-- By day you hear traffic. As the lamps come on it fades into crickets, and back again at dawn. The mix follows the
-  city's clock, so it changes when you go back in time too.
+- By day you hear traffic. As the lamps come on it fades into a quiet field recording of crickets, and back again at
+  dawn. The mix follows the city's clock, so it changes when you go back in time too. The crickets drift a little
+  louder and softer at irregular moments and start from a different point each time the page is loaded, so nothing repeats on a beat.
 - Going back in time, with `J` or by dragging the timeline into the past, plays a short whoosh.
 - If the browser has no audio or blocks it, the button stays off and a short note says so.
 
-The sound is made in the browser with the Web Audio API, so there are no audio files to download. The button is not
+Traffic and the whoosh are made in the browser with the Web Audio API. The crickets are one 190 KB Ogg recording
+(CC0, credited in [prototype/assets/CREDITS.md](prototype/assets/CREDITS.md)) that the page downloads the first time
+you turn the sound on. If it cannot be loaded or your browser cannot play Ogg Opus, the night is traffic and quiet. The button is not
 shown with `?ui=0` or `?capture`. [docs/ui.md](docs/ui.md#sound) explains how it works.
 
 ## Building
@@ -187,16 +190,16 @@ refused in the page with its reason, and the architect takes it away with two ta
 
 ## Status
 
-| M   | Milestone           | State                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| --- | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 0   | The look, locked    | In progress: style frame, assets, daylight, post-processing, quality tiers, the UI shell (settings sheet, key list, first-visit hint, rolling clock), camera controls, instanced traffic and ambient life done                                                                                                                                                                                                                                                                                                                                                    |
-| 1   | A live city         | Done                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| 2   | Time travel         | In progress: keyframes, seeking, the timeline scrubber and its markers for rush hours and builds, rewind then follow, and backward playback with speeds built, smoothness not yet measured                                                                                                                                                                                                                                                                                                                                                                        |
-| 3   | Follow a life       | In progress: click a car or walker to follow them, with a card for their day read from the log and a `?follow=` link; ambient sound built; city stats at any tick built                                                                                                                                                                                                                                                                                                                                                                                           |
-| 4   | Build               | In progress: the sim applies build, demolish and speed commands and records who sent them, and the page animates a building going up (scaffold) or coming down (dust) over 8 ticks, backwards when you rewind; build, demolish and road tools in the page; roads with replanning; zones are not built yet                                                                                                                                                                                                                                                         |
-| 5   | Branching timelines | Planned                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| 6   | Scale and failover  | In progress: a restarted sim resumes from its log; 20,000 residents, 16 districts and broker loss are open                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| 7   | Self-hosting        | Planned                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| M   | Milestone           | State                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| --- | ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0   | The look, locked    | In progress: style frame, assets, daylight, post-processing, quality tiers, the UI shell (settings sheet, key list, first-visit hint, rolling clock), camera controls, instanced traffic and ambient life done                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| 1   | A live city         | Done                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| 2   | Time travel         | In progress: keyframes, seeking, the timeline scrubber and its markers for rush hours and builds, rewind then follow, and backward playback with speeds built, smoothness not yet measured                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| 3   | Follow a life       | In progress: click a car or walker to follow them, with a card for their day read from the log and a `?follow=` link; ambient sound built; city stats at any tick built                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| 4   | Build               | In progress: the sim applies build, demolish and speed commands and records who sent them, and the page animates a building going up (scaffold) or coming down (dust) over 8 ticks, backwards when you rewind; build, demolish and road tools in the page; roads with replanning; zones are not built yet                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| 5   | Branching timelines | In progress: the sim forks a city at a past tick with a `fork` command, the fork copies the parent's history and runs on its own; the page's way to fork and compare is not built yet                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| 6   | Scale and failover  | In progress: a restarted sim resumes from its log. The page has a mode for measuring the frame rate over 16 districts on a real GPU (see [docs/art.md](docs/art.md#what-it-costs)); no frame rate has been recorded yet. 20,000 residents and broker loss are open                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| 7   | Self-hosting        | Planned                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | 8   | A first chapter     | In progress: the sim resumes from its log after a restart (nothing built is lost, no tick repeated or missing, commands run once); the city has funds (taxes and upkeep each day, a price on building, shown on the page, also for the moment you scrub to); the council's three factions are scored each city day and shown with their demands and a recall countdown; the mayor can set shop hours and speed limits for avenues and streets, each once a city day (a `policy` command); the first chapter, `pier`, opens with slow speed limits and lists its goals under the council (see [docs/game.md](docs/game.md)); the first case file, `ember`, is a city nobody can command with one question about its first day, answered in the council's Case section |
 
 What runs today: the sim, which picks up where it left off after a restart, the dev stack and a browser page that shows a city live, with
@@ -210,6 +213,23 @@ A city the gateway refuses (a misspelled name, or no access) shows a message ins
 retrying. The city name in the top left opens a list of every city. The clock's digits roll as time moves, the button under it opens the settings sheet, and the `?` key opens the key list. The page's
 own [building tools](#building) place and demolish buildings; a command published to the city's command stream by any client with a
 builder's token is applied by the sim and shows up in the page, rising over 8 ticks of city time inside a scaffold (a demolished building scales down in a puff of dust). Rewind through it and it comes down again; the low quality tier skips the scaffold and the dust.
+
+## Forking a city
+
+A builder can fork a city at any tick it has already run. The fork is a new city named after its parent
+(`harbor~bridge-closed`) that starts as a copy of the parent's whole history up to that tick, then ticks on by itself:
+what is built in one never appears in the other. Everyone who can watch or build in the parent can in the fork. The
+page has no button for it yet; the sim side is done and `fork` is a command like `build`:
+
+```sh
+node dev/check-fork.mjs pinecrest
+```
+
+That forks `pinecrest` through the gateway, waits for the fork to be listed, and checks that the fork holds the parent's
+history, runs on, and is independent. A fork is joined at the gateway as `pinecrest_<name>`, because the gateway allows
+no `~` in a name. How it works, and the new result codes 16 to 21, are in
+[docs/design.md](docs/design.md#branching). The sim makes a fork's streams through a provisioner service the
+deployment runs (`SIM_FORK_PROVISION_URL`); the dev stack has one.
 
 ## Ambient life
 
@@ -331,15 +351,15 @@ that pulls the published images instead of building them. You need Docker or Pod
 described below. The compose bundle runs Felix 0.6.2.
 
 ```sh
-curl -fsSL https://github.com/GetFelix/felix-metro/releases/download/v0.2.2/felix-metro-compose-0.2.2.tar.gz | tar xz
-cd felix-metro-compose-0.2.2
+curl -fsSL https://github.com/GetFelix/felix-metro/releases/download/v0.2.3/felix-metro-compose-0.2.3.tar.gz | tar xz
+cd felix-metro-compose-0.2.3
 ./up.sh
 ```
 
 It starts the same stack as `dev/up.sh` and returns once the cities are serving. The web
 app is at <http://127.0.0.1:8088>. `./speed.sh` and `./city.sh` work as the `dev/` ones
 do. `SHA256SUMS` on the release lists a checksum for each download, and
-`felix-metro-web-v0.2.2.tar.gz` is the built web app alone.
+`felix-metro-web-v0.2.3.tar.gz` is the built web app alone.
 
 ## Run it locally
 
@@ -380,10 +400,6 @@ and unlisted until you start it:
 ```sh
 dev/city.sh lakeside
 ```
-
-`ember` is held back the same way. It is a case file: nobody can build or set a policy there, and the council has a Case
-section asking for the busiest street, hour and purpose of the first day's rush. Start it with `dev/city.sh ember` and
-open `/#ember` (see [docs/game.md](docs/game.md#a-case-file)).
 
 `pier` is held back the same way. It is the first chapter: it opens with slow speed limits, the council lists its
 goals, and it starts at its first tick so the three days to meet them are yours. Start it with `dev/city.sh pier`,
@@ -528,8 +544,9 @@ dev/speed.sh harbor      # show it
 
 `dev/seed.mjs` sets up the tenant, each city's streams and `lobby`, and the roles that
 `viewer` (watch) and `mayor` (watch and build) sign in with. `METRO_BUILDERS=mayor,architect dev/up.sh` makes a
-second sign-in a builder too, which CI uses to test two builders at once. `sim/ci/` runs the same
-seed against a broker for the sim's integration test.
+second sign-in a builder too, which CI uses to test two builders at once. `dev/provision.mjs` runs as the
+`provisioner` service and makes the streams of a fork, with the roles of the city it came from.
+`sim/ci/` runs the same seed against a broker for the sim's integration test.
 
 ## Documentation
 

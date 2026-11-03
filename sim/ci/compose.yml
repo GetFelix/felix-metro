@@ -47,6 +47,7 @@ services:
       METRO_CITIES: harbor:4,speedway:4,phoenix:4
     volumes:
       - ../../dev/seed.mjs:/app/seed.mjs:ro
+      - ../../dev/lib:/app/lib:ro
       - ./state:/state
     depends_on:
       controlplane:
