@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Journey, Voyage } from './city';
-import { LANE, PAVEMENT, Traffic, poseBetween, type Fleet } from './traffic';
+import { DOOR_SETBACK, LANE, PAVEMENT, Traffic, doorEase, poseBetween, type Fleet } from './traffic';
 
 describe('poseBetween', () => {
   it('moves along the way and faces it', () => {
@@ -192,10 +192,14 @@ describe('Traffic', () => {
     expect(traffic.drawn).toBe(1);
   });
 
-  // A road along z = 0; lot 0 is a tile to its north, lot 1 a tile to its south, both at x = 5.
+  // A road along z = 0. Lots 0 and 1 are a tile to its north and south at the west end, 2 and 3 the same at x = 10, and
+  // 4 is a north lot at x = 30. A trip's ends are the lots beside where it starts and stops.
   const lots = [
-    { x: 5, z: -1 },
-    { x: 5, z: 1 },
+    { x: 0, z: -1 },
+    { x: 0, z: 1 },
+    { x: 10, z: -1 },
+    { x: 10, z: 1 },
+    { x: 30, z: -1 },
   ];
   const trip = (from: number, to: number, ends: [number, number], vehicle = 2): Voyage => ({
     resident: 1,
@@ -209,28 +213,29 @@ describe('Traffic', () => {
     return { x: placed[0]!.x, z: placed[0]!.z, scale: placed[0]!.size, vehicle };
   };
 
-  it('turns onto the lot it leaves and the lot it enters, whichever side of the road that is', () => {
+  it('walks up to the door of the lot it leaves and the lot it enters, whichever side of the road that is', () => {
     for (const vehicle of [2, 0]) {
       for (const [ends, side] of [
-        [[0, 1], -1],
-        [[1, 0], 1],
+        [[0, 3], -1],
+        [[1, 2], 1],
       ] as const) {
         // Leaves lot ends[0], arrives at lot ends[1]: the other side of the road.
         const start = drawn(trip(0, 10, [...ends], vehicle), 0.01);
-        expect(start.z).toBeCloseTo(side, 1);
-        expect(start.scale).toBeLessThan(0.05);
+        // The door is the lot's near edge, half a tile from its middle; full size all the way there.
+        expect(start.z).toBeCloseTo(side * DOOR_SETBACK, 1);
+        expect(start.scale).toBe(1);
         const end = drawn(trip(0, 10, [...ends], vehicle), 9.99);
-        expect(end.z).toBeCloseTo(-side, 1);
-        expect(end.scale).toBeLessThan(0.05);
+        expect(end.z).toBeCloseTo(-side * DOOR_SETBACK, 1);
+        expect(end.scale).toBe(1);
       }
     }
   });
 
   it('turns in on the same side at both ends of a round trip on one lot', () => {
     const out = drawn(trip(0, 10, [0, 0]), 0.01);
-    const back = drawn(trip(20, 30, [0, 0]), 29.99);
-    expect(out.z).toBeCloseTo(-1, 1);
-    expect(back.z).toBeCloseTo(-1, 1);
+    const back = drawn(trip(20, 30, [0, 4]), 29.99);
+    expect(out.z).toBeCloseTo(-DOOR_SETBACK, 1);
+    expect(back.z).toBeCloseTo(-DOOR_SETBACK, 1);
   });
 
   it('drives in its lane mid-trip and walks on the pavement', () => {
@@ -349,5 +354,82 @@ describe('Traffic', () => {
     const traffic = new Traffic(f, 5);
     traffic.update(5, 0, [voyage(1, 1, 0, 10)]);
     expect(traffic.where()[0]!.x).toBeCloseTo(0);
+  });
+});
+
+describe('arriving and leaving', () => {
+  const lots = [
+    { x: 0, z: -1 },
+    { x: 10, z: 1 },
+    { x: 20, z: 1 },
+  ];
+  const withLots = (v: Voyage, ends: [number, number]): Voyage => ({
+    ...v,
+    journey: { ...v.journey, lots: (out) => ((out[0] = ends[0]), (out[1] = ends[1])) },
+  });
+
+  it('eases to the door and back without a jump, and stays at full size', () => {
+    for (const vehicle of [2, 0]) {
+      const v = withLots(voyage(1, vehicle, 0, 10), [0, 1]);
+      let last: { x: number; z: number } | null = null;
+      for (let tick = 8.5; tick < 10; tick += 0.05) {
+        const { f, placed } = fleet();
+        new Traffic(f, 0, lots).update(tick, 0, [v]);
+        const p = placed[0]!;
+        expect(p.size).toBe(1);
+        // Never inside the lot, and never more than a car's length from where it was a frame (50 ms at 4 ticks/s) before.
+        expect(Math.abs(p.z - lots[1]!.z)).toBeGreaterThanOrEqual(DOOR_SETBACK - 1e-6);
+        if (last) expect(Math.hypot(p.x - last.x, p.z - last.z)).toBeLessThan(0.2);
+        last = p;
+      }
+    }
+  });
+
+  it('eases smoothly from 0 on the road to 1 at the door', () => {
+    expect(doorEase(0, 0, 10)).toBe(1);
+    expect(doorEase(5, 0, 10)).toBe(0);
+    expect(doorEase(10, 0, 10)).toBe(1);
+    const mid = doorEase(0.5, 0, 10);
+    expect(mid).toBeGreaterThan(0);
+    expect(mid).toBeLessThan(1);
+  });
+
+  it('stops drawing a trip the moment it arrives, and hands its place to the next one', () => {
+    const { f, placed } = fleet();
+    const traffic = new Traffic(f, 0, lots);
+    const first = withLots(voyage(7, 2, 0, 10), [0, 1]);
+    const second = withLots(voyage(7, 2, 20, 30), [2, 0]);
+    traffic.update(9.99, 0, [first]);
+    expect(placed).toHaveLength(1);
+    traffic.update(10, 0, [first]);
+    expect(placed).toHaveLength(0);
+    expect(traffic.drawn).toBe(0);
+    // The same resident's next trip starts at its own door, not where the last one ended.
+    traffic.update(20.01, 0, [first, second]);
+    expect(placed).toHaveLength(1);
+    expect(placed[0]!.z).toBeCloseTo(DOOR_SETBACK, 1);
+    expect(placed[0]!.x).toBeCloseTo(20, 1);
+  });
+
+  it('draws the others where they would be alone when one arrives', () => {
+    // A car is placed under its vehicle kind and a walker under its resident, so the three are told apart by those.
+    const a = withLots(voyage(1, 1, 0, 10), [0, 1]);
+    const b = withLots(voyage(2, 2, 0, 20), [0, 1]);
+    const c = withLots(voyage(3, 0, 0, 20), [1, 0]);
+    const idOf = (v: Voyage) => (v.vehicle === 0 ? v.resident : v.vehicle);
+    const alone = (v: Voyage, tick: number) => {
+      const { f, placed } = fleet();
+      new Traffic(f, 0, lots).update(tick, 0, [v]);
+      return placed[0]!;
+    };
+    const { f, placed } = fleet();
+    const traffic = new Traffic(f, 0, lots);
+    for (const tick of [9.5, 9.99, 10, 10.5, 11]) {
+      traffic.update(tick, 0, [a, b, c]);
+      for (const v of [b, c]) {
+        expect(placed.find((p) => p.id === idOf(v))).toEqual(alone(v, tick));
+      }
+      expect(placed.some((p) => p.id === idOf(a))).toBe(tick < 10);
+    }
   });
 });

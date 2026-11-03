@@ -244,7 +244,9 @@ flowchart LR
 ```
 
 `web/src/traffic.ts` (`Traffic`) holds the maths: the lane or pavement a voyage keeps to, its heading, and the turn into
-the lot at each end of a trip. It places every voyage between `fleet.begin(dt)` and `fleet.end()` and keeps nothing
+the lot at each end of a trip: a car or walker turns in from the road and goes up to the lot's door (the near edge of
+the tile) at full size, and is released there, where the building hides it. It does not shrink or slide into the lot's
+middle. It places every voyage between `fleet.begin(dt)` and `fleet.end()` and keeps nothing
 between rounds, so what is drawn is exactly what the last update placed. `web/src/fleet.ts` turns those poses into
 instances.
 `positionOf(voyage, tick)` gives the same pose for one voyage without placing it, so the camera can follow a resident the

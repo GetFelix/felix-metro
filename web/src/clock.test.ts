@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { TICKS_PER_DAY, TickClock, cityTime } from './clock';
+import { TICKS_PER_DAY, TickClock, cityTime, playoutLag } from './clock';
 
 describe('cityTime', () => {
   it('counts days from 1 and hours from midnight', () => {
@@ -10,13 +10,20 @@ describe('cityTime', () => {
 });
 
 describe('TickClock', () => {
-  it('starts one tick behind the newest and waits for a first record', () => {
-    const clock = new TickClock();
-    expect(clock.advance(0.1, -1, 4)).toBeNaN();
-    expect(clock.advance(0, 100, 4)).toBe(99);
+  it('keeps half a second of ticks in hand, and at least one', () => {
+    expect(playoutLag(4)).toBe(2);
+    expect(playoutLag(16)).toBe(8);
+    expect(playoutLag(0)).toBe(1);
   });
 
-  it('follows a steady sim without drifting from its one tick of lag', () => {
+  it('starts the playout delay behind the newest and waits for a first record', () => {
+    const clock = new TickClock();
+    expect(clock.advance(0.1, -1, 4)).toBeNaN();
+    expect(clock.advance(0, 100, 4)).toBe(98);
+    expect(new TickClock().advance(0, 100, 16)).toBe(92);
+  });
+
+  it('follows a steady sim without drifting from its playout delay', () => {
     const clock = new TickClock();
     let latest = 50;
     clock.advance(0, latest, 4);
@@ -24,8 +31,30 @@ describe('TickClock', () => {
       latest = 50 + Math.floor(frame * (1 / 60) * 4);
       clock.advance(1 / 60, latest, 4);
     }
-    expect(latest - clock.now).toBeGreaterThan(0.4);
-    expect(latest - clock.now).toBeLessThan(1.6);
+    expect(latest - clock.now).toBeGreaterThan(1.4);
+    expect(latest - clock.now).toBeLessThan(2.6);
+  });
+
+  it('rides out a tick that is late by most of a second without standing still', () => {
+    for (const speed of [4, 16]) {
+      const clock = new TickClock();
+      const dt = 1 / 60;
+      let latest = 100;
+      clock.advance(0, latest, speed);
+      // Steady ticks, then one 400 ms late, then the sim carries on.
+      let sim = 0;
+      let stalled = 0;
+      let last = clock.now;
+      for (let frame = 0; frame < 60 * 12; frame++) {
+        sim += dt;
+        const late = sim > 6 && sim < 6.4;
+        if (!late) latest = 100 + Math.floor(sim * speed - (sim >= 6.4 ? 0.4 * speed : 0));
+        const now = clock.advance(dt, latest, speed);
+        if (frame > 120 && now === last) stalled++;
+        last = now;
+      }
+      expect(stalled).toBe(0);
+    }
   });
 
   it('never passes the newest tick, and a pause stops it there', () => {
@@ -53,7 +82,7 @@ describe('TickClock', () => {
     clock.advance(0.016, 10, 4);
     // A hidden tab: the sim went on for a minute.
     const now = clock.advance(0.016, 250, 4);
-    expect(now).toBeGreaterThanOrEqual(249);
+    expect(now).toBeGreaterThanOrEqual(248);
     expect(now).toBeLessThanOrEqual(250);
   });
 
@@ -67,7 +96,7 @@ describe('TickClock', () => {
     const clock = new TickClock();
     clock.advance(0, 100, 4);
     for (let i = 0; i < 300; i++) clock.advance(1 / 60, 100, 4, true);
-    expect(clock.now).toBeCloseTo(99 + 20, 5);
+    expect(clock.now).toBeCloseTo(98 + 20, 5);
     // The records come back: it holds until the newest tick passes it, and never moves backwards.
     const held = clock.now;
     expect(clock.advance(1 / 60, 110, 4)).toBe(held);
@@ -78,6 +107,6 @@ describe('TickClock', () => {
     const clock = new TickClock();
     clock.advance(0, 100, 4);
     for (let i = 0; i < 70 * 60; i++) clock.advance(1 / 60, 100, 4, true);
-    expect(clock.now).toBeCloseTo(99 + 60 * 4, 0);
+    expect(clock.now).toBeCloseTo(98 + 60 * 4, 0);
   });
 });

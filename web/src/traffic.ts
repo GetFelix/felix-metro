@@ -7,16 +7,19 @@ export const LANE = 0.17;
 export const PAVEMENT = 0.38;
 /** Ticks a trip spends turning in from the road at each end; a trip shorter than two of them gives half to each end. */
 export const TURN_TICKS = 1;
+/** Tiles from a lot's middle to its door: the edge of the tile, where a trip starts and ends and is hidden by the building. */
+export const DOOR_SETBACK = 0.5;
 
 /**
- * How far into its lot a trip is at `tick`: 0 on the road, 1 standing on the lot. It falls over the first ticks after
- * the trip leaves and rises over the last ticks before it arrives. A function of the tick alone, so a rewind draws
- * the same.
+ * How far from the road to its lot's door a trip is at `tick`: 0 on the road, 1 at the door. It falls over the first
+ * ticks after the trip leaves and rises over the last ticks before it arrives, smoothly. A function of the tick alone,
+ * so a rewind draws the same.
  */
 export function doorEase(tick: number, depart: number, arrive: number): number {
   const window = Math.min(TURN_TICKS, (arrive - depart) / 2);
   if (!(window > 0)) return 0;
-  return Math.max(0, 1 - Math.min(tick - depart, arrive - tick) / window);
+  const t = Math.max(0, 1 - Math.min(tick - depart, arrive - tick) / window);
+  return t * t * (3 - 2 * t);
 }
 
 /** Where a lot stands, in tiles from the city's north-west corner. */
@@ -80,7 +83,7 @@ export interface Placed {
   y: number;
   z: number;
   heading: number;
-  /** 1 at full size, shrinking to 0 as the trip turns into a lot. */
+  /** 1 at full size; the fleet draws nothing at 0. A trip stays full size to its door and is then released. */
   size: number;
   /** The heading on the road, kept for when the trip stands still. */
   road: number;
@@ -200,23 +203,30 @@ export class Traffic {
     const arrive = v.journey.arrive();
     const pose = poseBetween(this.from, this.to, f, on ? PAVEMENT : LANE, into.road, this.pose);
     into.road = pose.heading;
-    let turned = doorEase(tick, v.depart, arrive);
+    const turned = doorEase(tick, v.depart, arrive);
     let heading = pose.heading;
     if (turned > 0) {
       // The lot at the end the trip is nearer: the one it left, or the one it is reaching.
       v.journey.lots(this.ends);
       const lot = this.lots[this.ends[tick - v.depart < arrive - tick ? 0 : 1]!];
       if (lot) {
+        // Turn in from the road and walk or drive up to the door, at full size. The trip is released at the door,
+        // where the building hides it, instead of shrinking into the lot's middle.
         const tx = lot.x - this.half;
         const tz = lot.z - this.half;
-        let turn = Math.atan2(tx - pose.x, tz - pose.z) - heading;
+        const [dx, dz] = [tx - pose.x, tz - pose.z];
+        const away = Math.hypot(dx, dz);
+        let turn = Math.atan2(dx, dz) - heading;
         turn -= Math.round(turn / (2 * Math.PI)) * 2 * Math.PI;
         heading += turned * turn;
-        pose.x += turned * (tx - pose.x);
-        pose.z += turned * (tz - pose.z);
-      } else turned = 0;
+        if (away > 1e-6) {
+          const reach = (turned * Math.max(0, away - DOOR_SETBACK)) / away;
+          pose.x += dx * reach;
+          pose.z += dz * reach;
+        }
+      }
     }
-    into.size = 1 - turned;
+    into.size = 1;
     into.x = pose.x;
     into.y = on ? 0 : 0.036;
     into.z = pose.z;
