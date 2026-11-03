@@ -121,6 +121,7 @@ for (const t of targets) {
   });
   const settle = async (resident) => {
     const [t0, f0] = [Date.now(), await page.evaluate(() => window.__fc)];
+    let timedOut = false;
     await page
       .waitForFunction(
         (r) => {
@@ -135,8 +136,12 @@ for (const t of targets) {
         resident,
         { polling: 100, timeout: MINUTE },
       )
-      .catch(() => {});
-    return `${Date.now() - t0} ms, ${(await page.evaluate(() => window.__fc)) - f0} frames`;
+      .catch((e) => {
+        if (e?.name !== 'TimeoutError') throw e;
+        timedOut = true;
+      });
+    const frames = (await page.evaluate(() => window.__fc)) - f0;
+    return `${Date.now() - t0} ms, ${frames} frames${timedOut ? ' (timed out waiting for the card and camera)' : ''}`;
   };
   const here = (resident) =>
     page.evaluate((r) => {
