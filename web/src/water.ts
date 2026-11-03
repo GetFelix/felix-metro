@@ -87,7 +87,8 @@ export function createWater(city: City, coast: Coast, reach: number): Water {
     uDeep: { value: new THREE.Color(PALETTE.deep) },
     uFoam: { value: new THREE.Color(PALETTE.foam) },
   };
-  // Mostly diffuse: a rough, non-metal surface with little of the environment, so it reads as water and not a mirror.
+  // Mostly diffuse: a rough, non-metal surface with little of the environment (scene.ts gives it the map, so the
+  // intensity below applies), so it reads as water and not a mirror.
   const material = new THREE.MeshStandardMaterial({
     color: PALETTE.water,
     roughness: 0.42,

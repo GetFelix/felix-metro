@@ -423,6 +423,7 @@ export async function createCity(
     // Water: one mesh of the water tiles and the open sea past the map edge it lies along, cut to the coast.
     if (c.water.length && coast) {
       water = createWater(c, coast, 60 * span);
+      (water.mesh.material as THREE.MeshStandardMaterial).envMap = scene.environment;
       water.setDetail(waterTier !== 'low');
       scene.add(water.mesh);
     }

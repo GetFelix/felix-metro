@@ -1,9 +1,9 @@
 // The coast: where the drawn water meets the land, and the one test every piece of scatter asks.
 //
 // The sim knows water as whole tiles, and that stays the rule for lots and roads. The page draws a smoother edge by
-// blurring the tile mask and cutting it at a level that wanders with a noise seeded from the city's seed. The cut is
-// above the blur's value at a tile edge, so the drawn water only ever pulls back into water tiles and never covers a
-// land one. What it uncovers is the beach. `dry` is the same field read the other way: a tree goes where it is
+// blurring the tile mask and cutting it at a level that wanders with a noise seeded from the city's seed. Land texels
+// are forced dry and the mesh only covers water tiles, so the drawn water never reaches a land tile. What it
+// uncovers is the beach. `dry` is the same field read the other way: a tree goes where it is
 // clear of the beach, on land, and nowhere else.
 import * as THREE from 'three';
 import { roll, seedNumber } from './ambient';
@@ -11,7 +11,7 @@ import type { City } from './layout';
 
 /** Tiles of map drawn past each edge, so the coast reads right out to where the camera can see. */
 export const COAST_PADDING = 10;
-/** The blurred mask is 0.5 at a tile edge. The water is drawn where it passes this, which pulls it back into the tile. */
+/** The blurred mask is 0.5 along a straight tile edge. Water is drawn where it passes this, which pulls it back into the tile. */
 const LEVEL = 0.72;
 /** A channel or inlet a tile or two wide would blur away at that level, so the level drops by up to this much there. */
 const THIN = 0.25;
@@ -19,8 +19,9 @@ const THIN = 0.25;
 const WANDER = 0.12;
 /** Land clears the shore where the blurred mask is below this: about half a tile from the water's tile edge. */
 const DRY_BELOW = 0.14;
-/** The field the shaders read is 0.5 at the drawn edge and runs 1 per `1 / FIELD_SLOPE` of the mask. */
+/** The shaders read a field that is 0.5 at the drawn edge; this is how fast it changes with the blurred mask. */
 const FIELD_SLOPE = 2.5;
+/** Land texels get this field value, which is dry. It is what keeps the water off land tiles. */
 const FIELD_LAND_CAP = 0;
 
 export interface Coast {
@@ -105,7 +106,7 @@ export function buildCoast(city: City): Coast {
   const tiles = city.tiles;
   const half = (tiles - 1) / 2;
   const across = tiles + 2 * COAST_PADDING;
-  // A 16 district city would be too many texels at full detail.
+  // Fewer texels per tile once the map is very large, to keep the texture small.
   const per = Math.max(4, Math.min(8, Math.floor(1536 / across)));
   const size = across * per;
   const origin = -half - 0.5 - COAST_PADDING;

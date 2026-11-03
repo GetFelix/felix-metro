@@ -4,8 +4,8 @@ Felix Metro is a model city on a table: low-poly, saturated, seen from above
 through a tilt-shift lens, with the time of day doing most of the mood. The
 reference is [prototype/style-frame.html](../prototype/style-frame.html).
 
-| Noon | Golden hour | Night |
-|---|---|---|
+| Noon                                         | Golden hour                                                 | Night                                           |
+| -------------------------------------------- | ----------------------------------------------------------- | ----------------------------------------------- |
 | ![Noon](screenshots/style-frame-day.jpg?v=2) | ![Golden hour](screenshots/style-frame-golden-hour.jpg?v=2) | ![Night](screenshots/style-frame-night.jpg?v=2) |
 
 ## Assets
@@ -13,14 +13,14 @@ reference is [prototype/style-frame.html](../prototype/style-frame.html).
 Six Kenney packs, all CC0 and one family. They share Kenney's gradient-swatch
 palette and proportions, so they sit together without restyling by hand.
 
-| Pack | Used for | Notes |
-|---|---|---|
-| City Kit (Roads) | Roads, crossings, pavement lots, street lights, traffic lights | Tiles are 1 × 1 units; the grid is built on them. `road-straight` runs along X |
-| City Kit (Commercial) | Downtown and commercial lots, towers | 14 buildings, 5 towers, awnings and parasols |
-| City Kit (Suburban) | Houses, trees, fences, driveways | Also the source of every tree |
-| City Kit (Industrial) | Factories, tanks, chimneys, containers, water tower | |
-| Car Kit | Traffic | Sedan, taxi, SUV, van, delivery, police, ambulance, trucks; scaled to 0.12 |
-| Mini Characters | Pedestrians | Rigged, with `walk`, `idle`, `sit` and more; scaled to 0.17 in the style frame and 0.22 in a city |
+| Pack                  | Used for                                                       | Notes                                                                                             |
+| --------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| City Kit (Roads)      | Roads, crossings, pavement lots, street lights, traffic lights | Tiles are 1 × 1 units; the grid is built on them. `road-straight` runs along X                    |
+| City Kit (Commercial) | Downtown and commercial lots, towers                           | 14 buildings, 5 towers, awnings and parasols                                                      |
+| City Kit (Suburban)   | Houses, trees, fences, driveways                               | Also the source of every tree                                                                     |
+| City Kit (Industrial) | Factories, tanks, chimneys, containers, water tower            |                                                                                                   |
+| Car Kit               | Traffic                                                        | Sedan, taxi, SUV, van, delivery, police, ambulance, trucks; scaled to 0.12                        |
+| Mini Characters       | Pedestrians                                                    | Rigged, with `walk`, `idle`, `sit` and more; scaled to 0.17 in the style frame and 0.22 in a city |
 
 Considered and left out:
 
@@ -49,14 +49,14 @@ Construction has no models of its own; see [Construction](#construction).
 Serve the repository root (`python3 -m http.server`) and open
 `/prototype/style-frame.html`. Parameters:
 
-| Parameter | Effect |
-|---|---|
-| `?t=17.8` | Freeze the clock at that hour |
-| `?still` | Freeze cars and people, for screenshots |
-| `?tier=low\|medium\|high` | Force a quality tier and turn off the automatic choice |
-| `?hud` | Frame-time overlay under the brand chip |
-| `?ui=0` | Hide the overlay |
-| `?capture&trace` | Draw only when `window.__capture.frame(tMs)` is called, with the camera and tick following a path the clip script sets (`web/scripts/clip.mjs`) |
+| Parameter                 | Effect                                                                                                                                          |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `?t=17.8`                 | Freeze the clock at that hour                                                                                                                   |
+| `?still`                  | Freeze cars and people, for screenshots                                                                                                         |
+| `?tier=low\|medium\|high` | Force a quality tier and turn off the automatic choice                                                                                          |
+| `?hud`                    | Frame-time overlay under the brand chip                                                                                                         |
+| `?ui=0`                   | Hide the overlay                                                                                                                                |
+| `?capture&trace`          | Draw only when `window.__capture.frame(tMs)` is called, with the camera and tick following a path the clip script sets (`web/scripts/clip.mjs`) |
 
 The app (`web/`) draws the city generated from the seed in the URL hash (`/#harbor`), 2 × 2 districts by default (`?districts=3`). `?layout=frame` draws the style frame's hand-made map instead, which is what CI compares against the frame. `?live=0` skips the gateway and draws the city with no traffic, and `?gateway=ws://host:8787/ws` names a gateway other than the page's own. `?at=<tick>` opens the city at a past tick, `?cam=x,z,distance,azimuth,polar` starts the camera at a saved view (the two make up the link that Share this moment copies) and `?attract=<seconds>` sets how long the page waits before the camera turns on its own (`0` for never).
 
@@ -67,21 +67,21 @@ The screenshots above are `?t=12&still`, `?t=17.8&still` and `?t=21&still` at
 
 You move around the city by moving the point the camera looks at, standing nearer or farther from it, or walking the camera round it. These controls work in the app, on a generated city and on the frame layout (`?layout=frame`, the style frame's hand-made map instead of a generated city). The style frame page itself (`prototype/style-frame.html`) still uses plain orbit controls.
 
-| Input | What it does |
-|---|---|
-| Mouse: drag with the left button | Turn and tilt the view around the point it looks at |
-| Mouse: drag with the right button, or hold Shift and drag | Slide the view across the city |
-| Mouse wheel | Zoom toward the point under the pointer |
-| Trackpad: click and drag | Turn and tilt, as with a mouse |
-| Trackpad: hold Shift and drag | Slide the view (a trackpad has no right button) |
-| Trackpad: pinch or two-finger scroll | Zoom toward the point under the pointer. Ctrl and wheel over the canvas zooms the city, not the page |
-| Touch: drag with one finger | Turn and tilt |
-| Touch: drag with two fingers | Slide the view |
-| Touch: pinch | Zoom toward the point between the fingers |
-| Keyboard: `W` `A` `S` `D` | Slide the view forward, left, back and right (hold to keep going) |
-| Keyboard: `Q` `E` | Turn the view left and right |
-| Keyboard: `+` `-` | Zoom in and out |
-| Keyboard: `0` | Return to the city's opening view (where the drift from above settles) |
+| Input                                                     | What it does                                                                                         |
+| --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| Mouse: drag with the left button                          | Turn and tilt the view around the point it looks at                                                  |
+| Mouse: drag with the right button, or hold Shift and drag | Slide the view across the city                                                                       |
+| Mouse wheel                                               | Zoom toward the point under the pointer                                                              |
+| Trackpad: click and drag                                  | Turn and tilt, as with a mouse                                                                       |
+| Trackpad: hold Shift and drag                             | Slide the view (a trackpad has no right button)                                                      |
+| Trackpad: pinch or two-finger scroll                      | Zoom toward the point under the pointer. Ctrl and wheel over the canvas zooms the city, not the page |
+| Touch: drag with one finger                               | Turn and tilt                                                                                        |
+| Touch: drag with two fingers                              | Slide the view                                                                                       |
+| Touch: pinch                                              | Zoom toward the point between the fingers                                                            |
+| Keyboard: `W` `A` `S` `D`                                 | Slide the view forward, left, back and right (hold to keep going)                                    |
+| Keyboard: `Q` `E`                                         | Turn the view left and right                                                                         |
+| Keyboard: `+` `-`                                         | Zoom in and out                                                                                      |
+| Keyboard: `0`                                             | Return to the city's opening view (where the drift from above settles)                               |
 
 The keys are ignored while you type in a text field or hold Ctrl, Cmd or Alt, so browser shortcuts still work. The arrow keys step the timeline and Space plays, so the camera leaves them alone. The table of keys is data (`CAMERA_KEYS` in `web/src/camera-keys.ts`), and the key list in the UI builds its View and Mouse and touch groups from it and from `CAMERA_GESTURES`.
 
@@ -155,14 +155,14 @@ is open, stacks that smoke while a factory works, birds on the roofs at dawn, tr
 truck on its morning round and delivery vans on the shopping streets. The page draws all of it from the tick on screen
 and the city's seed, and nothing else.
 
-| What | When | How it is drawn | Low tier |
-|---|---|---|---|
-| Shop windows | A strip of glass on the street side of every shop lights between its opening (07:30 to 09:30) and its closing (18:00 to 22:00), each shop at its own hour. Pale by day, a warm glow at night | One instanced quad each | Drawn |
-| Chimney smoke | Each factory starts smoking between 05:30 and 07:00 and stops between 16:30 and 18:30, at hours fixed by its lot. Puffs rise from the model's stack and thin out as they go | Instanced soft sprites, 5 puffs a stack on high, 3 on medium | Left out |
-| Birds | A flock lands on some roofs (3 in 10) between 05:00 and 06:00 and flies off between 07:00 and 08:30; each flight takes about seven minutes | Instanced sprites, 3 a roof on high, 2 on medium | Left out |
-| Traffic lights | A post on each corner of every crossroads. One road has 13 ticks of green and 2 of amber, then the other has its turn | The model's post, instanced, with a lit lens: green, amber or red | Left out |
-| Garbage truck | Sets off between 06:00 and 07:30 and stops at every fourth tile of a long round | The fleet draws it as car kind 7 | Left out |
-| Delivery vans | Six a day on high, three on medium, setting off from 08:00 to 13:00 on rounds of a few hours, keeping to streets with shops and stopping outside them | The fleet draws each as car kind 6, the delivery van | Left out |
+| What           | When                                                                                                                                                                                         | How it is drawn                                                   | Low tier |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- | -------- |
+| Shop windows   | A strip of glass on the street side of every shop lights between its opening (07:30 to 09:30) and its closing (18:00 to 22:00), each shop at its own hour. Pale by day, a warm glow at night | One instanced quad each                                           | Drawn    |
+| Chimney smoke  | Each factory starts smoking between 05:30 and 07:00 and stops between 16:30 and 18:30, at hours fixed by its lot. Puffs rise from the model's stack and thin out as they go                  | Instanced soft sprites, 5 puffs a stack on high, 3 on medium      | Left out |
+| Birds          | A flock lands on some roofs (3 in 10) between 05:00 and 06:00 and flies off between 07:00 and 08:30; each flight takes about seven minutes                                                   | Instanced sprites, 3 a roof on high, 2 on medium                  | Left out |
+| Traffic lights | A post on each corner of every crossroads. One road has 13 ticks of green and 2 of amber, then the other has its turn                                                                        | The model's post, instanced, with a lit lens: green, amber or red | Left out |
+| Garbage truck  | Sets off between 06:00 and 07:30 and stops at every fourth tile of a long round                                                                                                              | The fleet draws it as car kind 7                                  | Left out |
+| Delivery vans  | Six a day on high, three on medium, setting off from 08:00 to 13:00 on rounds of a few hours, keeping to streets with shops and stopping outside them                                        | The fleet draws each as car kind 6, the delivery van              | Left out |
 
 **One rule: a function of the tick.** Every effect is worked out by `web/src/ambient.ts` from the tick, the seed of the
 city and an id (a lot, a crossing, a day). Nothing reads the wall clock or `Math.random`, and nothing is kept between
@@ -203,11 +203,11 @@ frame from a few hundred sites, and the posts are drawn once. The buffers are ma
 fills, and a mesh with nothing to draw costs no call. Draw calls and frame time on the medium tier, with and without the ambient life, on the same page
 and the same 160 cars and walkers:
 
-| Hour | Draw calls, without / with | Triangles, without / with | Page's submit ms | Frame ms on SwiftShader |
-|---|---|---|---|---|
-| 11:00 (smoke, vans, shops) | 4353 / 4360 | 2.87 M / 2.92 M | 5.7 / 6.1 | 335 / 355 |
-| 06:30 (birds, truck) | 4361 / 4368 | 2.87 M / 2.90 M | 5.8 / 6.0 | 353 / 362 |
-| 19:00 (shops, lights) | 4383 / 4389 | 2.87 M / 2.90 M | 6.0 / 6.0 | 389 / 401 |
+| Hour                       | Draw calls, without / with | Triangles, without / with | Page's submit ms | Frame ms on SwiftShader |
+| -------------------------- | -------------------------- | ------------------------- | ---------------- | ----------------------- |
+| 11:00 (smoke, vans, shops) | 4353 / 4360                | 2.87 M / 2.92 M           | 5.7 / 6.1        | 335 / 355               |
+| 06:30 (birds, truck)       | 4361 / 4368                | 2.87 M / 2.90 M           | 5.8 / 6.0        | 353 / 362               |
+| 19:00 (shops, lights)      | 4383 / 4389                | 2.87 M / 2.90 M           | 6.0 / 6.0        | 389 / 401               |
 
 The ambient life adds six or seven draw calls and 1% to 2% more triangles. The page's own work for it
 (`Ambient.update` and the fleet's round) takes about 0.04 ms a frame on the medium tier, and the page's submit time rose
@@ -316,20 +316,20 @@ and in WebGL calls, which is what draw calls cost on a real GPU. "Frame" waits f
 instancing does not speed up. It moved by as much as 50% between two runs of the same build with other jobs running, so
 the table gives the best of two runs.
 
-| Tier | Movers | Draw calls before | Draw calls after | Submit ms before | Submit ms after | Frame ms before | Frame ms after |
-|---|---|---|---|---|---|---|---|
-| high | 0 | 6,270 | 6,270 | 7.1 | 7.7 | 468 | 470 |
-| high | 100 | 8,049 | 6,489 | 11.1 | 8.8 | 526 | 525 |
-| high | 400 | 13,665 | 6,489 | 19.6 | 8.9 | 704 | 690 |
-| high | 800 | 20,862 | 6,489 | 32.3 | 8.9 | 982 | 912 |
-| medium | 0 | 4,240 | 4,240 | 5.4 | 6.0 | 267 | 264 |
-| medium | 80 | 5,214 | 4,395 | 7.2 | 6.2 | 296 | 297 |
-| medium | 160 | 6,180 | 4,395 | 8.9 | 5.8 | 328 | 330 |
-| medium | 400 | 9,170 | 4,395 | 13.6 | 5.7 | 428 | 412 |
-| low | 0 | 1,216 | 1,216 | 2.5 | 2.7 | 107 | 107 |
-| low | 40 | 1,449 | 1,273 | 3.0 | 2.7 | 112 | 113 |
-| low | 80 | 1,685 | 1,275 | 3.6 | 2.8 | 118 | 118 |
-| low | 400 | 3,571 | 1,275 | 6.8 | 2.7 | 167 | 161 |
+| Tier   | Movers | Draw calls before | Draw calls after | Submit ms before | Submit ms after | Frame ms before | Frame ms after |
+| ------ | ------ | ----------------- | ---------------- | ---------------- | --------------- | --------------- | -------------- |
+| high   | 0      | 6,270             | 6,270            | 7.1              | 7.7             | 468             | 470            |
+| high   | 100    | 8,049             | 6,489            | 11.1             | 8.8             | 526             | 525            |
+| high   | 400    | 13,665            | 6,489            | 19.6             | 8.9             | 704             | 690            |
+| high   | 800    | 20,862            | 6,489            | 32.3             | 8.9             | 982             | 912            |
+| medium | 0      | 4,240             | 4,240            | 5.4              | 6.0             | 267             | 264            |
+| medium | 80     | 5,214             | 4,395            | 7.2              | 6.2             | 296             | 297            |
+| medium | 160    | 6,180             | 4,395            | 8.9              | 5.8             | 328             | 330            |
+| medium | 400    | 9,170             | 4,395            | 13.6             | 5.7             | 428             | 412            |
+| low    | 0      | 1,216             | 1,216            | 2.5              | 2.7             | 107             | 107            |
+| low    | 40     | 1,449             | 1,273            | 3.0              | 2.7             | 112             | 113            |
+| low    | 80     | 1,685             | 1,275            | 3.6              | 2.8             | 118             | 118            |
+| low    | 400    | 3,571             | 1,275            | 6.8              | 2.7             | 167             | 161            |
 
 The 0 rows are the city alone: its buildings, roads and trees are still one object each. Before, every mover added about
 18 draw calls. Now the first movers add a fixed 219 on high, 155 on medium and 59 on low (a mesh for each part of each
@@ -348,16 +348,16 @@ A city with a shore has the sea along one edge of the map, and the water has to 
 that is lighter in the shallows and darker offshore, a faint ripple, a pale sheen at a low angle and a thin line of foam
 where it meets the beach. It does not mirror the sky.
 
-| Piece | What it does |
-|---|---|
-| Colour by depth | `PALETTE.shallow` at the shore, `PALETTE.deep` far out, around the style frame's `PALETTE.water` |
-| Ripples | A few slow waves tilt the surface normal a little, so the sun breaks up into a soft glitter instead of one hot spot |
-| Sheen | The sky's colour is added at a grazing angle only (a Fresnel term), so water looks brighter toward the horizon and plain overhead |
-| Foam | A line of white where the sea meets the sand, drifting in and out |
+| Piece           | What it does                                                                                                                                            |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Colour by depth | `PALETTE.shallow` at the shore, `PALETTE.deep` far out, around the style frame's `PALETTE.water`                                                        |
+| Ripples         | A few slow waves tilt the surface normal a little, so the sun breaks up into a soft glitter instead of one hot spot                                     |
+| Sheen           | The sky's colour is added at a grazing angle only (a Fresnel term), so the water is brighter toward the horizon and plain when seen from straight above |
+| Foam            | A line of white where the sea meets the sand, drifting in and out                                                                                       |
 
 The water is one mesh in one draw call. It is a standard material, so it takes the sun, shadows and fog like the rest of
-the scene, with the environment map turned almost off (that map was the mirror: it put a bright blob of the room on the
-sea). There are no screen-space reflections. The ripples, sheen, foam and depth colour are for the medium and high tiers.
+the scene, with the scene's environment map at a tenth of its strength (at full strength it was the mirror: a bright blob of
+the room on the sea). There are no screen-space reflections. The ripples, sheen, foam and depth colour are for the medium and high tiers.
 Low draws the flat `PALETTE.water` with the same coast.
 
 ### The coast
@@ -367,26 +367,28 @@ tile. Drawn as tiles, the shore is a staircase, so the page draws a smoother edg
 (`web/src/coast.ts`):
 
 1. The water tiles, and the sea past the edge of the map, become a mask: 1 for water, 0 for land.
-2. The mask is blurred, which rounds every corner. A tile edge sits at 0.5 on the blurred mask.
+2. The mask is blurred, which rounds every corner. Along a straight tile edge the blurred mask is 0.5.
 3. The water is drawn where the blurred mask is above 0.72, moved up and down a little by noise seeded from the city's
-   seed. The cut is well above 0.5, so the drawn water only pulls back into water tiles. It never covers a land tile, so a road
-   or a lot never ends up under water.
+   seed. Along a straight edge that is well inside the water tile, so the edge pulls back. Narrow inlets get a lower cut
+   so they do not vanish.
+   Land tiles are forced dry, and the water mesh only has quads on water tiles, so the drawn water never covers a land tile
+   and a road or a lot never ends up under it.
 4. The strip of tile the water gave up is beach. The ground turns to sand there, darker where the waves wet it.
 
-The result is baked once into a small texture (eight texels to a tile for a 2 by 2 city) that the water and the ground
+The result is baked once into a small texture (8 texels to a tile, fewer on a very large map) that the water and the ground
 both read, so the edge is as sharp as the screen allows and costs nothing per frame. The same seed gives the same coast
 on every machine; the noise is a hash of the city seed and the position, not a random number.
 
 ### Trees and other scatter
 
-Everything that is placed by hand on the page and not by a lot goes through one test, `Coast.dry(x, z)`: land, and clear
-of the beach (about half a tile back from where the water's tile edge was). That covers the trees past the map, and
-the trees a house or a park puts on its lot, since a lot next to the water can have a tree that jitters to its edge. A
-point that fails is left out; the city draws a few fewer trees on the shore. The sim chooses lots and what stands on them, tile by tile, and has no
-position inside a tile, so it cannot disagree with the page: a tile it calls land is land, and the page only ever
-removes water from tiles the sim called water. `web/src/coast.test.ts` checks this for cities on all four edges and a dry
-one: nothing is drawn as water on a land tile, and no point that passes `dry` is on a water tile or within a quarter of a
-tile of one.
+Trees that the page places itself, the landscape past the map and the trees on house and park lots, must pass one test,
+`Coast.dry(x, z)`: land, and off the beach (between a quarter and half a tile back from the water's tile edge). A tree
+that fails is dropped, so a lot at the water has fewer trees and a waterfront park can have none.
+
+The sim picks lots and what stands on them tile by tile and has no position inside a tile, so it cannot disagree with the
+page: a tile it calls land is land, and the page only ever removes water from tiles the sim called water.
+`web/src/coast.test.ts` checks this for cities on all four edges and a dry one. Nothing is drawn as water on a land tile,
+and no point that passes `dry` is on a water tile or within a quarter of a tile of one.
 
 ![A shore at noon](screenshots/coast-day.jpg)
 
@@ -399,11 +401,11 @@ The pictures are `?tier=high&t=12&still&live=0&cam=0,9,8,0.4,0.8#harbor` and the
 Each tier drops effects in the order that costs the least in looks, so the
 picture degrades before the frame rate does.
 
-| Tier | Ambient occlusion | Tilt-shift | Shadows | Pixel ratio | Cars and walkers at once | Pedestrian rigs\* | Water |
-|---|---|---|---|---|---|---|---|
-| high | yes | yes | 4096 map | up to 2 | no limit | yes | ripples, sheen, foam, depth colour |
-| medium | no | yes | 2048 map | up to 2 | 160 | no | ripples, sheen, foam, depth colour |
-| low | no | no | no | 1 | 80 | no | flat colour |
+| Tier   | Ambient occlusion | Tilt-shift | Shadows  | Pixel ratio | Cars and walkers at once | Pedestrian rigs\* | Water                              |
+| ------ | ----------------- | ---------- | -------- | ----------- | ------------------------ | ----------------- | ---------------------------------- |
+| high   | yes               | yes        | 4096 map | up to 2     | no limit                 | yes               | ripples, sheen, foam, depth colour |
+| medium | no                | yes        | 2048 map | up to 2     | 160                      | no                | ripples, sheen, foam, depth colour |
+| low    | no                | no         | no       | 1           | 80                       | no                | flat colour                        |
 
 \* The `rigs` flag is set only on high. Rigged pedestrians arrive with #6; until then nothing reads it.
 

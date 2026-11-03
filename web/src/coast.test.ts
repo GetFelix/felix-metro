@@ -74,6 +74,22 @@ describe('the coast', () => {
     }
   });
 
+  it('leaves every land texel dry in the texture the shaders read', () => {
+    for (const seed of SEEDS) {
+      const c = city(seed);
+      const coast = buildCoast(c);
+      const wet = new Set(c.water.map(([x, z]) => z * c.tiles + x));
+      const per = coast.size / coast.extent;
+      for (let j = 0; j < coast.size; j++) {
+        for (let i = 0; i < coast.size; i++) {
+          const [x, z] = [coast.origin + (i + 0.5) / per, coast.origin + (j + 0.5) / per];
+          if (!simWater(c, wet, x, z))
+            expect(coast.data[(j * coast.size + i) * 4]!, `${seed} ${x}, ${z}`).toBeLessThan(128);
+        }
+      }
+    }
+  });
+
   it('is not squared off: the edge pulls back into the water by a different amount along the coast', () => {
     const c = city('harbor');
     const coast = buildCoast(c);
