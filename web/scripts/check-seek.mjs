@@ -108,6 +108,41 @@ for (const t of targets) {
 // seek replaces. Follow someone on the road in one seeked state, then look at a tick when they are indoors and at the first
 // tick again: the camera is on them each time and the card keeps saying what they are doing.
 {
+  // The card and the camera move on the page's frames, and CI's software renderer draws well under one a second, so a
+  // fixed wait can end before the frame that shows the card. The check waits for what it asserts instead. A seeked tick
+  // holds still, so the camera does settle on them; a follow that never does is caught by the checks after the wait.
+  await page.evaluate(() => {
+    window.__fc = 0;
+    const count = () => {
+      window.__fc++;
+      requestAnimationFrame(count);
+    };
+    requestAnimationFrame(count);
+  });
+  const settle = async (resident) => {
+    const [t0, f0] = [Date.now(), await page.evaluate(() => window.__fc)];
+    let timedOut = false;
+    await page
+      .waitForFunction(
+        (r) => {
+          const w = window.__live.where().find((x) => x.resident === r);
+          const c = window.__camera.state();
+          const card =
+            !document.getElementById('follow').hidden &&
+            window.__following.resident() === r &&
+            (document.querySelector('#follow [data-doing]')?.textContent ?? '') !== '';
+          return card && (!w || Math.hypot(c.x - w.x, c.z - w.z) <= 0.5);
+        },
+        resident,
+        { polling: 100, timeout: MINUTE },
+      )
+      .catch((e) => {
+        if (e?.name !== 'TimeoutError') throw e;
+        timedOut = true;
+      });
+    const frames = (await page.evaluate(() => window.__fc)) - f0;
+    return `${Date.now() - t0} ms, ${frames} frames${timedOut ? ' (timed out waiting for the card and camera)' : ''}`;
+  };
   const here = (resident) =>
     page.evaluate((r) => {
       const w = window.__live.where().find((x) => x.resident === r);
@@ -134,26 +169,30 @@ for (const t of targets) {
     console.warn('nobody was on the road at any tick tried; the follow check across seeks is skipped');
   } else {
     await page.evaluate((r) => window.__following.start(r), mover);
-    // The camera glides to them on a spring, so it is given a moment.
-    await page.waitForTimeout(1500);
+    const took = await settle(mover);
     const onRoad = await here(mover);
     if (!onRoad.shown || onRoad.who !== mover)
-      await fail(`following resident ${mover} did not show the card at tick ${at}`);
+      await fail(`following resident ${mover} did not show the card at tick ${at} after ${took}`);
     if (!onRoad.w || Math.hypot(onRoad.c.x - onRoad.w.x, onRoad.c.z - onRoad.w.z) > 0.5)
-      await fail(`the camera is not on resident ${mover} at tick ${at}: ${JSON.stringify(onRoad)}`);
+      await fail(`the camera is not on resident ${mover} at tick ${at} after ${took}: ${JSON.stringify(onRoad)}`);
     if (!/^(Driving|Walking) to /.test(onRoad.doing))
       await fail(`the card says "${onRoad.doing}" for a resident on the road`);
+    console.log(
+      `  following resident ${mover} at tick ${at}: "${onRoad.doing}", card and camera on them after ${took}`,
+    );
     for (const t of [7, Math.floor(newest / 2), at]) {
       await page.evaluate((tick) => window.__metro.seek(tick), t);
-      await page.waitForTimeout(1500);
+      const settled = await settle(mover);
       const now = await here(mover);
       if (!now.shown || now.who !== mover || now.doing === '')
-        await fail(`the follow of resident ${mover} did not survive a seek to tick ${t}: ${JSON.stringify(now)}`);
+        await fail(
+          `the follow of resident ${mover} did not survive a seek to tick ${t} after ${settled}: ${JSON.stringify(now)}`,
+        );
       if (!Number.isFinite(now.c.x) || !Number.isFinite(now.c.z))
         await fail(`the camera lost resident ${mover} at tick ${t}`);
       if (now.w && Math.hypot(now.c.x - now.w.x, now.c.z - now.w.z) > 0.5)
         await fail(`the camera is not on resident ${mover} at tick ${t}: ${JSON.stringify(now)}`);
-      console.log(`  following resident ${mover} at tick ${t}: "${now.doing}"`);
+      console.log(`  following resident ${mover} at tick ${t}: "${now.doing}" after ${settled}`);
     }
     await page.screenshot({ path: join(out, 'follow-seek.png') });
     await page.evaluate(() => window.__following.stop());
