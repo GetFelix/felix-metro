@@ -160,6 +160,7 @@ export function createSoundscape(
   let starting: Promise<boolean> = Promise.resolve(false);
   let wander: ReturnType<typeof setTimeout> | undefined;
   let heard = false;
+  let misses = 0;
 
   // The recording loops from a random point, and its level drifts at random gaps, so a long night has no fixed beat.
   const drift = (g: Graph) => {
@@ -186,7 +187,8 @@ export function createSoundscape(
       },
       // No file, no crickets; the night is traffic and quiet, and the next `enable` tries again.
       () => {
-        heard = false;
+        // A browser that cannot decode Ogg Opus would otherwise fetch the file on every press.
+        if (graph === g && ++misses < 3) heard = false;
       },
     );
   };
@@ -243,6 +245,7 @@ export function createSoundscape(
         return true;
       } catch {
         // The next attempt may do better, so nothing is remembered about this one.
+        clearTimeout(wander);
         graph = null;
         on = false;
         heard = false;
