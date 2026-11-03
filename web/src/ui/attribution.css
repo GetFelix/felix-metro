@@ -2,6 +2,8 @@
 .attribution {
   position: fixed;
   z-index: 4;
+  /* So max-width is the whole card; its padding made a long name's card 26 px wider than the screen allowed. */
+  box-sizing: border-box;
   display: flex;
   align-items: center;
   gap: 0;
