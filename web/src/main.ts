@@ -536,6 +536,8 @@ async function main() {
     glows,
     setTime,
     setShadows,
+    setWaterTime,
+    setWaterTier,
     fleet,
     pick,
     setLot,
@@ -552,6 +554,7 @@ async function main() {
     post?.dispose();
     renderer.setPixelRatio(Math.min(devicePixelRatio, s.pixelRatioCap));
     setShadows(s.shadows, s.shadowMapSize);
+    setWaterTier(tier);
     construction.setEffects(tier !== 'low');
     ambient?.setTier(s.ambient);
     if (traffic) traffic.cap = s.movers;
@@ -1502,6 +1505,8 @@ async function main() {
     else draw(now, now - last, still ? 0 : Math.min(clock.getDelta(), 0.05));
     requestAnimationFrame(frame);
   }
+  /** Seconds the waves have run; a still page holds them. */
+  let waterClock = 0;
   /** Draw one frame `dt` seconds on from the last. */
   function draw(now: number, frameMs: number, dt: number, paint = true) {
     if (intro && !intro.step(now)) intro = null;
@@ -1510,6 +1515,8 @@ async function main() {
     if (frameMs > 0) smoothed += (1000 / frameMs - smoothed) * 0.05;
     hud?.frame(frameMs);
     if (slow) for (const end = performance.now() + slow; performance.now() < end; );
+    waterClock += dt;
+    setWaterTime(waterClock);
     move(cars, dt, true);
     move(people, dt, false);
     for (const p of people) p.mixer.update(dt);

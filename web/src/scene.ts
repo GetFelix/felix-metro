@@ -24,6 +24,8 @@ import { tintGhost } from './placement-ghost';
 import { StaticCity } from './static-city';
 import { LampLights } from './lamp-lights';
 import { VARIANTS } from './materials';
+import { buildCoast, outerTrees, type Coast } from './coast';
+import { beachGround, createWater, type Water } from './water';
 
 // Seeded so the frame is identical on every load.
 let seed = 7;
@@ -120,6 +122,8 @@ export async function createCity(
   const kindOn = new Map<number, number>();
   let buildingOn: (id: number) => THREE.Object3D | null = () => null;
   let ambient: Ambient | null = null;
+  let water: Water | null = null;
+  let waterTier = tier;
   let previewBuilding: (
     id: number | null,
     building: { kind: number; rotation: number } | null,
@@ -159,11 +163,12 @@ export async function createCity(
   sun.shadow.normalBias = 0.02;
   scene.add(sun, sun.target);
 
-  // Ground: grass under the city, darker toward the fog.
-  const ground = new THREE.Mesh(
-    new THREE.CircleGeometry(60 * span, 64),
-    new THREE.MeshStandardMaterial({ color: PALETTE.grass, roughness: 1 }),
-  );
+  // The coast of a generated city: where its water is drawn, and where scatter may stand.
+  const coast: Coast | null = city ? buildCoast(city) : null;
+  // Ground: grass under the city, darker toward the fog, and sand where the water meets it.
+  const groundMaterial = new THREE.MeshStandardMaterial({ color: PALETTE.grass, roughness: 1 });
+  if (coast) beachGround(groundMaterial, coast);
+  const ground = new THREE.Mesh(new THREE.CircleGeometry(60 * span, 64), groundMaterial);
   ground.rotation.x = -Math.PI / 2;
   ground.position.y = -0.01;
   ground.receiveShadow = true;
@@ -397,6 +402,8 @@ export async function createCity(
   // Tile (x, z) of the map sits at world (x - half, z - half), so the city is centred on the origin.
   function drawCity(c: City) {
     const wx = (v: number) => v - half;
+    /** Whether a tree may stand at world (x, z): on land and clear of the beach. */
+    const dry = (x: number, z: number) => coast?.dry(x, z) ?? true;
     const tileKey = (x: number, z: number) => z * 65536 + x;
     const roadLook = (r: Road) => `${r.piece}|${r.rot}|${r.mask}|${r.avenue}`;
     const roadDrawn = new Map<number, RoadDrawn>();
@@ -449,29 +456,12 @@ export async function createCity(
     };
     for (const r of c.roads) drawRoad(r, true);
 
-    // Water: a tile each, and open sea past the map edge it lies along.
-    if (c.water.length) {
-      const waterMat = new THREE.MeshStandardMaterial({ color: PALETTE.water, roughness: 0.15, metalness: 0.1 });
-      const tiles = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1), waterMat, c.water.length);
-      const m = new THREE.Matrix4().makeRotationX(-Math.PI / 2);
-      c.water.forEach(([x, z], i) => tiles.setMatrixAt(i, m.setPosition(wx(x), 0.005, wx(z))));
-      tiles.receiveShadow = true;
-      scene.add(tiles);
-      if (c.shore !== null) {
-        const reach = 60 * span;
-        const sea = new THREE.Mesh(new THREE.PlaneGeometry(reach, reach), waterMat);
-        sea.rotation.x = -Math.PI / 2;
-        const edge = half + 0.5 + reach / 2;
-        const [sx, sz] = [
-          [0, -edge],
-          [edge, 0],
-          [0, edge],
-          [-edge, 0],
-        ][c.shore]!;
-        sea.position.set(sx!, 0.004, sz!);
-        sea.receiveShadow = true;
-        scene.add(sea);
-      }
+    // Water: one mesh of the water tiles and the open sea past the map edge it lies along, cut to the coast.
+    if (c.water.length && coast) {
+      water = createWater(c, coast, 60 * span);
+      (water.mesh.material as THREE.MeshStandardMaterial).envMap = scene.environment;
+      water.setDetail(waterTier !== 'low');
+      scene.add(water.mesh);
     }
 
     // What stands on each lot, so a building that changes can take its old one down.
@@ -542,7 +532,9 @@ export async function createCity(
         putBuilding(pack, model, x, z, rotY, 0.62, lit ? 1 : 0, Math.floor(rnd() * 5));
         if (rnd() < 0.6) {
           const tree = choose(['tree-small', 'tree-large']);
-          put('suburban', tree, x + (rnd() - 0.5) * 0.7, z + (rnd() - 0.5) * 0.7, rnd() * 6, 0.9);
+          const at = [x + (rnd() - 0.5) * 0.7, z + (rnd() - 0.5) * 0.7] as const;
+          const turn = rnd() * 6;
+          if (dry(...at)) put('suburban', tree, at[0], at[1], turn, 0.9);
         }
       } else if (look === 'factory') {
         putBuilding(pack, model, x, z, rotY, 0.46, lit ? 1 : 0, 2 + Math.floor(rnd() * 3));
@@ -554,7 +546,9 @@ export async function createCity(
         for (let i = 0; i < n; i++) {
           const spread = n > 1 ? 0.8 : 0.5;
           const at = [x + (rnd() - 0.5) * spread, z + (rnd() - 0.5) * spread] as const;
-          put(pack, model, at[0], at[1], rnd() * 6, 1 + rnd() * 0.4);
+          const turn = rnd() * 6,
+            size = 1 + rnd() * 0.4;
+          if (dry(...at)) put(pack, model, at[0], at[1], turn, size);
         }
       } else {
         put(pack, model, x, z, 0, 1);
@@ -662,20 +656,10 @@ export async function createCity(
       for (const job of mine.jobs) void job.then((o) => tintGhost(o, fits));
     };
 
-    // Trees past the map, except along the sea.
-    for (let i = 0; i < 140; i++) {
-      const out = half + 1.5 + rand() * 8;
-      const along = (rand() * 2 - 1) * (half + 6);
-      const side = Math.floor(rand() * 4);
-      if (side === c.shore) continue;
-      const [tx, tz] = [
-        [along, -out],
-        [out, along],
-        [along, out],
-        [-out, along],
-      ][side]!;
-      jobs.push(place('suburban', pick(['tree-large', 'tree-small']), tx!, tz!, rand() * 6, 1 + rand() * 0.6));
-    }
+    // Trees past the map, on dry land only: the sea runs along the shore's whole side and past the corners.
+    if (coast)
+      for (const [tx, tz] of outerTrees(c, coast, rand))
+        jobs.push(place('suburban', pick(['tree-large', 'tree-small']), tx, tz, rand() * 6, 1 + rand() * 0.6));
   }
 
   // ---------- lights that come on at night ----------
@@ -918,6 +902,7 @@ export async function createCity(
     hemi.intensity = d.hemiIntensity;
     renderer.toneMappingExposure = d.exposure;
     scene.environmentIntensity = d.environment;
+    water?.setSky(d.sky, d.hemiIntensity);
     (ground.material as THREE.MeshStandardMaterial).color.copy(
       groundColor.set(PALETTE.grass).lerp(nightGround, d.groundNight),
     );
@@ -1017,6 +1002,13 @@ export async function createCity(
     glows,
     setTime,
     setShadows,
+    /** The waves' clock in seconds, 0 to hold them still. */
+    setWaterTime: (seconds: number) => water?.setTime(seconds),
+    /** Ripples, sheen, foam and depth shading are for the medium and high tiers. */
+    setWaterTier: (t: Tier) => {
+      waterTier = t;
+      water?.setDetail(t !== 'low');
+    },
     fleet: crowd?.fleet ?? null,
     pick: crowd?.pick.bind(crowd) ?? null,
     setLot: (id: number, b: Building | null) => setLotDrawn(id, b),

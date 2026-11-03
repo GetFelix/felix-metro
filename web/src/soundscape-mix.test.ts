@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { intoThePast, mixAt, startsRewind, WHOOSH_GAP_MS, whooshDue } from './soundscape-mix';
+import {
+  intoThePast,
+  mixAt,
+  nextSwell,
+  startOffset,
+  startsRewind,
+  SWELL,
+  WHOOSH_GAP_MS,
+  whooshDue,
+} from './soundscape-mix';
 
 describe('the mix by hour', () => {
   it('is traffic by day and crickets by night', () => {
@@ -69,5 +78,30 @@ describe('the rewind sweep', () => {
     expect(intoThePast(500, 400)).toBe(true);
     expect(intoThePast(500, 500)).toBe(false);
     expect(intoThePast(500, 600)).toBe(false);
+  });
+});
+
+describe("the crickets' swell", () => {
+  it('draws every gap and level inside its bounds, at both ends of the random range', () => {
+    for (const r of [0, 0.25, 0.5, 0.999999]) {
+      const { gap, level } = nextSwell(() => r);
+      expect(gap).toBeGreaterThanOrEqual(SWELL.minGap);
+      expect(gap).toBeLessThan(SWELL.maxGap);
+      expect(level).toBeGreaterThanOrEqual(SWELL.lowest);
+      expect(level).toBeLessThanOrEqual(SWELL.highest);
+    }
+  });
+
+  it('does not repeat: successive draws differ', () => {
+    let x = 7;
+    const random = () => (x = (x * 1664525 + 1013904223) % 4294967296) / 4294967296;
+    const gaps = new Set(Array.from({ length: 20 }, () => nextSwell(random).gap));
+    expect(gaps.size).toBe(20);
+  });
+
+  it('starts the loop somewhere inside the recording', () => {
+    expect(startOffset(() => 0, 57)).toBe(0);
+    expect(startOffset(() => 0.999, 57)).toBeLessThan(57);
+    expect(startOffset(() => 0.5, 57)).toBeCloseTo(28.5);
   });
 });
