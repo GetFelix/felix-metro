@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { brownNoise, createSoundscape, type PageVisibility } from './soundscape';
-import { mixAt } from './soundscape-mix';
+import { mixAt, SWELL } from './soundscape-mix';
 
 // Just enough of the Web Audio API for the sound to build its graph, recording what it asks for.
 class Param {
@@ -245,6 +245,64 @@ describe('starting', () => {
     await vi.advanceTimersByTimeAsync(400);
     expect(await settled).toBe(false);
     expect(ambient.on).toBe(true);
+  });
+});
+
+describe('the night recording', () => {
+  const clip = { duration: 57 } as AudioBuffer;
+  const ready = () => new Promise<void>((done) => setTimeout(done, 0));
+  /** Sources that loop the recording, as opposed to the traffic hum. */
+  const loops = (ctx: FakeContext) => ctx.nodes.filter((n) => n.buffer === clip);
+
+  it('loops the recording once it has loaded, once however often it is switched on', async () => {
+    const ambient = createSoundscape(
+      open,
+      page(),
+      () => Promise.resolve(clip),
+      () => 0.5,
+    );
+    ambient.enable();
+    ambient.disable();
+    ambient.enable();
+    await ready();
+    expect(loops(made[0]!)).toHaveLength(1);
+    expect(loops(made[0]!)[0]!.loop).toBe(true);
+    expect(loops(made[0]!)[0]!.started).toBe(1);
+  });
+
+  it('is silent and tries again later when the file is missing', async () => {
+    let tries = 0;
+    const ambient = createSoundscape(
+      open,
+      page(),
+      () => (tries++ === 0 ? Promise.reject(new Error('404')) : Promise.resolve(clip)),
+      () => 0.5,
+    );
+    expect(ambient.enable()).toBe(true);
+    await ready();
+    expect(loops(made[0]!)).toHaveLength(0);
+    ambient.enable();
+    await ready();
+    expect(loops(made[0]!)).toHaveLength(1);
+  });
+
+  it('changes its level at random gaps while on, and stops when switched off', () => {
+    vi.useFakeTimers();
+    let x = 3;
+    const random = () => (x = (x * 1664525 + 1013904223) % 4294967296) / 4294967296;
+    const ambient = createSoundscape(open, page(), () => new Promise(() => {}), random);
+    ambient.enable();
+    const swell = () =>
+      made[0]!.nodes.filter((n) => n.gain.targets.some((t) => t >= SWELL.lowest && t <= SWELL.highest));
+    const steps = () => swell().reduce((n, node) => n + node.gain.targets.length, 0);
+    const first = steps();
+    expect(first).toBeGreaterThanOrEqual(1);
+    vi.advanceTimersByTime(SWELL.maxGap * 1000);
+    expect(steps()).toBeGreaterThan(first);
+    ambient.disable();
+    const after = steps();
+    vi.advanceTimersByTime(60_000);
+    expect(steps()).toBe(after);
   });
 });
 

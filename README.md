@@ -114,12 +114,15 @@ The page has an optional ambient sound. It is off until you turn it on: nothing 
 - Click the speaker button under the clock, or press `M`, to turn it on or off. The button shows a cross while the
   sound is off. Your choice is kept in this browser. Browsers only let a page make sound after a click or key press, so
   if you left it on, it starts again at your first click or key press on the next visit.
-- By day you hear traffic. As the lamps come on it fades into crickets, and back again at dawn. The mix follows the
-  city's clock, so it changes when you go back in time too.
+- By day you hear traffic. As the lamps come on it fades into a quiet field recording of crickets, and back again at
+  dawn. The mix follows the city's clock, so it changes when you go back in time too. The crickets drift a little
+  louder and softer at irregular moments and start from a different point each time the page is loaded, so nothing repeats on a beat.
 - Going back in time, with `J` or by dragging the timeline into the past, plays a short whoosh.
 - If the browser has no audio or blocks it, the button stays off and a short note says so.
 
-The sound is made in the browser with the Web Audio API, so there are no audio files to download. The button is not
+Traffic and the whoosh are made in the browser with the Web Audio API. The crickets are one 190 KB Ogg recording
+(CC0, credited in [prototype/assets/CREDITS.md](prototype/assets/CREDITS.md)) that the page downloads the first time
+you turn the sound on. If it cannot be loaded or your browser cannot play Ogg Opus, the night is traffic and quiet. The button is not
 shown with `?ui=0` or `?capture`. [docs/ui.md](docs/ui.md#sound) explains how it works.
 
 ## Building

@@ -196,14 +196,24 @@ row, so the list cannot fall behind the code it describes.
 
 The sound is three small modules, each with one job:
 
-| File                        | What it does                                                                           |
-| --------------------------- | -------------------------------------------------------------------------------------- |
-| `web/src/soundscape-mix.ts` | Pure numbers: how loud traffic and crickets are at an hour, and when a whoosh is due   |
-| `web/src/soundscape.ts`     | The Web Audio graph: filtered noise for traffic, pulsed tones for crickets, the whoosh |
-| `web/src/ui/sound.ts`       | The button, the `M` key and the remembered choice                                      |
+| File                        | What it does                                                                         |
+| --------------------------- | ------------------------------------------------------------------------------------ |
+| `web/src/soundscape-mix.ts` | Pure numbers: how loud traffic and crickets are at an hour, and when a whoosh is due |
+| `web/src/soundscape.ts`     | The Web Audio graph: filtered noise for traffic, the crickets recording, the whoosh  |
+| `web/src/ui/sound.ts`       | The button, the `M` key and the remembered choice                                    |
 
-There are no audio files. Traffic is brown noise through a low-pass filter with a slow swell, crickets are two pulsed
-tones, and the whoosh is a burst of noise swept from high to low. Nothing needs a licence or a credit.
+Traffic is brown noise through a low-pass filter with a slow swell, and the whoosh is a burst of noise swept from
+high to low. Both are made in the browser. The crickets are a recording: `prototype/assets/audio/night-crickets.ogg`,
+a CC0 field recording of a night chorus, cut into a seamless loop of 57 seconds, mono Opus at 24 kbit/s and
+normalised to -26 LUFS. Its source and licence are in `prototype/assets/CREDITS.md`.
+
+A loop that short would sound like a pattern, so the page varies it. The loop begins at a random point the first
+time the sound is turned on after a page load. While the sound is on, the crickets' level moves to a new random value between 55% and 100% every 4 to 11
+seconds, easing there rather than stepping. The bounds and the draw are `SWELL` and `nextSwell` in
+`web/src/soundscape-mix.ts`, tested with fixed random sources. At full night the recording plays at half level under the
+master volume, well below the traffic bed. The page fetches the file when the sound is first turned on, so a page that
+never turns it on never downloads it; if it fails to load or decode (older browsers cannot play Ogg Opus) the crickets are silent, and the next turn-on
+tries again, up to three times in all.
 
 The mix is a function of the city's hour and nothing else. It uses the same dusk and dawn curve as the sky (`night` in
 `web/src/daylight.ts`), so the crickets come in as the lamps do and traffic never cuts in or out. `mixAt(hour)` is unit

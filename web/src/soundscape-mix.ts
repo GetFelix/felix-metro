@@ -21,6 +21,22 @@ export function mixAt(hour: number): Mix {
   return { traffic: NIGHT_TRAFFIC + (1 - NIGHT_TRAFFIC) * (1 - dark), crickets: dark };
 }
 
+/** Seconds between changes to the crickets' level, and the range it moves in (1 is the recording as it is). */
+export const SWELL = { minGap: 4, maxGap: 11, lowest: 0.55, highest: 1 };
+
+/** When the crickets' level next changes and where it goes, drawn from `random` (0 up to 1, as `Math.random`). */
+export function nextSwell(random: () => number): { gap: number; level: number } {
+  return {
+    gap: SWELL.minGap + random() * (SWELL.maxGap - SWELL.minGap),
+    level: SWELL.lowest + random() * (SWELL.highest - SWELL.lowest),
+  };
+}
+
+/** Where in a recording of `duration` seconds to start looping, so each visit hears the night from somewhere new. */
+export function startOffset(random: () => number, duration: number): number {
+  return random() * duration;
+}
+
 /** The shortest gap between two whooshes, in milliseconds; a drag along the timeline would otherwise rattle. */
 export const WHOOSH_GAP_MS = 1500;
 
