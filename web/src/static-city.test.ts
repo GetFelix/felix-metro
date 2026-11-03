@@ -62,7 +62,8 @@ describe('the static city', () => {
     const o = placement(m, 3, 4);
     statics.add(o, m, 'roads', look);
     expect(o.parent).toBe(statics.handles);
-    expect(statics.handles.visible).toBe(false);
+    // Outside the scene, so three.js does not walk them every frame.
+    expect(scene.children).not.toContain(statics.handles);
     expect(scene.children).toContain(statics.group);
     const box = new THREE.Box3().setFromObject(o);
     expect(box.min.x).toBeCloseTo(2.5);
@@ -175,5 +176,13 @@ describe('the static city', () => {
     expect(shader.fragmentShader).toContain('sampler2DArray');
     expect(shader.fragmentShader).toContain('totalEmissiveRadiance *= vGlow');
     expect(shader.vertexShader).toContain('windowOn[int(glow.y + 0.5)]');
+  });
+
+  it('patches chunks the standard material really has', () => {
+    // If three.js renames one of these, the patch would silently do nothing and every building would draw plain.
+    const { vertexShader, fragmentShader } = THREE.ShaderLib.standard;
+    for (const chunk of ['common', 'uv_vertex']) expect(vertexShader).toContain(`#include <${chunk}>`);
+    for (const chunk of ['common', 'map_fragment', 'emissivemap_fragment'])
+      expect(fragmentShader).toContain(`#include <${chunk}>`);
   });
 });

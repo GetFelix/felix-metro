@@ -163,6 +163,14 @@ describe('measuring the display when the frames cannot say', () => {
     expect(refreshFromGaps([16.7, 16.7])).toBeNull();
   });
 
+  it('stops measuring when a tier is chosen by hand', () => {
+    const q = createQuality({ url: null, still: false, hidden: () => false, onChange: () => {} });
+    for (let i = 0; i < 200; i++) q.tick(33.3);
+    expect(q.skipFrame(1000)).toBe(true);
+    q.setTier('medium');
+    expect(q.skipFrame(1017)).toBe(false);
+  });
+
   it('does not measure a forced tier', () => {
     const q = createQuality({ url: 'high', still: false, hidden: () => false, onChange: () => {} });
     for (let i = 0; i < 200; i++) q.tick(33.3);

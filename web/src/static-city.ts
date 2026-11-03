@@ -121,8 +121,8 @@ export class StaticCity {
   /** The pools' meshes. */
   readonly group = new THREE.Group();
   /**
-   * The placements as ordinary objects, kept apart from drawing: a lot's objects are still what the page measures,
-   * scales for construction and picks with a ray. Nothing in here is ever drawn.
+   * The placements as ordinary objects, outside the scene: a lot's objects are still what the page measures, scales
+   * for construction and picks with a ray. Nothing in here is ever drawn.
    */
   readonly handles = new THREE.Group();
   private readonly packs = new Map<Pack, { textures: PackTextures; material: THREE.MeshStandardMaterial }>();
@@ -134,10 +134,10 @@ export class StaticCity {
     scene: THREE.Scene,
     private readonly shadows = true,
   ) {
-    this.handles.visible = false;
-    // A handle's world matrix is worked out when it is placed or changed, not every frame.
-    this.handles.matrixWorldAutoUpdate = false;
-    scene.add(this.group, this.handles);
+    // The handles group is never added to the scene: three.js walks every child of a scene each frame to update world
+    // matrices, which would cost thousands of nodes. A handle's world matrix is worked out when it is placed or
+    // changed, and the group's own is the identity.
+    scene.add(this.group);
   }
 
   /** The glow of the windows of each bucket, from `daylight` and `windowSwitch`. */

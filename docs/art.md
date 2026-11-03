@@ -232,11 +232,11 @@ node scripts/check-ambient.mjs http://localhost:5173/ambient.html /tmp/ambient
 
 Every road tile, lamp, building, tree and prop of the generated city is drawn as an instance of its model, not as an
 object of its own. A model's mesh is drawn once with a list of places, so the draw calls follow how many different
-models the city uses and not how big it is. A 4 by 4 city draws the same few hundred calls as a 2 by 2 one.
+models the city uses and not how big it is. A 4 by 4 city draws 235 calls on the high tier where a 2 by 2 one draws 205.
 
 ```mermaid
 flowchart LR
-  place["place(): a model, a spot and a look"] --> handle["Handle: a hidden object at the spot"]
+  place["place(): a model, a spot and a look"] --> handle["Handle: an object at the spot, never drawn"]
   place --> pool["Pool: an instance in the mesh of each part of the model"]
   handle --> uses["Construction scales it, a click ray hits it, the ambient life measures it"]
   uses -->|"sync()"| pool
@@ -245,8 +245,8 @@ flowchart LR
 `web/src/scene.ts` still places a model for each lot, road tile and tree, in the same order and with the same
 numbers, so every browser draws the same city. What changed is what `place` does with the result:
 
-- **A handle and a pool.** The placement is a clone of the model, as before, but it is kept in a hidden group
-  (`StaticCity.handles`) and never drawn. The page still scales it for a rising building, shoots a ray at it to find
+- **A handle and a pool.** The placement is a clone of the model, as before, but it is kept in a group outside
+  the scene (`StaticCity.handles`) and never drawn. The page still scales it for a rising building, shoots a ray at it to find
   the lot under a click and measures it for scaffolds and smoke. What is drawn is an instance in the pool of each part of
   the model (`web/src/static-city.ts`, `web/src/instance-pool.ts`). When a handle moves or is scaled, `sync` copies its
   matrix to its instance, and `ConstructionFx` calls it through `LotAccess.changed` every frame a lot is rising.
@@ -353,14 +353,14 @@ or walkers (`?run=1&n=0`), at two window sizes. "Before" is the build without in
 the build with it. Draw calls and triangles are for the frame, every pass included. The M4 Max was shared with other jobs,
 so the milliseconds move by about a tenth between runs; the draw calls do not.
 
-| City | Tier | Draw calls before | after | Triangles before | after | Frame ms 1280 x 720, before | after | Frame ms 2560 x 1440 at 2x, before | after |
-|---|---|---|---|---|---|---|---|---|---|
-| 2 by 2 | high | 6,317 | 205 | 3.29 M | 1.64 M | 10.1 | 1.8 | 16.0 | 15.6 |
-| 2 by 2 | medium | 4,274 | 200 | 2.19 M | 1.64 M | 6.0 | 1.3 | 8.9 | 5.3 |
-| 2 by 2 | low | 1,217 | 79 | 0.53 M | 0.54 M | 2.8 | 1.4 | 3.1 | 1.9 |
-| 4 by 4 | high | 25,103 | 235 | 12.8 M | 6.56 M | 35.9 | 4.4 | 40.1 | 16.1 |
-| 4 by 4 | medium | 16,980 | 210 | 8.55 M | 6.54 M | 21.4 | 2.5 | 26.8 | 6.8 |
-| 4 by 4 | low | 4,877 | 82 | 2.09 M | 2.16 M | 10.2 | 1.7 | 10.5 | 2.2 |
+| City | Tier | Draw calls, before / after | Triangles, before / after | Frame ms at 1280 x 720, before / after | Frame ms at 2560 x 1440 at 2x, before / after |
+|---|---|---|---|---|---|
+| 2 by 2 | high | 6,317 / 205 | 3.29 M / 1.64 M | 10.1 / 1.8 | 16.0 / 15.6 |
+| 2 by 2 | medium | 4,274 / 200 | 2.19 M / 1.64 M | 6.0 / 1.3 | 8.9 / 5.3 |
+| 2 by 2 | low | 1,217 / 79 | 0.53 M / 0.54 M | 2.8 / 1.4 | 3.1 / 1.9 |
+| 4 by 4 | high | 25,103 / 235 | 12.8 M / 6.56 M | 35.9 / 4.4 | 40.1 / 16.1 |
+| 4 by 4 | medium | 16,980 / 210 | 8.55 M / 6.54 M | 21.4 / 2.5 | 26.8 / 6.8 |
+| 4 by 4 | low | 4,877 / 82 | 2.09 M / 2.16 M | 10.2 / 1.7 | 10.5 / 2.2 |
 
 The draw calls no longer depend on the city's size: about one for each part of each model in use, a few for the ground,
 the lamps and the tower, and the passes the tier runs. The default page loads 2 by 2 districts and starts on the high
@@ -369,9 +369,11 @@ tier, which steps down by itself if frames are slow.
 Draws are not the whole cost. At 2560 by 1440 with a pixel ratio of 2, which is a 5K display such as the Studio
 Display, the high tier draws 14.7 million pixels through ambient occlusion, bloom, tilt-shift and the grade, and that
 costs about 10 ms of the 15.6 and does not change with the city. Medium has no ambient occlusion and costs 5.3 ms at the
-same size. The ambient occlusion pass is the next thing to look at for a high display.
+same size. The same live page (not this table's measuring page) took 24.2 ms before and 15.4 ms after at that size on high.
 
-**The movers.** Draw calls of the 2 by 2 city with N cars and walkers on SwiftShader (`check-traffic.mjs`). The first
+**The movers.** Draw calls of the 2 by 2 city with N cars and walkers on SwiftShader (`check-traffic.mjs`). That
+check reads the last of several frames and counts a few calls more than the measuring page above (226 against 205 on
+high with no movers), so compare numbers within one table. The first
 movers add a fixed 102 calls on high (a mesh for each part of each car model and each walker model, and the lights, in
 every pass the tier runs), 102 on medium and 59 on low, and more movers add none.
 

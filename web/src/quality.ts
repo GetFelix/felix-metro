@@ -230,6 +230,7 @@ export function createQuality(opts: QualityOptions): Quality {
       return forced ? 'forced' : opts.still ? 'still' : 'auto';
     },
     setTier(next) {
+      probe = null;
       forced = true;
       done = true;
       writeStored(next);
