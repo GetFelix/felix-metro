@@ -259,3 +259,28 @@ describe('renderCouncil goals', () => {
     expect(sections(root)).toEqual(['', '', 'policies']);
   });
 });
+
+describe('renderCouncil case', () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const sections = (root: Fake) => root.all('details')[0]!.children.map((c) => c.className);
+
+  it('adds the case last, keeps the same section across redraws, and drops it for a city without one', () => {
+    vi.stubGlobal('document', { createElement: (tag: string) => new Fake(tag) });
+    const root = new Fake('div');
+    const el = root as unknown as HTMLElement;
+    const view = councilView(event(1, calm), 1);
+    const rows = [{ name: 'Shop hours', value: 'Usual', again: null }];
+    const section = new Fake('div');
+    section.className = 'case';
+    const asHtml = section as unknown as HTMLElement;
+    renderCouncil(el, view, false, rows, null, null);
+    expect(sections(root)).toEqual(['', '', 'policies']);
+    renderCouncil(el, view, false, rows, null, asHtml);
+    expect(sections(root)).toEqual(['', '', 'policies', 'case']);
+    renderCouncil(el, councilView(event(2, calm), 1), false, rows, null, asHtml);
+    expect(root.allBy((c) => c === section)).toHaveLength(1);
+    expect(sections(root)).toEqual(['', '', 'policies', 'case']);
+    renderCouncil(el, view, false, rows, null, null);
+    expect(sections(root)).toEqual(['', '', 'policies']);
+  });
+});

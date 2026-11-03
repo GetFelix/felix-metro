@@ -60,6 +60,7 @@ function world() {
     water: [],
     nodes: [],
     segments: [],
+    streets: [],
   };
   const half = 5.5;
   const kind = new Map(lots.map((l) => [l.id, l.kind]));

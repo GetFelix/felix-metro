@@ -5,6 +5,11 @@ export const PALETTE = {
   grassFar: 0x4d8a4a,
   dirt: 0xa98a5e,
   water: 0x3f8fb0,
+  // Water shades by depth around the style frame's water, and sand is what the grass turns to at the shore.
+  shallow: 0x72bcc6,
+  deep: 0x2c6d92,
+  foam: 0xf2fafa,
+  sand: 0xdcc594,
   lamp: 0xffc46b,
   window: new THREE.Color(1.0, 0.66, 0.32),
   headlight: 0xfff1d0,
