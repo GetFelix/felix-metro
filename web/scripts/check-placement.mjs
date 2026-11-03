@@ -111,8 +111,37 @@ setInterval(async () => {
  */
 const READY_MS = 120_000;
 const OPEN_TRIES = 3;
+
+/**
+ * Software WebGL draws every page's frames on the one GPU process, and a page that is already drawing keeps it busy
+ * enough that one still loading never gets its first frames (A sat for 6 minutes behind B while the GPU process ran at
+ * 360% and A's main thread waited on it). So frames are parked on every open page while another one loads. The page
+ * stays signed in and live; it just does not draw until the new one is up.
+ */
+const HOLD = process.env.PLACEMENT_HOLD !== '0';
+const parkFrames = () => {
+  const real = window.requestAnimationFrame.bind(window);
+  const parked = [];
+  let held = false;
+  window.requestAnimationFrame = (cb) => (held ? (parked.push(cb), 0) : real(cb));
+  window.__holdFrames = (on) => {
+    held = on;
+    if (!on) for (const cb of parked.splice(0)) real(cb);
+  };
+};
+const holdFrames = (on) =>
+  Promise.all(
+    pages.map((page) =>
+      within(
+        5000,
+        page.evaluate((h) => window.__holdFrames(h), on).catch(() => {}),
+      ),
+    ),
+  );
+
 async function open(name, who, options = {}) {
   for (let attempt = 1; ; attempt++) {
+    if (HOLD) await holdFrames(true);
     const started = Date.now();
     progress(`opening ${name}`);
     let context = null;
@@ -124,6 +153,7 @@ async function open(name, who, options = {}) {
       context = mine;
       if (dead) return mine.close().then(() => 'abandoned');
       await mine.addInitScript((t) => sessionStorage.setItem('metro.token', t), who);
+      await mine.addInitScript(parkFrames);
       const tab = await mine.newPage();
       page = tab;
       if (dead) return mine.close().then(() => 'abandoned');
@@ -146,6 +176,7 @@ async function open(name, who, options = {}) {
       'no answer from the browser',
     );
     if (why !== null) dead = true;
+    if (HOLD) await holdFrames(false);
     if (why === null) {
       progress(`opened ${name}`);
       console.log(`opened ${name} in ${Date.now() - started} ms${attempt > 1 ? ` (try ${attempt})` : ''}`);
@@ -282,11 +313,8 @@ async function answer(page, before) {
 }
 
 // 2. Two builders. Pick two bare lots in the development area from what A sees.
-// Opened together: a page that is already drawing starves one still loading (50 s against about 10 s).
-const [a, b] = await Promise.all([
-  open('A (mayor, mouse)', mayor),
-  open('B (architect, touch)', architect, { hasTouch: true }),
-]);
+const b = await open('B (architect, touch)', architect, { hasTouch: true });
+const a = await open('A (mayor, mouse)', mayor);
 for (const { page } of [a, b]) {
   await until(page, () => window.__build.state().unavailable === null, null, 'the builder was never allowed');
 }
