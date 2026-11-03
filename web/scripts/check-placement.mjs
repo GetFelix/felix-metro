@@ -118,7 +118,6 @@ const OPEN_TRIES = 3;
  * 360% and A's main thread waited on it). So frames are parked on every open page while another one loads. The page
  * stays signed in and live; it just does not draw until the new one is up.
  */
-const HOLD = process.env.PLACEMENT_HOLD !== '0';
 const parkFrames = () => {
   const real = window.requestAnimationFrame.bind(window);
   const parked = [];
@@ -141,7 +140,7 @@ const holdFrames = (on) =>
 
 async function open(name, who, options = {}) {
   for (let attempt = 1; ; attempt++) {
-    if (HOLD) await holdFrames(true);
+    await holdFrames(true);
     const started = Date.now();
     progress(`opening ${name}`);
     let context = null;
@@ -176,7 +175,7 @@ async function open(name, who, options = {}) {
       'no answer from the browser',
     );
     if (why !== null) dead = true;
-    if (HOLD) await holdFrames(false);
+    await holdFrames(false);
     if (why === null) {
       progress(`opened ${name}`);
       console.log(`opened ${name} in ${Date.now() - started} ms${attempt > 1 ? ` (try ${attempt})` : ''}`);
