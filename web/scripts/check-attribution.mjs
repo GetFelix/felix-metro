@@ -215,17 +215,26 @@ await touch.waitForFunction(() => Number.isFinite(window.__live?.tick) && window
   polling: 250,
   timeout: 5 * MINUTE,
 });
-await touch.waitForFunction((l) => window.__lots.built().some((b) => b.lot === l), longLot, {
-  polling: 100,
-  timeout: 60_000,
-});
+for (const lot of [target.lot, longLot]) {
+  await touch.waitForFunction((l) => window.__lots.built().some((b) => b.lot === l), lot, {
+    polling: 100,
+    timeout: 60_000,
+  });
+}
 await touch.waitForTimeout(3000);
 await touch.evaluate(() => {
   window.__touches = [];
   for (const type of ['pointerdown', 'pointerup', 'pointercancel']) {
     document.addEventListener(
       type,
-      (e) => window.__touches.push(`${type} made ${Math.round(e.timeStamp)} handled ${Math.round(performance.now())}`),
+      (e) => {
+        const t = e.target;
+        const where = `${t.tagName}#${t.id}.${t.className} at ${Math.round(e.clientX)},${Math.round(e.clientY)}`;
+        window.__touches.push(
+          `${type} on ${where} made ${Math.round(e.timeStamp)} handled ${Math.round(performance.now())}, ` +
+            `body "${document.body.className}", lot under it ${window.__lots.pick(e.clientX, e.clientY)}`,
+        );
+      },
       true,
     );
   }
