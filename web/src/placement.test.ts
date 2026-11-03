@@ -82,10 +82,39 @@ describe('when the tools can be used', () => {
     expect(placement.fix()).toBeNull();
   });
 
-  it('names a fork by its lineage in the command to start it', () => {
-    expect(notRunning('harbor_bridge')).toBe(
-      'Harbor~bridge is not running. Start it with dev/city.sh harbor~bridge (./city.sh harbor~bridge in the release bundle).',
+  it('does not send the stand-in builder to ?as=mayor, which is who they already are', async () => {
+    const mayor: SignedIn = { ...stand, user: 'mayor' };
+    const link = { name: 'Ana', signedIn: mayor, blocked: () => 'viewer' as Blocked | null, send: async () => {} };
+    const base = { atTip: () => true, wantsLive: true };
+    expect(whyNot({ ...base, link })).toBe('Signed in as mayor, who may not build in this city.');
+    expect(setup({ link }).placement.fix()).toBeNull();
+    const refused = setup({
+      link: { ...link, blocked: () => null, send: async () => Promise.reject(new GatewayError('forbidden', 'no')) },
+    });
+    refused.placement.select('build');
+    expect(await refused.placement.commit(1)).toBe('Signed in as mayor, who may not build in this city.');
+  });
+
+  it('does not name a sign-in that names no one', () => {
+    const base = { atTip: () => true, wantsLive: true };
+    const link = {
+      name: 'Ana',
+      signedIn: { ...stand, user: '' },
+      blocked: () => 'viewer' as Blocked | null,
+      send: async () => {},
+    };
+    expect(whyNot({ ...base, link })).toBe(
+      "You're signed in but can only watch. Open ?as=mayor in a new tab to build.",
     );
+  });
+
+  it('names a fork by its lineage, and only tells the held-back cities to use city.sh', () => {
+    const restart = 'Check that the sim is up, or restart the stack with dev/up.sh (./up.sh in the release bundle).';
+    expect(notRunning('harbor_bridge')).toBe(`Harbor~bridge is not running. ${restart}`);
+    expect(notRunning('harbor')).toBe(`Harbor is not running. ${restart}`);
+    for (const held of ['lakeside', 'pier', 'ember']) {
+      expect(notRunning(held)).toMatch(new RegExp(`Start it with dev/city.sh ${held} \\(`));
+    }
   });
 
   it('links ?as=mayor only on the stand-in', () => {
@@ -103,6 +132,7 @@ describe('when the tools can be used', () => {
     expect(whyNot({ ...base, link })).toBe(
       'Pier is not running. Start it with dev/city.sh pier (./city.sh pier in the release bundle).',
     );
+    expect(whyNot({ ...base, link: { ...link, signedIn: { ...stand, city: 'harbor' } } })).toMatch(/restart the stack/);
   });
 
   it('will not pick a tool while blocked, and puts it away if the page leaves the tip', () => {

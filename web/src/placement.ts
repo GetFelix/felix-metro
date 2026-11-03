@@ -31,7 +31,7 @@ export type Blocked = 'viewer' | 'idle' | 'down';
 
 /** Who is signed in, as far as saying what to do about a refusal needs. */
 export interface SignedIn {
-  /** The stand-in's user (`viewer`), or the display name a real provider gives. */
+  /** The stand-in's user (`viewer`), or the display name a real provider gives. Empty when the token names no one. */
   readonly user: string;
   /** Whether the provider is the development stand-in, where `?as` picks the user. */
   readonly standIn: boolean;
@@ -120,16 +120,23 @@ export const FIX_LABEL = `?as=${BUILDER}`;
 
 /** Why a sign-in without the build right cannot build, and the way out. */
 export function watchOnly(who: SignedIn): string {
-  const first = `Signed in as ${who.user}, who can only watch.`;
-  return who.standIn
-    ? `${first} Open ${FIX_LABEL} in a new tab to build.`
-    : `${first} Building here needs the build role, ${buildRole(who.city)}.`;
+  const first = who.user ? `Signed in as ${who.user}, who can only watch.` : "You're signed in but can only watch.";
+  if (!who.standIn) return `${first} Building here needs the build role, ${buildRole(who.city)}.`;
+  // The stand-in's builder is already the one refused, so ?as=mayor would only open the same sign-in again.
+  if (who.user === BUILDER) return 'Signed in as mayor, who may not build in this city.';
+  return `${first} Open ${FIX_LABEL} in a new tab to build.`;
 }
+
+/** The cities the dev stack's sim holds back until `dev/city.sh` starts them (`SIM_ON_DEMAND` in dev/compose.yml). */
+const HELD_BACK = ['lakeside', 'pier', 'ember'];
 
 /** What to do about a city the sim has not started. */
 export function notRunning(city: string): string {
   const name = city.replaceAll('_', '~');
-  return `${displayName(name)} is not running. Start it with dev/city.sh ${name} (./city.sh ${name} in the release bundle).`;
+  const start = HELD_BACK.includes(name)
+    ? `Start it with dev/city.sh ${name} (./city.sh ${name} in the release bundle).`
+    : 'Check that the sim is up, or restart the stack with dev/up.sh (./up.sh in the release bundle).';
+  return `${displayName(name)} is not running. ${start}`;
 }
 
 /** Why the tools are not usable now, in plain words, or null when they are. */
@@ -196,7 +203,8 @@ export class Placement {
 
   /** The link a message of {@link watchOnly} carries, which only the development sign-in has. */
   fix(): Fix | null {
-    return this.deps.link?.signedIn.standIn ? { label: FIX_LABEL, user: BUILDER } : null;
+    const who = this.deps.link?.signedIn;
+    return who?.standIn && who.user !== BUILDER ? { label: FIX_LABEL, user: BUILDER } : null;
   }
 
   /** Pick a tool, or put it away with `null` or by picking the one already held. False, and no change, when blocked. */

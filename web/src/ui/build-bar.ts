@@ -5,7 +5,7 @@ import { signedInAs } from '../auth';
 import { buildAction } from '../build-keys';
 import { families } from '../build';
 import { PHOTO_CLASS } from './photo';
-import type { Placement, Tool } from '../placement';
+import type { Fix, Placement, Tool } from '../placement';
 import { note, setMessage, type MessageLink } from './toast';
 
 const HOUSE = `<path d="M3 17V9l7-5 7 5v8z"/>`;
@@ -53,6 +53,10 @@ function toolButton(id: string, label: string, key: string, icon: string): HTMLB
   return button;
 }
 
+/** The link a refusal carries: this page opened as the user that can build. */
+export const messageLink = (fix: Fix | null, href: string): MessageLink | null =>
+  fix && { label: fix.label, href: signedInAs(href, fix.user) };
+
 /** Put the controls in `tools`, the row under the clock, and the panel after it. */
 export function createBuildBar(tools: HTMLElement, placement: Placement, sheetOpen: () => boolean): BuildBar {
   const build = toolButton('build-button', BUILD_LABEL, 'B', BUILD_ICON);
@@ -93,10 +97,7 @@ export function createBuildBar(tools: HTMLElement, placement: Placement, sheetOp
     select.append(group);
   }
 
-  const messageLink = (): MessageLink | null => {
-    const fix = placement.fix();
-    return fix && { label: fix.label, href: signedInAs(location.href, fix.user) };
-  };
+  const link = () => messageLink(placement.fix(), location.href);
 
   let doneTimer: ReturnType<typeof setTimeout> | null = null;
   let shownStatus = '';
@@ -105,7 +106,7 @@ export function createBuildBar(tools: HTMLElement, placement: Placement, sheetOp
     const text = s.state === 'idle' ? '' : s.text;
     if (text === shownStatus) return;
     shownStatus = text;
-    setMessage(status, text, messageLink());
+    setMessage(status, text, link());
     status.dataset.state = s.state;
     if (doneTimer) clearTimeout(doneTimer);
     doneTimer = null;
@@ -150,7 +151,7 @@ export function createBuildBar(tools: HTMLElement, placement: Placement, sheetOp
     const now = performance.now();
     if (text === said.text && now - said.at < SAY_AGAIN_MS) return;
     said = { text, at: now };
-    note(text, messageLink());
+    note(text, link());
   };
 
   const pick = (tool: Tool) => {

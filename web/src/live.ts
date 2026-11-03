@@ -299,7 +299,7 @@ export async function connectLive(
     who = nameFrom(token);
     const standIn = isStandIn(oidc.issuer);
     const named = nameFrom(token, '');
-    signedIn = { user: (standIn ? subjectOf(token) : named || subjectOf(token)) || 'an unnamed user', standIn, city };
+    signedIn = { user: (standIn ? subjectOf(token) : named || subjectOf(token)) || '', standIn, city };
     const gateway = await Gateway.connect(url, city, token);
     current = gateway;
     let end = () => {};
