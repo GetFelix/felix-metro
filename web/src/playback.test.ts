@@ -9,7 +9,7 @@ vi.mock('./core/felix_metro_core.js', () => ({
   decodeRecord: (bytes: Uint8Array) => new TextDecoder().decode(bytes),
 }));
 vi.mock('./auth', () => ({ signIn: async () => 'token' }));
-const { Playback, handOver, JOIN_LAG } = await import('./playback');
+const { Playback, handOver, joinLag } = await import('./playback');
 
 const city = { lots: [] } as unknown as City;
 const trips: Trips = { trip: () => undefined };
@@ -139,7 +139,7 @@ describe('Playback', () => {
       const ticks = seq.map((a) => a[1]);
       expect(ticks[0]).toBe(201);
       expect(ticks).toEqual(Array.from({ length: ticks.length }, (_, i) => 201 + i));
-      expect(ticks.at(-1)!).toBeGreaterThanOrEqual(log.length - 1 - JOIN_LAG - 2);
+      expect(ticks.at(-1)!).toBeGreaterThanOrEqual(log.length - 1 - joinLag(p.state.speed) - 2);
     }
   });
 

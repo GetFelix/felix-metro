@@ -762,10 +762,17 @@ lose a record:
    records. A record at or before a district's newest tick is skipped, so a
    reconnect can read from the keyframe again.
 
-The page draws one tick behind the newest one every district has, so a car
-always has both ends of its motion. Its clock runs at the sim's speed and is
-steered to keep that one tick of lag: a late record slows it, a burst speeds it
-up, it never passes the newest tick and never runs backwards. The hour of day
+The page draws a little behind the newest tick every district has, so a car
+always has both ends of its motion. The delay is half a second of real time,
+which is 2 ticks at 4 ticks a second and 8 at 16, and never under 1 tick:
+records arrive about every 250 ms at the default speed with tens of ms of
+jitter, and a clock one tick behind ran out of road whenever one was late. The
+clock runs at the sim's speed and is steered to keep that lag: a late record
+slows it, a burst speeds it up, it never passes the newest tick and never runs
+backwards. Every frame places cars at a fraction of a tick between the two
+ticks around the clock, and nothing is extrapolated past the newest tick.
+Positions are a function of the tick alone, so a replay or a seek to a tick
+draws the same picture whenever it is made. The hour of day
 is the tick's, never the wall clock's, so the sun, lamps and windows follow the
 sim. A `trip` event gives a resident's route; the page rebuilds the trip from
 its legs and the resident's schedule (`Resident::trip_from_route`), which

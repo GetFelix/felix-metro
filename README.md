@@ -76,6 +76,11 @@ tick's events, such as a resident leaving home on a route or a building going
 up. It does not write positions. The browser moves cars along their routes
 itself. Every city hour each district also commits a keyframe, its full state.
 
+Cars and walkers move on every frame, not once a tick: the page keeps its clock half a
+second of real time behind the newest tick (2 ticks at the default speed), so a record that arrives a little late does not
+stall the traffic, and places each one a fraction of the way between two ticks. A trip ends
+at the lot's door, where the building hides it; nothing shrinks into the ground.
+
 To show an earlier moment, the browser reads each district's nearest keyframe
 and the events after it, up to that moment. To play forward, it subscribes from
 there. [docs/design.md](docs/design.md) has the details.
