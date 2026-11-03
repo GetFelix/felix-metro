@@ -21,6 +21,12 @@ export function createHud(renderer: THREE.WebGLRenderer, quality: Quality) {
   let calls = 0;
   let triangles = 0;
 
+  // The refresh rate the tier choice measured, when it had to, so a report of a slow page says which display it ran on.
+  function display() {
+    const ms = quality.refreshMs;
+    return ms === null ? '' : `  display ${(1000 / ms).toFixed(0)} Hz`;
+  }
+
   function refresh() {
     scratch.set(ring);
     const sorted = scratch.subarray(0, filled).sort();
@@ -29,7 +35,7 @@ export function createHud(renderer: THREE.WebGLRenderer, quality: Quality) {
     el.textContent =
       `${(1000 / Math.max(median, 0.1)).toFixed(0)} fps  ${median.toFixed(1)} ms median  ${p95.toFixed(1)} ms p95\n` +
       `${calls} draws  ${triangles} tris\n` +
-      `tier ${quality.tier} (${quality.mode})`;
+      `tier ${quality.tier} (${quality.mode})${display()}`;
   }
 
   return {

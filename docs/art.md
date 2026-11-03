@@ -183,8 +183,8 @@ flowchart LR
 The tick is the one the clock shows: the tick drawn, the scrub target while the timeline is dragged, or the held hour
 under `?t=`. A city with no live connection draws the same effects from the hour.
 
-**The truck and the vans** come out of a lot's door and go into one at the end of the round, shrinking at the threshold as
-the sim's cars do. They are placed by `Traffic` after the voyages in each round (`Traffic.extras`), so they are
+**The truck and the vans** come out of a lot's door and go into one at the end of the round, going up to its door at full size,
+as the sim's cars do. They are placed by `Traffic` after the voyages in each round (`Traffic.extras`), so they are
 culled, lit at night and drawn instanced with the other cars. Kinds 1 to 6 are the sim's, and the van reuses the sim's
 delivery model, kind 6. Only the garbage truck, kind 7, is the page's own; the sim never logs a kind above 6, and a test
 keeps it so (`CAR_MODELS` in `web/src/ambient.ts`).
@@ -228,6 +228,45 @@ npx vite --port 5173
 node scripts/check-ambient.mjs http://localhost:5173/ambient.html /tmp/ambient
 ```
 
+## The static city
+
+Every road tile, lamp, building, tree and prop of the generated city is drawn as an instance of its model, not as an
+object of its own. A model's mesh is drawn once with a list of places, so the draw calls follow how many different
+models the city uses and not how big it is. A 4 by 4 city draws 235 calls on the high tier where a 2 by 2 one draws 205.
+
+```mermaid
+flowchart LR
+  place["place(): a model, a spot and a look"] --> handle["Handle: an object at the spot, never drawn"]
+  place --> pool["Pool: an instance in the mesh of each part of the model"]
+  handle --> uses["Construction scales it, a click ray hits it, the ambient life measures it"]
+  uses -->|"sync()"| pool
+```
+
+`web/src/scene.ts` still places a model for each lot, road tile and tree, in the same order and with the same
+numbers, so every browser draws the same city. What changed is what `place` does with the result:
+
+- **A handle and a pool.** The placement is a clone of the model, as before, but it is kept in a group outside
+  the scene (`StaticCity.handles`) and never drawn. The page still scales it for a rising building, shoots a ray at it to find
+  the lot under a click and measures it for scaffolds and smoke. What is drawn is an instance in the pool of each part of
+  the model (`web/src/static-city.ts`, `web/src/instance-pool.ts`). When a handle moves or is scaled, `sync` copies its
+  matrix to its instance, and `ConstructionFx` calls it through `LotAccess.changed` every frame a lot is rising.
+- **A look in each instance.** Buildings used to differ by material: a recoloured copy of the pack's colormap for each
+  wall and roof choice, and a material for each lit level and window hour. That made nearly every building its own draw
+  call. Now one material covers a whole pack. Its colormap is a texture array with the original in layer 0 and a
+  recolouring for each of the six wall and roof choices after it, and an instance carries its layer, how brightly its
+  windows glow and which of the eight light-hour buckets it follows. The hour sets the glow of each bucket as one
+  uniform, so night falling still costs no recompile.
+- **Lamps.** The bulb, the glow and the pool of light under each lamp are three pools shared by every lamp. A lamp
+  switches on at its own hour, so each instance has its own brightness: the bulb's colour, and the glow's and pool's
+  alpha. The glow and the pool are additive and are hidden from the occlusion and depth passes, as before.
+- **What is not instanced.** A preview of a builder's tool, the building coming down on a demolished lot, the style
+  frame's hand-made city and the 24 scaffolds are still objects of their own, because they are tinted or scaled apart
+  from the city. The style frame (`?layout=frame`) therefore still matches `prototype/style-frame.html` pixel for pixel.
+
+Two more costs went with it, and they do not depend on instancing. The sun's shadow map was drawn again by every pass
+that draws the scene: twice a frame on medium and three times on high. It is now drawn once. And the distance blur on high read a depth
+pass of its own, which the ambient occlusion pass had already drawn; it now reads that.
+
 ## Cars and walkers
 
 Every car and walker on screen stands for one voyage in the log. The page works out where each one is from the tick
@@ -244,7 +283,9 @@ flowchart LR
 ```
 
 `web/src/traffic.ts` (`Traffic`) holds the maths: the lane or pavement a voyage keeps to, its heading, and the turn into
-the lot at each end of a trip. It places every voyage between `fleet.begin(dt)` and `fleet.end()` and keeps nothing
+the lot at each end of a trip: a car or walker turns in from the road and goes up to the lot's door (just inside the near edge of
+the tile) at full size, and is released there, where the building hides it. It does not shrink or slide into the lot's
+middle. It places every voyage between `fleet.begin(dt)` and `fleet.end()` and keeps nothing
 between rounds, so what is drawn is exactly what the last update placed. `web/src/fleet.ts` turns those poses into
 instances.
 `positionOf(voyage, tick)` gives the same pose for one voyage without placing it, so the camera can follow a resident the
@@ -305,42 +346,49 @@ cd web && npm run build && npx vite preview --port 4173
 # then open http://127.0.0.1:4173/traffic-load.html?run=1&districts=4&tier=medium&n=5400
 ```
 
-The frame rate is capped by the display's refresh rate. A 16 district city at medium, with 160 movers, was 17,108 draw
-calls and 9.3 million triangles on SwiftShader. A 2 by 2 city with no movers was 4,274 calls (the table below, from an
-earlier build, has 4,240), and 160 movers add about 150. What is left to cut at scale is the static city, which is
-placed one model at a time, and not the cars and walkers, whose cost is flat.
+The frame rate is capped by the display's refresh rate, so to see what a frame costs, measure with the cap off. In
+Chromium that is `--disable-frame-rate-limit --disable-gpu-vsync`, and the page's median is then the time a frame takes,
+not the display's interval.
 
-The numbers below are in headless Chromium on SwiftShader, which draws with the CPU, at 1280 by 720, on an Apple M4 Max
-shared with other jobs. Draw calls are exact. "Submit" is the median ms over 20 frames the page spent in its own code
-and in WebGL calls, which is what draw calls cost on a real GPU. "Frame" waits for SwiftShader to finish drawing, which
-instancing does not speed up. It moved by as much as 50% between two runs of the same build with other jobs running, so
-the table gives the best of two runs.
+**The static city.** Measured on an Apple M4 Max, in headless Chromium on its Metal GPU with the cap off, with no cars
+or walkers (`?run=1&n=0`), at two window sizes. "Before" is the build without instancing the city (`9fb8db0`), "after"
+the build with it. Draw calls and triangles are for the frame, every pass included. The M4 Max was shared with other jobs,
+so the milliseconds move by about a tenth between runs; the draw calls do not.
 
-| Tier   | Movers | Draw calls before | Draw calls after | Submit ms before | Submit ms after | Frame ms before | Frame ms after |
-| ------ | ------ | ----------------- | ---------------- | ---------------- | --------------- | --------------- | -------------- |
-| high   | 0      | 6,270             | 6,270            | 7.1              | 7.7             | 468             | 470            |
-| high   | 100    | 8,049             | 6,489            | 11.1             | 8.8             | 526             | 525            |
-| high   | 400    | 13,665            | 6,489            | 19.6             | 8.9             | 704             | 690            |
-| high   | 800    | 20,862            | 6,489            | 32.3             | 8.9             | 982             | 912            |
-| medium | 0      | 4,240             | 4,240            | 5.4              | 6.0             | 267             | 264            |
-| medium | 80     | 5,214             | 4,395            | 7.2              | 6.2             | 296             | 297            |
-| medium | 160    | 6,180             | 4,395            | 8.9              | 5.8             | 328             | 330            |
-| medium | 400    | 9,170             | 4,395            | 13.6             | 5.7             | 428             | 412            |
-| low    | 0      | 1,216             | 1,216            | 2.5              | 2.7             | 107             | 107            |
-| low    | 40     | 1,449             | 1,273            | 3.0              | 2.7             | 112             | 113            |
-| low    | 80     | 1,685             | 1,275            | 3.6              | 2.8             | 118             | 118            |
-| low    | 400    | 3,571             | 1,275            | 6.8              | 2.7             | 167             | 161            |
+| City | Tier | Draw calls, before / after | Triangles, before / after | Frame ms at 1280 x 720, before / after | Frame ms at 2560 x 1440 at 2x, before / after |
+|---|---|---|---|---|---|
+| 2 by 2 | high | 6,317 / 205 | 3.29 M / 1.64 M | 10.1 / 1.8 | 16.0 / 15.6 |
+| 2 by 2 | medium | 4,274 / 200 | 2.19 M / 1.64 M | 6.0 / 1.3 | 8.9 / 5.3 |
+| 2 by 2 | low | 1,217 / 79 | 0.53 M / 0.54 M | 2.8 / 1.4 | 3.1 / 1.9 |
+| 4 by 4 | high | 25,103 / 235 | 12.8 M / 6.56 M | 35.9 / 4.4 | 40.1 / 16.1 |
+| 4 by 4 | medium | 16,980 / 210 | 8.55 M / 6.54 M | 21.4 / 2.5 | 26.8 / 6.8 |
+| 4 by 4 | low | 4,877 / 82 | 2.09 M / 2.16 M | 10.2 / 1.7 | 10.5 / 2.2 |
 
-The 0 rows are the city alone: its buildings, roads and trees are still one object each. Before, every mover added about
-18 draw calls. Now the first movers add a fixed 219 on high, 155 on medium and 59 on low (a mesh for each part of each
-car model and each walker model, and the lights, in every pass the tier runs), and more movers add none. The frame time
-SwiftShader needs is the same before and after within the noise, because the CPU rasterizer pays for triangles and not
-for calls. The "before" numbers come from a build of the commit before this change (`a049c20`) with the same page and the old
-call into `Traffic`, which is not kept in the repository; it added about 7,400 draw calls for 400 movers.
+The draw calls no longer depend on the city's size: about one for each part of each model in use, a few for the ground,
+the lamps and the tower, and the passes the tier runs. The default page loads 2 by 2 districts and starts on the high
+tier, which steps down by itself if frames are slow.
 
-SwiftShader says nothing about a GPU's fill rate or vertex rate, so it cannot say how many cars a laptop GPU can draw.
-What it shows is that the draw calls and the page's own time no longer grow with the number of movers, which is what
-the old limits guarded. What still grows is the triangles each mover adds in each pass that draws it.
+Draws are not the whole cost. At 2560 by 1440 with a pixel ratio of 2, which is a 5K display such as the Studio
+Display, the high tier draws 14.7 million pixels through ambient occlusion, bloom, tilt-shift and the grade, and that
+costs about 10 ms of the 15.6 and does not change with the city. Medium has no ambient occlusion and costs 5.3 ms at the
+same size. The same live page (not this table's measuring page) took 24.2 ms before and 15.4 ms after at that size on high.
+
+**The movers.** Draw calls of the 2 by 2 city with N cars and walkers on SwiftShader (`check-traffic.mjs`). That
+check reads the last of several frames and counts a few calls more than the measuring page above (226 against 205 on
+high with no movers), so compare numbers within one table. The first
+movers add a fixed 102 calls on high (a mesh for each part of each car model and each walker model, and the lights, in
+every pass the tier runs), 102 on medium and 59 on low, and more movers add none.
+
+| Movers | high | medium | low |
+|---|---|---|---|
+| 0 | 226 | 222 | 79 |
+| 100 | 328 | 324 | 138 |
+| 400 | 328 | 324 | 138 |
+| 800 | 328 | 324 | 138 |
+
+SwiftShader draws with the CPU, so its frame time follows triangles and not calls and says nothing about a GPU. What
+it shows is that the draw calls and the page's own time (2 to 3 ms on high) do not grow with the number of movers or the
+size of the city. What still grows is the triangles each mover adds in each pass that draws it.
 
 ## Water and coast
 
@@ -424,9 +472,16 @@ steps down a tier as before, and a lower tier has a lower limit. High has no lim
 times for the first 3 seconds after the city is ready, ignoring the first 5
 frames and any time the tab is hidden. It steps down one tier when the median
 is over 22 ms, or over 1.3 times the display's frame interval if that is
-longer. The interval is estimated from the fastest tenth of frames and held
-between 4 and 33.4 ms, so a steady 30 Hz display is not treated as slow.
-After a step it rebuilds the post chain and judges another 1.5 seconds,
+longer. The interval is held between 4 and 33.4 ms, so a steady 30 Hz display is
+not treated as slow.
+
+The frames alone cannot tell a 30 Hz display from a 60 Hz one whose frames each take two refreshes: both show a steady
+33 ms. So the interval is first estimated from the fastest tenth of the frames, and when that says the frames are slow
+but fit for a 30 Hz display, the choice measures the display instead. `Quality.skipFrame` makes the page draw nothing
+for about a dozen animation frames, and the gaps between them are the display's refresh interval (about 0.2 s at 60 Hz).
+The shortest quarter of the gaps gives the interval, and gaps over 100 ms (a stall, a hidden tab) are left out. If it
+could not read a rhythm in 60 frames it judges by the frames alone, as before. `?hud` prints the display it measured,
+such as `display 60 Hz`. After a step it rebuilds the post chain and judges another 1.5 seconds,
 repeating until a window passes or it reaches low. It never steps up. A frozen
 scene (`?still`) has no meaningful frame times, so it never chooses on its own
 and ignores a saved tier.

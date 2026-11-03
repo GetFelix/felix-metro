@@ -15,7 +15,7 @@ function colormapCopy(tex: THREE.Texture) {
 
 // Windows are the light-blue swatches of Kenney's colormap. A copy of the colormap with only those swatches kept
 // becomes the emissive map, so lit windows come from the texture the models already use.
-function windowMask(tex: THREE.Texture) {
+export function windowMask(tex: THREE.Texture) {
   const { c, g, d } = colormapCopy(tex);
   for (let i = 0; i < d.data.length; i += 4) {
     const [r, gg, b] = [d.data[i]!, d.data[i + 1]!, d.data[i + 2]!];
@@ -34,9 +34,23 @@ function windowMask(tex: THREE.Texture) {
   return m;
 }
 
-// The colormap with its wall swatches and roof swatches tinted from the palette lists.
-function variantMap(tex: THREE.Texture, v: number) {
-  const { c, g, d } = colormapCopy(tex);
+/** How many wall and roof choices a variant number can name. */
+export const VARIANTS = WALLS.length;
+
+/** The colormap's pixels as they are. */
+export function colormapPixels(tex: THREE.Texture) {
+  return colormapCopy(tex).d;
+}
+
+/** The colormap with its wall swatches and roof swatches tinted from the palette lists, as pixels. */
+export function variantPixels(tex: THREE.Texture, v: number) {
+  const { d } = tintedCopy(tex, v);
+  return d;
+}
+
+function tintedCopy(tex: THREE.Texture, v: number) {
+  const copy = colormapCopy(tex);
+  const { d } = copy;
   const wall = new THREE.Color(WALLS[v % WALLS.length]!);
   const roof = new THREE.Color(ROOFS[(v * 3) % ROOFS.length]!);
   for (let i = 0; i < d.data.length; i += 4) {
@@ -58,6 +72,12 @@ function variantMap(tex: THREE.Texture, v: number) {
       d.data[i + 2] = Math.min(255, tint.b * 255 * k);
     }
   }
+  return copy;
+}
+
+// The colormap with its wall swatches and roof swatches tinted from the palette lists.
+function variantMap(tex: THREE.Texture, v: number) {
+  const { c, g, d } = tintedCopy(tex, v);
   g.putImageData(d, 0, 0);
   const t = new THREE.CanvasTexture(c);
   t.flipY = tex.flipY;

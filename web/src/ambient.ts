@@ -3,7 +3,7 @@
 // no Math.random. The same tick gives the same picture whether it was reached by playing, seeking or rewinding.
 import { TICKS_PER_DAY, TICKS_PER_HOUR } from './clock';
 import { unitHash } from './daylight';
-import { LANE, poseBetween } from './traffic';
+import { DOOR_SETBACK, LANE, poseBetween } from './traffic';
 
 const smooth = (t: number) => t * t * (3 - 2 * t);
 const clamp01 = (t: number) => Math.min(1, Math.max(0, t));
@@ -274,7 +274,7 @@ export function routePose(
     poseBetween(a, b, (t - leave[i]!) / (arrive[i + 1]! - leave[i]!), LANE, 0, out);
   }
   const into = Math.max(0, 1 - Math.min(t, route.total - t) / DOOR_TICKS);
-  out.size = 1 - into;
+  out.size = 1;
   if (into > 0) {
     const end = t < route.total / 2 ? tiles[0]! : tiles[tiles.length - 1]!;
     if (lot(roads.door[end]!, DOOR)) {
@@ -283,8 +283,13 @@ export function routePose(
       let turn = Math.atan2(dx, dz) - out.heading;
       turn -= Math.round(turn / (2 * Math.PI)) * 2 * Math.PI;
       out.heading += into * turn;
-      out.x += into * dx;
-      out.z += into * dz;
+      // Up to the lot's door at full size, where the vehicle is released, as the sim's cars are (see Traffic).
+      const away = Math.hypot(dx, dz);
+      if (away > 1e-6) {
+        const reach = (into * Math.max(0, away - DOOR_SETBACK)) / away;
+        out.x += reach * dx;
+        out.z += reach * dz;
+      }
     }
   }
   return true;

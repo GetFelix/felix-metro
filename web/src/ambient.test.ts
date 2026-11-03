@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { TICKS_PER_DAY, TICKS_PER_HOUR } from './clock';
+import { DOOR_SETBACK } from './traffic';
 import {
   CAR_MODELS,
   MAX_VANS,
@@ -311,11 +312,11 @@ describe('routePose', () => {
 
   it('comes out of a lot door at the start and goes into one at the end', () => {
     routePose(graph, route, 0, lotAt, out);
-    expect(out.size).toBe(0);
-    // The door of tile 0 is the lot north of it, at z = 3.
-    expect(out.z).toBeCloseTo(3);
+    // The door of tile 0 is the lot north of it, at z = 3: reached at full size, a door's depth short of its middle.
+    expect(out.size).toBe(1);
+    expect(Math.abs(out.z - 3)).toBeCloseTo(DOOR_SETBACK);
     routePose(graph, route, route.total - 0.01, lotAt, out);
-    expect(out.size).toBeCloseTo(0, 1);
+    expect(out.size).toBe(1);
     routePose(graph, route, 3, lotAt, out);
     expect(out.size).toBe(1);
   });

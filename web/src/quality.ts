@@ -71,10 +71,34 @@ export function displayInterval(frameMs: ArrayLike<number>): number {
 }
 
 // The tier to run after judging one window of frame times. Never steps up, and never touches a forced tier.
-export function decideTier(tier: Tier, frameMs: ArrayLike<number>, forced: boolean): Tier {
+// `refreshMs` is the display's interval measured apart from the frames: a display at 60 Hz whose frames each take two
+// refreshes looks, in the frames alone, like a display at 30 Hz, and would never be stepped down.
+export function decideTier(
+  tier: Tier,
+  frameMs: ArrayLike<number>,
+  forced: boolean,
+  refreshMs: number | null = null,
+): Tier {
   if (forced || frameMs.length < MIN_SAMPLES) return tier;
-  const limit = Math.max(SLOW_MS, REFRESH_SLACK * displayInterval(frameMs));
+  const interval = refreshMs === null ? displayInterval(frameMs) : clampInterval(refreshMs);
+  const limit = Math.max(SLOW_MS, REFRESH_SLACK * interval);
   return median(frameMs) > limit ? stepDown(tier) : tier;
+}
+
+const clampInterval = (ms: number) => Math.min(MAX_INTERVAL_MS, Math.max(MIN_INTERVAL_MS, ms));
+
+/** A gap between two animation frames longer than this is a stall or a hidden tab, not the display's rhythm. */
+export const STALL_MS = 100;
+/** Gaps the display probe wants before it says what it saw. */
+export const PROBE_GAPS = 12;
+/** Frames the probe waits for those gaps before it gives up. */
+export const PROBE_FRAMES = 60;
+
+/** The display's frame interval from the gaps between frames that drew nothing: the shortest quarter speak for it. */
+export function refreshFromGaps(gaps: ArrayLike<number>): number | null {
+  if (gaps.length < PROBE_GAPS) return null;
+  const sorted = Array.from(gaps).sort((a, b) => a - b);
+  return median(sorted.slice(0, Math.max(1, sorted.length >> 2)));
 }
 
 const KEY = 'felix-metro.tier';
@@ -126,6 +150,14 @@ export interface Quality {
   setTier(tier: Tier): void;
   /** Go back to choosing from frame times: forget the saved tier and judge again from high, as on a first visit. */
   setAutomatic(): void;
+  /** The display's frame interval in ms, once `skipFrame` has measured it. */
+  readonly refreshMs: number | null;
+  /**
+   * Call at the start of every animation frame with its time. While it returns true the page is measuring its display
+   * and must draw nothing and not call `tick`. The measure starts when a window ends with frames too slow for a 60 Hz
+   * display but fit for a 30 Hz one: from the frames alone those look the same, and only the display can say.
+   */
+  skipFrame(now: number): boolean;
   /** Every tier the page has run, first to last. */
   readonly history: readonly Tier[];
   /** Feed one frame time in ms after the city is ready. */
@@ -149,7 +181,24 @@ export function createQuality(opts: QualityOptions): Quality {
   const history: Tier[] = [tier];
   const hidden = opts.hidden ?? (() => typeof document !== 'undefined' && document.hidden);
 
+  let refreshMs: number | null = null;
+  let probe: { last: number; gaps: number[]; frames: number } | null = null;
+
+  // Judge the window just ended, with the display's interval if it is known.
+  function judge(refresh: number | null) {
+    const next = decideTier(tier, samples.subarray(0, count), forced, refresh);
+    if (next === tier) {
+      done = true;
+      return;
+    }
+    tier = next;
+    history.push(tier);
+    restart(NEXT_WINDOW_MS);
+    opts.onChange(tier);
+  }
+
   function restart(ms: number) {
+    probe = null;
     count = 0;
     skipped = 0;
     elapsed = 0;
@@ -160,6 +209,20 @@ export function createQuality(opts: QualityOptions): Quality {
     get tier() {
       return tier;
     },
+    get refreshMs() {
+      return refreshMs;
+    },
+    skipFrame(now) {
+      if (!probe) return false;
+      const gap = now - probe.last;
+      if (gap > 0 && gap < STALL_MS) probe.gaps.push(gap);
+      probe.last = now;
+      if (probe.gaps.length < PROBE_GAPS && ++probe.frames < PROBE_FRAMES) return true;
+      refreshMs = refreshFromGaps(probe.gaps);
+      probe = null;
+      judge(refreshMs);
+      return true;
+    },
     get history() {
       return history;
     },
@@ -167,6 +230,7 @@ export function createQuality(opts: QualityOptions): Quality {
       return forced ? 'forced' : opts.still ? 'still' : 'auto';
     },
     setTier(next) {
+      probe = null;
       forced = true;
       done = true;
       writeStored(next);
@@ -195,15 +259,13 @@ export function createQuality(opts: QualityOptions): Quality {
       if (skipped < SETTLE_FRAMES) skipped++;
       else if (count < samples.length) samples[count++] = frameMs;
       if (elapsed < windowMs || count < MIN_SAMPLES) return;
-      const next = decideTier(tier, samples.subarray(0, count), forced);
-      if (next === tier) {
-        done = true;
+      const window = samples.subarray(0, count);
+      // Slow, yet no slower than a 30 Hz display would make it: measure the display before believing it.
+      if (refreshMs === null && median(window) > SLOW_MS && decideTier(tier, window, forced) === tier) {
+        probe = { last: NaN, gaps: [], frames: 0 };
         return;
       }
-      tier = next;
-      history.push(tier);
-      restart(NEXT_WINDOW_MS);
-      opts.onChange(tier);
+      judge(refreshMs);
     },
   };
 }

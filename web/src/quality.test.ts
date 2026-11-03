@@ -1,6 +1,17 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { passesFor } from './passes';
-import { MIN_SAMPLES, createQuality, decideTier, displayInterval, median, settingsFor, stepDown } from './quality';
+import {
+  MIN_SAMPLES,
+  PROBE_FRAMES,
+  PROBE_GAPS,
+  createQuality,
+  decideTier,
+  displayInterval,
+  median,
+  refreshFromGaps,
+  settingsFor,
+  stepDown,
+} from './quality';
 import type { Tier } from './params';
 
 const frames = (ms: number, n = 60) => Array<number>(n).fill(ms);
@@ -67,6 +78,103 @@ describe('refresh rate', () => {
   it('keeps the 22 ms floor on a fast display', () => {
     const near = [...frames(8.3, 10), ...frames(21, 50)];
     expect(decideTier('high', near, false)).toBe('high');
+  });
+});
+
+describe('a display measured apart from the frames', () => {
+  it('steps down a 60 Hz display whose every frame takes two refreshes', () => {
+    // From the frames alone this is a 30 Hz display and is left on high for good.
+    expect(decideTier('high', frames(33.3), false)).toBe('high');
+    expect(decideTier('high', frames(33.3), false, 16.7)).toBe('medium');
+  });
+
+  it('still leaves a display that really runs at 30 Hz alone', () => {
+    expect(decideTier('high', frames(33.3), false, 33.3)).toBe('high');
+  });
+
+  it('keeps the 22 ms floor on a 120 Hz display', () => {
+    expect(decideTier('high', frames(20), false, 8.3)).toBe('high');
+    expect(decideTier('high', frames(24), false, 8.3)).toBe('medium');
+  });
+
+  it('keeps a tier that makes its refresh', () => {
+    expect(decideTier('high', frames(16.7), false, 16.7)).toBe('high');
+  });
+});
+
+describe('measuring the display when the frames cannot say', () => {
+  // Plays frames of `frameMs` until the quality asks to skip, then frames `refreshMs` apart while it measures.
+  function run(frameMs: number, refreshMs: number) {
+    const changed: Tier[] = [];
+    const q = createQuality({ url: null, still: false, hidden: () => false, onChange: (t) => changed.push(t) });
+    let now = 1000;
+    let skipped = 0;
+    for (let i = 0; i < 600 && changed.length === 0; i++) {
+      if (q.skipFrame(now)) {
+        skipped++;
+        now += refreshMs;
+      } else {
+        q.tick(frameMs);
+        now += frameMs;
+      }
+    }
+    return { q, changed, skipped };
+  }
+
+  it('steps down a 60 Hz display that shows every frame twice', () => {
+    const { changed, skipped, q } = run(33.3, 16.7);
+    expect(changed).toEqual(['medium']);
+    expect(skipped).toBeGreaterThanOrEqual(PROBE_GAPS);
+    expect(q.refreshMs).toBeCloseTo(16.7);
+  });
+
+  it('keeps a display that really runs at 30 Hz', () => {
+    const { changed, skipped, q } = run(33.3, 33.3);
+    expect(changed).toEqual([]);
+    expect(skipped).toBeGreaterThanOrEqual(PROBE_GAPS);
+    expect(q.refreshMs).toBeCloseTo(33.3);
+  });
+
+  it('does not stop a page whose frames are fast', () => {
+    const { skipped } = run(12, 16.7);
+    expect(skipped).toBe(0);
+  });
+
+  it('does not measure when the frames alone already say step down', () => {
+    const { changed, skipped } = run(80, 16.7);
+    expect(changed).toEqual(['medium']);
+    expect(skipped).toBe(0);
+  });
+
+  it('draws again once it has the answer, or has waited long enough', () => {
+    const q = createQuality({ url: null, still: false, hidden: () => false, onChange: () => {} });
+    for (let i = 0; i < 200; i++) q.tick(33.3);
+    let now = 0;
+    let skips = 0;
+    // A tab that is hidden gives frames too far apart to be a refresh rate; the probe must not wait for ever.
+    while (q.skipFrame((now += 5000))) skips++;
+    expect(skips).toBeLessThanOrEqual(PROBE_FRAMES);
+    expect(q.skipFrame(now + 16.7)).toBe(false);
+    expect(q.refreshMs).toBeNull();
+  });
+
+  it('ignores gaps from a stall when it reads the display', () => {
+    expect(refreshFromGaps([...Array<number>(20).fill(16.7), 400, 900])).toBeCloseTo(16.7);
+    expect(refreshFromGaps([16.7, 16.7])).toBeNull();
+  });
+
+  it('stops measuring when a tier is chosen by hand', () => {
+    const q = createQuality({ url: null, still: false, hidden: () => false, onChange: () => {} });
+    for (let i = 0; i < 200; i++) q.tick(33.3);
+    expect(q.skipFrame(1000)).toBe(true);
+    q.setTier('medium');
+    expect(q.skipFrame(1017)).toBe(false);
+  });
+
+  it('does not measure a forced tier', () => {
+    const q = createQuality({ url: 'high', still: false, hidden: () => false, onChange: () => {} });
+    for (let i = 0; i < 200; i++) q.tick(33.3);
+    expect(q.skipFrame(1000)).toBe(false);
   });
 });
 
