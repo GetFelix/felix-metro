@@ -102,3 +102,35 @@
 .council .goals .faction-head span.lost {
   color: var(--coral);
 }
+.council .case {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+.council .case .faction-head span.won {
+  color: var(--cyan);
+}
+.council .case small {
+  display: block;
+  margin: 4px 0;
+}
+.council .case .clues {
+  margin: 6px 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+.council .case label {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 6px;
+}
+.council .case select {
+  width: 138px;
+  font: inherit;
+}
+.council .case button {
+  margin-top: 8px;
+  font: inherit;
+}
