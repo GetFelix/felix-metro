@@ -239,7 +239,17 @@ await touch.evaluate(() => {
     );
   }
 });
+// On a tall phone the council opens over the middle of the screen, where the tap would land on it.
+const foldCouncil = () =>
+  touch.evaluate(() => {
+    const details = document.querySelector('#council-chip details');
+    if (details) {
+      details.dataset.touched = '1';
+      details.open = false;
+    }
+  });
 async function tap(lot) {
+  await foldCouncil();
   const at = await touch.evaluate((l) => window.__lots.aim(l), lot);
   if ((await touch.evaluate(([x, y]) => window.__lots.pick(x, y), [at.x, at.y])) !== lot)
     await fail(`lot ${lot} is not under the tap`);
@@ -251,6 +261,7 @@ async function tap(lot) {
       .then(() => touch.evaluate(() => window.__lots.card()))
       .catch(() => null);
     if (shown !== null) return shown;
+    await foldCouncil();
     console.log(
       `tap ${attempt} on lot ${lot} showed no card: ${(await touch.evaluate(() => window.__touches.splice(0))).join('; ')}`,
     );
