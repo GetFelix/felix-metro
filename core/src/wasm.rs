@@ -24,6 +24,13 @@ pub fn chapter(seed: &str) -> Option<String> {
     crate::chapter_for(seed).map(crate::Chapter::to_json)
 }
 
+/// The case file whose city has this seed, as JSON, or `undefined` for any other city.
+/// See [`crate::Investigation::to_json`].
+#[wasm_bindgen]
+pub fn investigation(seed: &str) -> Option<String> {
+    crate::investigation_for(seed).map(crate::Investigation::to_json)
+}
+
 /// [`crate::City::hash`] as 16 hex digits.
 #[wasm_bindgen]
 pub fn hash(seed: &str, districts_per_side: u16) -> Result<String, JsError> {

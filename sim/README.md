@@ -116,7 +116,7 @@ percent of the road's speed) with a `policy` command. Each can change once a cit
 shopkeepers at work longer and raise shop tax; a limit caps how fast trips are planned and driven on that class of road.
 District 0 writes a `policy` event when one changes and on every keyframe tick after the first change, with the values and when each last
 changed, and a restart restores them. A client sends one with `policy(kind, value)` from `dev/lib/gateway.mjs`
-(kind 0 is shop hours, 1 the avenue limit, 2 the street limit); the page has no control for it yet. A city that is a chapter (`pier`) opens with its own limits and skips the warm-up. [docs/design.md](../docs/design.md#policy) has the rules.
+(kind 0 is shop hours, 1 the avenue limit, 2 the street limit); the page has no control for it yet. A city that is a chapter (`pier`) opens with its own limits and skips the warm-up. A case file (`ember`) skips the warm-up too and refuses every command that would change the city, so its first day is the same for everyone. [docs/design.md](../docs/design.md#policy) has the rules.
 
 ## The registry
 

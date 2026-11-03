@@ -170,6 +170,9 @@ impl World {
     /// next step, so that tick's keyframe and events already show it. A
     /// refusal changes nothing. `speed` and `fork` are the runner's.
     pub(crate) fn apply(&mut self, command: &Command) -> Applied {
+        if self.is_case_file() {
+            return Applied::refused(0, REFUSED_UNSUPPORTED);
+        }
         match *command {
             Command::Build {
                 lot,
@@ -661,6 +664,7 @@ fn count_car(city: &City, cars: &mut [u16], trip: &Trip, tick: u32) {
     }
 }
 
+mod case_file;
 mod council;
 mod economy;
 mod policy;

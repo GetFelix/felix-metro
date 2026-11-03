@@ -7,6 +7,7 @@ import {
   decodeRecord,
   hash as cityHash,
   initSync,
+  investigation,
   principalHash as wasmPrincipalHash,
   residentDayHash,
   residentName,
@@ -249,5 +250,15 @@ describe('chapter', () => {
     const chapters = JSON.parse(readFileSync(new URL('./chapter-fixture.json', import.meta.url), 'utf8')).chapters;
     expect(JSON.parse(chapter(chapters[0].seed)!)).toEqual(chapters[0]);
     expect(chapter('harbor')).toBeUndefined();
+  });
+});
+
+describe('investigation', () => {
+  it('describes the case file of a seed, the way the sim plays it, and nothing for other cities', () => {
+    const cases = JSON.parse(
+      readFileSync(new URL('./investigation-fixture.json', import.meta.url), 'utf8'),
+    ).investigations;
+    expect(JSON.parse(investigation(cases[0].seed)!)).toEqual(cases[0]);
+    expect(investigation('harbor')).toBeUndefined();
   });
 });

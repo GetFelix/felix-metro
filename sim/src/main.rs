@@ -93,7 +93,9 @@ async fn main() -> Result<()> {
             &shared,
             spec.clone(),
             None,
-            warmup_ticks > 0 && felix_metro_core::chapter_for(&spec.name).is_none(),
+            warmup_ticks > 0
+                && felix_metro_core::chapter_for(&spec.name).is_none()
+                && felix_metro_core::investigation_for(&spec.name).is_none(),
             true,
         );
     }
@@ -190,8 +192,11 @@ async fn run_city(
         forks,
         ..
     } = shared;
-    // A chapter's clock starts when the city does, so it has no day and a half of history behind it.
-    let warmup_ticks = if felix_metro_core::chapter_for(&spec.name).is_some() {
+    // A chapter's clock starts when the city does, so it has no day and a half of history behind it. A case
+    // file's day is the one the player watches, so it starts at tick 0 too.
+    let warmup_ticks = if felix_metro_core::chapter_for(&spec.name).is_some()
+        || felix_metro_core::investigation_for(&spec.name).is_some()
+    {
         0
     } else {
         warmup_ticks
