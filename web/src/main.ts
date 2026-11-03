@@ -1511,7 +1511,9 @@ async function main() {
   let captureDt = 0;
   function frame() {
     const now = performance.now();
-    draw(now, now - last, still ? 0 : Math.min(clock.getDelta(), 0.05));
+    // The quality choice is measuring the display; nothing is drawn, so the frames show its refresh rate.
+    if (quality.skipFrame(now)) last = now;
+    else draw(now, now - last, still ? 0 : Math.min(clock.getDelta(), 0.05));
     requestAnimationFrame(frame);
   }
   /** Seconds the waves have run; a still page holds them. */

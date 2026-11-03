@@ -1,15 +1,21 @@
 // Draws a generated city with N cars and walkers (web/traffic-load.html) and prints the draw calls and frame times per
-// N. The draw calls of a frame must not grow with the number of movers: that is what instancing is for.
+// N. The draw calls of a frame must not grow with the number of movers, nor with the size of the city: that is what
+// instancing is for.
 // Usage: node scripts/check-traffic.mjs <traffic-load.html url> [tier] [counts, comma separated]
 //   TRAFFIC_FRAMES=30 sets the frames timed per count. TRAFFIC_MAX_EXTRA_CALLS bounds the calls N adds over the first N.
 //   TRAFFIC_WAIT_MS bounds how long a page may take to draw its frames (default 5 minutes).
-//   TRAFFIC_RUN_CHECK=1 also opens the page's measuring mode (?run=1) over 16 districts and checks what it writes.
+//   TRAFFIC_MAX_CALLS bounds the draw calls of every row (the 2 by 2 city, with its movers).
+//   TRAFFIC_RUN_CHECK=1 also opens the page's measuring mode (?run=1) over 16 districts and checks what it writes;
+//   TRAFFIC_MAX_RUN_CALLS bounds the draw calls it writes, which the static city alone would put in the tens of thousands.
 import { chromium } from 'playwright';
 
 const [pageUrl, tier = 'high', counts = '0,40,100,200,400'] = process.argv.slice(2);
 if (!pageUrl) throw new Error('usage: check-traffic.mjs <traffic-load.html url> [tier] [counts]');
 const FRAMES = Number(process.env.TRAFFIC_FRAMES ?? '30');
 const WAIT_MS = Number(process.env.TRAFFIC_WAIT_MS ?? '300000');
+const MAX_CALLS = process.env.TRAFFIC_MAX_CALLS === undefined ? null : Number(process.env.TRAFFIC_MAX_CALLS);
+const MAX_RUN_CALLS =
+  process.env.TRAFFIC_MAX_RUN_CALLS === undefined ? null : Number(process.env.TRAFFIC_MAX_RUN_CALLS);
 const MAX_EXTRA =
   process.env.TRAFFIC_MAX_EXTRA_CALLS === undefined ? null : Number(process.env.TRAFFIC_MAX_EXTRA_CALLS);
 
@@ -66,6 +72,9 @@ if (process.env.TRAFFIC_RUN_CHECK) {
   const drawn = Number(text?.match(/(\d+) of 400 movers/)?.[1]);
   if (!runProblem && (!text?.includes('16 districts') || !(drawn > 0 && drawn <= 160)))
     runProblem = `the measuring mode did not show 16 districts with at most 160 of 400 movers drawn: ${text}`;
+  const runCalls = Number(text?.match(/(\d+) draws/)?.[1]);
+  if (!runProblem && MAX_RUN_CALLS !== null && !(runCalls <= MAX_RUN_CALLS))
+    runProblem = `16 districts drew ${runCalls} calls, more than ${MAX_RUN_CALLS}: the static city is not instanced`;
   await page.close();
 }
 await browser.close();
@@ -84,6 +93,12 @@ if (failed) console.error('FAIL: not every mover was drawn');
 if (runProblem) {
   console.error(`FAIL: ${runProblem}`);
   failed = true;
+}
+if (MAX_CALLS !== null) {
+  const worst = Math.max(...rows.map((r) => r.calls));
+  const ok = worst <= MAX_CALLS;
+  console.log(`${ok ? 'ok  ' : 'FAIL'} at most ${worst} draw calls in a frame (at most ${MAX_CALLS})`);
+  failed ||= !ok;
 }
 if (MAX_EXTRA !== null) {
   const extra = rows[rows.length - 1].calls - rows[0].calls;
