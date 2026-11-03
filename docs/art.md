@@ -342,16 +342,68 @@ SwiftShader says nothing about a GPU's fill rate or vertex rate, so it cannot sa
 What it shows is that the draw calls and the page's own time no longer grow with the number of movers, which is what
 the old limits guarded. What still grows is the triangles each mover adds in each pass that draws it.
 
+## Water and coast
+
+A city with a shore has the sea along one edge of the map, and the water has to read as water: a mostly flat colour
+that is lighter in the shallows and darker offshore, a faint ripple, a pale sheen at a low angle and a thin line of foam
+where it meets the beach. It does not mirror the sky.
+
+| Piece | What it does |
+|---|---|
+| Colour by depth | `PALETTE.shallow` at the shore, `PALETTE.deep` far out, around the style frame's `PALETTE.water` |
+| Ripples | A few slow waves tilt the surface normal a little, so the sun breaks up into a soft glitter instead of one hot spot |
+| Sheen | The sky's colour is added at a grazing angle only (a Fresnel term), so water looks brighter toward the horizon and plain overhead |
+| Foam | A line of white where the sea meets the sand, drifting in and out |
+
+The water is one mesh in one draw call. It is a standard material, so it takes the sun, shadows and fog like the rest of
+the scene, with the environment map turned almost off (that map was the mirror: it put a bright blob of the room on the
+sea). There are no screen-space reflections. The ripples, sheen, foam and depth colour are for the medium and high tiers.
+Low draws the flat `PALETTE.water` with the same coast.
+
+### The coast
+
+The sim knows land and water as whole tiles, and that stays the rule for lots and roads: nothing is built on a water
+tile. Drawn as tiles, the shore is a staircase, so the page draws a smoother edge from the same tiles
+(`web/src/coast.ts`):
+
+1. The water tiles, and the sea past the edge of the map, become a mask: 1 for water, 0 for land.
+2. The mask is blurred, which rounds every corner. A tile edge sits at 0.5 on the blurred mask.
+3. The water is drawn where the blurred mask is above 0.72, moved up and down a little by noise seeded from the city's
+   seed. The cut is well above 0.5, so the drawn water only pulls back into water tiles. It never covers a land tile, so a road
+   or a lot never ends up under water.
+4. The strip of tile the water gave up is beach. The ground turns to sand there, darker where the waves wet it.
+
+The result is baked once into a small texture (eight texels to a tile for a 2 by 2 city) that the water and the ground
+both read, so the edge is as sharp as the screen allows and costs nothing per frame. The same seed gives the same coast
+on every machine; the noise is a hash of the city seed and the position, not a random number.
+
+### Trees and other scatter
+
+Everything that is placed by hand on the page and not by a lot goes through one test, `Coast.dry(x, z)`: land, and clear
+of the beach (about half a tile back from where the water's tile edge was). That covers the trees past the map, and
+the trees a house or a park puts on its lot, since a lot next to the water can have a tree that jitters to its edge. A
+point that fails is left out; the city draws a few fewer trees on the shore. The sim chooses lots and what stands on them, tile by tile, and has no
+position inside a tile, so it cannot disagree with the page: a tile it calls land is land, and the page only ever
+removes water from tiles the sim called water. `web/src/coast.test.ts` checks this for cities on all four edges and a dry
+one: nothing is drawn as water on a land tile, and no point that passes `dry` is on a water tile or within a quarter of a
+tile of one.
+
+![A shore at noon](screenshots/coast-day.jpg)
+
+![A shore at night](screenshots/coast-night.jpg)
+
+The pictures are `?tier=high&t=12&still&live=0&cam=0,9,8,0.4,0.8#harbor` and the same at `t=21`.
+
 ## Quality tiers
 
 Each tier drops effects in the order that costs the least in looks, so the
 picture degrades before the frame rate does.
 
-| Tier | Ambient occlusion | Tilt-shift | Shadows | Pixel ratio | Cars and walkers at once | Pedestrian rigs\* |
-|---|---|---|---|---|---|---|
-| high | yes | yes | 4096 map | up to 2 | no limit | yes |
-| medium | no | yes | 2048 map | up to 2 | 160 | no |
-| low | no | no | no | 1 | 80 | no |
+| Tier | Ambient occlusion | Tilt-shift | Shadows | Pixel ratio | Cars and walkers at once | Pedestrian rigs\* | Water |
+|---|---|---|---|---|---|---|---|
+| high | yes | yes | 4096 map | up to 2 | no limit | yes | ripples, sheen, foam, depth colour |
+| medium | no | yes | 2048 map | up to 2 | 160 | no | ripples, sheen, foam, depth colour |
+| low | no | no | no | 1 | 80 | no | flat colour |
 
 \* The `rigs` flag is set only on high. Rigged pedestrians arrive with #6; until then nothing reads it.
 
