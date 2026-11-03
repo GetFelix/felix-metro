@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import type { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { BULB_OFF, CYAN, FOG, GROUND_NIGHT, HEMI, PALETTE, SIGN_EMISSIVE, SUN_WHITE, TOWER } from './palette';
-import { daylight, lampId, lampSwitch, unitHash, windowBucket, windowSwitch } from './daylight';
+import { WINDOW_BUCKETS, daylight, lampId, lampSwitch, unitHash, windowBucket, windowSwitch } from './daylight';
 import type { Pack } from './assets';
 import type { GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import { cloneModel, facing as facingOf, fitToLot, loadModel } from './models';
@@ -21,6 +21,9 @@ import { ConstructionFx, type LotAccess } from './construction-fx';
 import { showClock } from './ui/clock';
 import { radialTexture as radial } from './instanced';
 import { tintGhost } from './placement-ghost';
+import { StaticCity } from './static-city';
+import { LampLights } from './lamp-lights';
+import { VARIANTS } from './materials';
 
 // Seeded so the frame is identical on every load.
 let seed = 7;
@@ -122,7 +125,13 @@ export async function createCity(
     building: { kind: number; rotation: number } | null,
     fits: boolean,
   ) => void = () => {};
-  let lots: LotAccess = { objects: () => [], ghosts: () => [], setGhost: () => {}, centre: () => [0, 0] };
+  let lots: LotAccess = {
+    objects: () => [],
+    ghosts: () => [],
+    setGhost: () => {},
+    changed: () => {},
+    centre: () => [0, 0],
+  };
   const span = city ? Math.max(1, city.tiles / FRAME_TILES) : 1;
   const half = city ? (city.tiles - 1) / 2 : 0;
   const scene = new THREE.Scene();
@@ -130,6 +139,8 @@ export async function createCity(
   scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
   const fog = new THREE.Fog(FOG, 30 * span, 70 * span);
   scene.fog = fog;
+  // The generated city is drawn as instances; the style frame's hand-made one keeps one object per model.
+  const statics = city ? new StaticCity(scene) : null;
 
   const hemi = new THREE.HemisphereLight(HEMI.sky, HEMI.ground, 0.8);
   scene.add(hemi);
@@ -168,8 +179,43 @@ export async function createCity(
     });
   }
 
-  async function place(pack: Pack, name: string, x: number, z: number, rotY = 0, scale = 1, lit = 0, v = -1) {
-    const o = cloneModel(await loadModel(pack, name));
+  type PlaceArgs = [
+    pack: Pack,
+    name: string,
+    x: number,
+    z: number,
+    rotY?: number,
+    scale?: number,
+    lit?: number,
+    v?: number,
+  ];
+  /** Take a placed model down, whichever way it was drawn. */
+  function unplace(o: THREE.Object3D) {
+    if (statics?.has(o)) statics.remove(o);
+    else scene.remove(o);
+  }
+  /** `loose` draws it as objects of its own, for what is tinted or scaled apart from the city: a preview or a ghost. */
+  async function place(
+    pack: Pack,
+    name: string,
+    x: number,
+    z: number,
+    rotY = 0,
+    scale = 1,
+    lit = 0,
+    v = -1,
+    loose = false,
+  ) {
+    const gltf = await loadModel(pack, name);
+    const o = cloneModel(gltf);
+    if (statics && !loose && v < VARIANTS) {
+      o.position.set(x, 0, z);
+      o.rotation.y = rotY;
+      o.scale.setScalar(scale);
+      fitToLot(pack, o);
+      statics.add(o, gltf, pack, { variant: v, lit, bucket: lit > 0 ? windowBucket(x, z) : 0 });
+      return o;
+    }
     meshes(o, (n) => {
       n.material = materials.materialFor(pack, n.material as THREE.MeshStandardMaterial, lit, v, windowBucket(x, z));
       n.castShadow = true;
@@ -187,15 +233,14 @@ export async function createCity(
   const lamps: THREE.Object3D[] = [];
   interface LampLight {
     id: number;
-    pool: THREE.MeshBasicMaterial;
-    glow: THREE.SpriteMaterial;
-    bulb: THREE.MeshBasicMaterial;
+    /** Switch the lamp to `on` (0 to 1) at the light of the hour. */
+    show(on: number, d: ReturnType<typeof daylight>): void;
+    remove(): void;
   }
   /** What is drawn on a road tile: its model and lamp, and the lights hung on the lamp once it loaded. */
   interface RoadDrawn {
     look: string;
     jobs: Promise<THREE.Object3D>[];
-    extras: THREE.Object3D[];
     light: LampLight | null;
     /** Taken away before its lamp loaded, so nothing is hung on it. */
     gone: boolean;
@@ -356,7 +401,7 @@ export async function createCity(
     const roadLook = (r: Road) => `${r.piece}|${r.rot}|${r.mask}|${r.avenue}`;
     const roadDrawn = new Map<number, RoadDrawn>();
     const drawRoad = (r: Road, first: boolean) => {
-      const mine: RoadDrawn = { look: roadLook(r), jobs: [], extras: [], light: null, gone: false };
+      const mine: RoadDrawn = { look: roadLook(r), jobs: [], light: null, gone: false };
       roadDrawn.set(tileKey(r.x, r.z), mine);
       const { name, turns } = roadModel(r.piece, r.rot, r.avenue);
       const model = place('roads', name, wx(r.x), wx(r.z), clockwise(turns));
@@ -390,25 +435,16 @@ export async function createCity(
       if (!mine) return;
       roadDrawn.delete(key);
       mine.gone = true;
-      for (const job of mine.jobs) void job.then((o) => scene.remove(o));
+      for (const job of mine.jobs) void job.then(unplace);
       // A lamp of the generated city that is not lit yet stays dark.
       for (const [lamp, tile] of lampTile) {
         if (tile !== mine) continue;
         lampTile.delete(lamp);
         lamps.splice(lamps.indexOf(lamp), 1);
       }
-      // The lights are this lamp's own; the models share their geometry and materials with the cache.
-      for (const o of mine.extras) {
-        scene.remove(o);
-        const at = glows.indexOf(o);
-        if (at >= 0) glows.splice(at, 1);
-        if (o instanceof THREE.Mesh) o.geometry.dispose();
-      }
       if (mine.light) {
         lampLights.splice(lampLights.indexOf(mine.light), 1);
-        mine.light.pool.dispose();
-        mine.light.glow.dispose();
-        mine.light.bulb.dispose();
+        mine.light.remove();
       }
     };
     for (const r of c.roads) drawRoad(r, true);
@@ -460,15 +496,16 @@ export async function createCity(
       apart: Map<number, Drawn> | null = null,
     ) {
       const mine: Drawn = { jobs: [], objects: [], building: null };
-      const put = (...args: Parameters<typeof place>) => {
-        const job = place(...args);
+      const put = (...args: PlaceArgs) => {
+        const [pack, name, x, z, rotY, scale, lit, v] = args;
+        const job = place(pack, name, x, z, rotY, scale, lit, v, apart !== null);
         mine.jobs.push(job);
         void job.then((o) => mine.objects.push(o));
         // A preview is redrawn as the pointer moves; the page does not wait on it to load.
         if (!apart) jobs.push(job);
         return job;
       };
-      const putBuilding = (...args: Parameters<typeof place>) => void put(...args).then((o) => (mine.building = o));
+      const putBuilding = (...args: PlaceArgs) => void put(...args).then((o) => (mine.building = o));
       const choose = <T>(a: readonly T[]): T => a[Math.floor(rnd() * a.length)]!;
       (apart ?? lotObjects).set(lot.id, mine);
       if (!apart) kindOn.set(lot.id, kind);
@@ -480,7 +517,8 @@ export async function createCity(
         plot.rotation.x = -Math.PI / 2;
         plot.position.set(x, 0.006, z);
         plot.receiveShadow = true;
-        scene.add(plot);
+        if (statics && !apart) statics.addMesh(plot);
+        else scene.add(plot);
         mine.jobs.push(Promise.resolve(plot));
         mine.objects.push(plot);
         return;
@@ -537,7 +575,7 @@ export async function createCity(
       ambient?.clearLot(id);
       // Not awaited: a second call for the lot while models load would find nothing to take down and draw beside this
       // one, and whichever drew last would be the only one tracked.
-      for (const job of old) void job.then((o) => scene.remove(o));
+      for (const job of old) void job.then(unplace);
     };
     // A lot's building changed: take down what stood and draw the new one, or the generated one for `null`. The look
     // is picked from the lot and the kind, so every browser draws the same building.
@@ -592,12 +630,15 @@ export async function createCity(
       setGhost(id, building) {
         const old = ghostObjects.get(id)?.jobs ?? [];
         ghostObjects.delete(id);
-        for (const job of old) void job.then((o) => scene.remove(o));
+        for (const job of old) void job.then(unplace);
         const lot = c.lots[id];
         if (!building || !lot) return;
         let n = 0;
         const rnd = () => unitHash(id * 64 + building.kind, n++);
         drawLot(lot, building.kind, building.rotation, rnd, false, ghostObjects);
+      },
+      changed(id) {
+        for (const o of lotObjects.get(id)?.objects ?? []) statics?.sync(o);
       },
       centre: (id) => [wx(c.lots[id]!.x), wx(c.lots[id]!.z)],
     };
@@ -606,7 +647,7 @@ export async function createCity(
     let previewLot: number | null = null;
     previewBuilding = (id, building, fits) => {
       if (previewLot !== null) {
-        for (const job of previewObjects.get(previewLot)?.jobs ?? []) void job.then((o) => scene.remove(o));
+        for (const job of previewObjects.get(previewLot)?.jobs ?? []) void job.then(unplace);
         previewObjects.delete(previewLot);
         previewLot = null;
       }
@@ -657,6 +698,8 @@ export async function createCity(
     transparent: true,
     opacity: 0,
   });
+  // The generated city's lamps share three pools of instances; the style frame's each have materials of their own.
+  const lampPool = statics ? new LampLights(scene, glows, { glow: glowMat.map!, pool: poolMat.map! }) : null;
 
   // ---------- traffic ----------
   const cars: Mover[] = [];
@@ -801,44 +844,67 @@ export async function createCity(
   for (const lamp of lamps) hangLamp(lamp, lampTile.get(lamp) ?? null);
   lampTile.clear();
 
-  // Bulbs, glows and pools hang off the lamp models' arms. Each lamp has its own materials so it can switch on alone.
+  // Bulbs, glows and pools hang off the lamp models' arms. Each lamp switches on alone.
   function hangLamp(lamp: THREE.Object3D, tile: RoadDrawn | null) {
     const arm = new THREE.Vector3(0, 0.58, -0.17).applyEuler(lamp.rotation).add(lamp.position);
-    const light = {
-      id: lampId(lamp.position.x, lamp.position.z),
-      pool: poolMat.clone(),
-      glow: glowMat.clone(),
-      bulb: new THREE.MeshBasicMaterial({ color: BULB_OFF }),
-    };
+    const id = lampId(lamp.position.x, lamp.position.z);
+    const light = lampPool ? pooledLamp(lampPool, id, arm) : ownLamp(id, arm);
     lampLights.push(light);
-    const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.025, 8, 6), light.bulb);
-    bulb.position.copy(arm);
-    const glow = new THREE.Sprite(light.glow);
-    glow.position.copy(arm);
-    glow.scale.setScalar(0.45);
-    const pool = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 1.5), light.pool);
-    pool.rotation.x = -Math.PI / 2;
-    pool.position.set(arm.x, 0.03, arm.z);
-    scene.add(bulb, glow, pool);
-    glows.push(glow, pool);
-    if (tile) {
-      tile.extras.push(bulb, glow, pool);
-      tile.light = light;
-    }
+    if (tile) tile.light = light;
     if (lit) switchLamp(light, lit.hour, lit.d);
+  }
+
+  function pooledLamp(pool: LampLights, id: number, arm: THREE.Vector3): LampLight {
+    const lights = pool.add(id, arm);
+    return {
+      id,
+      show: (on, d) => pool.setFromDay(lights, on, d),
+      remove: () => pool.remove(lights),
+    };
+  }
+
+  function ownLamp(id: number, arm: THREE.Vector3): LampLight {
+    const pool = poolMat.clone();
+    const glow = glowMat.clone();
+    const bulb = new THREE.MeshBasicMaterial({ color: BULB_OFF });
+    const mesh = new THREE.Mesh(new THREE.SphereGeometry(0.025, 8, 6), bulb);
+    mesh.position.copy(arm);
+    const sprite = new THREE.Sprite(glow);
+    sprite.position.copy(arm);
+    sprite.scale.setScalar(0.45);
+    const quad = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 1.5), pool);
+    quad.rotation.x = -Math.PI / 2;
+    quad.position.set(arm.x, 0.03, arm.z);
+    scene.add(mesh, sprite, quad);
+    glows.push(sprite, quad);
+    return {
+      id,
+      show(on, d) {
+        pool.opacity = on * d.poolOpacity;
+        glow.opacity = on * d.glowOpacity;
+        bulb.color.copy(bulbOff).lerp(lampColor, on);
+      },
+      remove() {
+        scene.remove(mesh, sprite, quad);
+        for (const o of [sprite, quad]) glows.splice(glows.indexOf(o), 1);
+        mesh.geometry.dispose();
+        quad.geometry.dispose();
+        pool.dispose();
+        glow.dispose();
+        bulb.dispose();
+      },
+    };
   }
 
   // ---------- time of day ----------
   let crowd: InstancedFleet | null = null;
+  const windowOn = new Float32Array(WINDOW_BUCKETS);
   const groundColor = new THREE.Color();
   const nightGround = new THREE.Color(GROUND_NIGHT);
   const lampColor = new THREE.Color(PALETTE.lamp);
   const bulbOff = new THREE.Color(BULB_OFF);
   function switchLamp(l: LampLight, hour: number, d: ReturnType<typeof daylight>) {
-    const on = lampSwitch(hour, l.id);
-    l.pool.opacity = on * d.poolOpacity;
-    l.glow.opacity = on * d.glowOpacity;
-    l.bulb.color.copy(bulbOff).lerp(lampColor, on);
+    l.show(lampSwitch(hour, l.id), d);
   }
   function setTime(hour: number, bloom: UnrealBloomPass | null) {
     const d = daylight(hour);
@@ -857,6 +923,10 @@ export async function createCity(
     );
     for (const m of materials.lit())
       m.emissiveIntensity = d.windowBrightness * m.userData.lit * windowSwitch(hour, m.userData.bucket);
+    if (statics) {
+      for (let b = 0; b < WINDOW_BUCKETS; b++) windowOn[b] = d.windowBrightness * windowSwitch(hour, b);
+      statics.setWindows(windowOn);
+    }
     lit = { hour, d };
     for (const l of lampLights) switchLamp(l, hour, d);
     headMat.opacity = d.headlight;

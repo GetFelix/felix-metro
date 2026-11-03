@@ -115,8 +115,9 @@ jobs:
           for _ in $(seq 1 30); do curl -sf "http://127.0.0.1:4177/" >/dev/null && up=1 && break; sleep 1; done
           [[ $up -eq 1 ]] || { echo "nothing is serving on port 4177" >&2; exit 1; }
           node scripts/check-quality.mjs http://127.0.0.1:4177/
-      # Cars and walkers are instanced: 400 of them add a fixed few hundred draw calls, not about 18 for each. The same
-      # page draws a car and a walker close up for the renders kept in web/references.
+      # Cars, walkers and the static city are instanced: 400 movers add a fixed hundred or so draw calls, not about 18
+      # for each, and 16 districts draw a few hundred calls in all, not the tens of thousands of a model for each object.
+      # The same page draws a car and a walker close up for the renders kept in web/references.
       - name: Traffic draw calls and pictures
         timeout-minutes: 15
         run: |
@@ -124,7 +125,7 @@ jobs:
           up=0
           for _ in $(seq 1 30); do curl -sf "http://127.0.0.1:4179/" >/dev/null && up=1 && break; sleep 1; done
           [[ $up -eq 1 ]] || { echo "nothing is serving on port 4179" >&2; exit 1; }
-          TRAFFIC_RUN_CHECK=1 TRAFFIC_FRAMES=5 TRAFFIC_WAIT_MS=240000 TRAFFIC_MAX_EXTRA_CALLS=450 node scripts/check-traffic.mjs http://127.0.0.1:4179/traffic-load.html high 0,400
+          TRAFFIC_RUN_CHECK=1 TRAFFIC_FRAMES=5 TRAFFIC_WAIT_MS=240000 TRAFFIC_MAX_EXTRA_CALLS=450 TRAFFIC_MAX_CALLS=700 TRAFFIC_MAX_RUN_CALLS=700 node scripts/check-traffic.mjs http://127.0.0.1:4179/traffic-load.html high 0,400
           node scripts/check-traffic-pictures.mjs http://127.0.0.1:4179/traffic-load.html frames/traffic
       # The ambient life (lit shops, smoke, birds, traffic lights, the garbage truck and the vans) is a function of the
       # tick: the same tick draws the same picture after a rewind, and each effect is on only at its hours.

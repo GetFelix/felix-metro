@@ -39,6 +39,8 @@ declare global {
   interface Window {
     __ready?: boolean;
     __load?: TrafficLoad;
+    /** The renderer and scene, and one frame of the post chain, for scripts that count draws pass by pass. */
+    __three?: { renderer: THREE.WebGLRenderer; scene: THREE.Scene; frame: () => void };
   }
 }
 
@@ -167,6 +169,7 @@ async function main() {
   }
 
   const target = controls.target;
+  window.__three = { renderer, scene, frame: () => post.render(target) };
   camera.lookAt(target);
   // The ambient life depends on the hour, so the run starts at it.
   let tick = Math.round(hour * TICKS_PER_HOUR);

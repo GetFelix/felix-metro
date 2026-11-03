@@ -45,6 +45,8 @@ export interface LotAccess {
   ghosts(lot: number): readonly THREE.Object3D[];
   /** Draw the building that stood on the lot, or take it away with `null`. */
   setGhost(lot: number, building: { kind: number; rotation: number } | null): void;
+  /** Say that the objects of the lot were moved or scaled, so a scene that draws them as instances can follow. */
+  changed(lot: number): void;
   /** The lot's centre in world units. */
   centre(lot: number): readonly [number, number];
 }
@@ -197,6 +199,7 @@ export class ConstructionFx {
       o.scale.y = u.baseY * Math.max(scale, MIN_HEIGHT);
       height = Math.max(height, u.fullH!);
     }
+    if (mode === 'rise') this.lots.changed(lot);
     if (!this.effects) return;
     this.scaffold(lot, slot, height, scale);
     if (mode === 'fall') this.dust(lot, slot, p);
@@ -252,6 +255,7 @@ export class ConstructionFx {
     this.slots.delete(lot);
     if (slot.mode === 'rise') {
       for (const o of this.lots.objects(lot)) this.restore(o);
+      this.lots.changed(lot);
     } else if (slot.ghost) {
       this.lots.setGhost(lot, null);
       this.ghosts--;
