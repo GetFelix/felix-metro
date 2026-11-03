@@ -159,6 +159,15 @@ describe('tapping', () => {
     expect(card.visible).toBe(false);
   });
 
+  it('keeps the card after the finger leaves the canvas', () => {
+    const { fire, card } = setup();
+    fire('pointerdown', { ...touch, clientX: 10, clientY: 10 });
+    fire('pointerup', { ...touch, clientX: 10, clientY: 10 });
+    fire('pointerleave', { ...touch, clientX: 10, clientY: 10 });
+    vi.advanceTimersByTime(5 * LINGER_MS);
+    expect(card.visible).toBe(true);
+  });
+
   it('counts the time between the touches, not between handling them', () => {
     const { fire, card } = setup();
     const at = performance.now();

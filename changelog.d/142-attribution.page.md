@@ -4,3 +4,4 @@
   forward. The page asks the gateway for the `principal` feature to know which buildings are yours; a gateway without
   it (before 0.8.0) shows names only. The card is left out with `?ui=0`.
 - A tap is timed from when the browser made the touch events, so a busy page that handles them late still opens the card.
+- On a phone the card stays after the tap that opened it; the finger leaving the canvas used to hide it a third of a second later.

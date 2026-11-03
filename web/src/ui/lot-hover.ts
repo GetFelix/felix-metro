@@ -161,7 +161,11 @@ export function createLotHover(o: LotHoverOptions): LotHover {
   const cancel = (e: Event) => {
     touches.delete((e as unknown as PointerLike).pointerId);
   };
-  const leave = () => hideSoon();
+  const leave = (e: Event) => {
+    // A finger lifting leaves the canvas too, which would hide a card the tap just opened.
+    if ((e as unknown as PointerLike).pointerType === 'touch') return;
+    hideSoon();
+  };
   const away = () => hideNow();
 
   o.canvas.addEventListener('pointermove', move, { passive: true } as AddEventListenerOptions);
