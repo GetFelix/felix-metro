@@ -17,7 +17,12 @@ import { createPost, passesFor } from './post';
 import { createQuality, settingsFor } from './quality';
 import { createRenderer } from './renderer';
 import { createCity, move } from './scene';
-import init, { chapter as chapterJson, generate, Metro } from './core/felix_metro_core.js';
+import init, {
+  chapter as chapterJson,
+  generate,
+  investigation as investigationJson,
+  Metro,
+} from './core/felix_metro_core.js';
 import { parseCity, type City } from './layout';
 import { RoadsOnScreen } from './roads-drawn';
 import { beforeSignIn, fetchOidc, signIn } from './auth';
@@ -46,6 +51,8 @@ import { createBuildBar } from './ui/build-bar';
 import { Placement, type CommandLink } from './placement';
 import { createPlacementView } from './placement-view';
 import { note, toast } from './ui/toast';
+import { caseSection } from './case-form';
+import { readInvestigation } from './case';
 import { goalsView, openingPolicy, readChapter, type Chapter } from './goals';
 import { councilView, fitCouncil, renderCouncil, TALL_SCREEN, type CouncilEvent } from './council';
 import { policyRows, type PolicyEvent } from './policy';
@@ -424,6 +431,8 @@ async function main() {
   let city: City | null = null;
   /** The chapter this city plays, if its seed names one. */
   let chapter: Chapter | null = null;
+  /** The case file this city is, if its seed names one: its section of the council, drawn once. */
+  let caseFile: HTMLElement | null = null;
   let state: CityState | null = null;
   let link: Link = { down: false };
   /** How commands leave the page, once the live connection exists. */
@@ -472,6 +481,8 @@ async function main() {
     await init();
     city = parseCity(generate(seed, districts));
     chapter = readChapter(chapterJson(seed));
+    const investigation = readInvestigation(investigationJson(seed));
+    caseFile = investigation ? caseSection(investigation, city.streets) : null;
     document.title = `Felix Metro: ${seed}`;
     document.getElementById('subtitle')!.textContent = displayName(seed);
     let past: { state: CityState; result: SeekResult; seekMs: number } | null = null;
@@ -536,6 +547,8 @@ async function main() {
     glows,
     setTime,
     setShadows,
+    setWaterTime,
+    setWaterTier,
     fleet,
     pick,
     setLot,
@@ -552,6 +565,7 @@ async function main() {
     post?.dispose();
     renderer.setPixelRatio(Math.min(devicePixelRatio, s.pixelRatioCap));
     setShadows(s.shadows, s.shadowMapSize);
+    setWaterTier(tier);
     construction.setEffects(tier !== 'low');
     ambient?.setTier(s.ambient);
     if (traffic) traffic.cap = s.movers;
@@ -1500,6 +1514,8 @@ async function main() {
     draw(now, now - last, still ? 0 : Math.min(clock.getDelta(), 0.05));
     requestAnimationFrame(frame);
   }
+  /** Seconds the waves have run; a still page holds them. */
+  let waterClock = 0;
   /** Draw one frame `dt` seconds on from the last. */
   function draw(now: number, frameMs: number, dt: number, paint = true) {
     if (intro && !intro.step(now)) intro = null;
@@ -1508,6 +1524,8 @@ async function main() {
     if (frameMs > 0) smoothed += (1000 / frameMs - smoothed) * 0.05;
     hud?.frame(frameMs);
     if (slow) for (const end = performance.now() + slow; performance.now() < end; );
+    waterClock += dt;
+    setWaterTime(waterClock);
     move(cars, dt, true);
     move(people, dt, false);
     for (const p of people) p.mixer.update(dt);
@@ -1566,6 +1584,7 @@ async function main() {
               window.innerHeight >= TALL_SCREEN,
               rows,
               chapter ? goalsView(chapter, councilShown, funds) : null,
+              caseFile,
             );
           }
         }

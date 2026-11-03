@@ -78,7 +78,7 @@ arithmetic throughout, as in felix-arena, so the two builds agree exactly.
 - **The development area** is 14 to 16 lots (fewer in a tiny city) that start empty, so a builder has bare ground to raise buildings on. Almost every other lot is in some resident's day, and the sim refuses to change those. The generator tries windows of 5 to 7 tiles a side that sit inside one district, and takes the one whose lots with a door (never the tower or park land) number 14 to 16, preferring the most suburban, with a hash of the seed and place breaking ties. The area is the lots with a door in that window, emitted with a tree kind and listed in `City::development`, in the JSON as `development` and in `City::hash`. No road changes, so routes are unaffected. Residents never pick them as home, shop, park or work, and the browser draws them as bare earth until something is built. In `harbor` at 2 by 2 it is 14 lots in district 1; in `pinecrest`, 15 in district 3.
 - **Built roads:** a builder can add a street between two nodes and remove it again (see [Roads](#roads)). A built segment is appended to the segment list with `built` set, takes the next id, and keeps it for ever once removed (`removed`); its tiles join `City::roads` and the pieces around them are worked out again. `City::hash` covers them, so the sim and the page can check they agree on the roads too. A city nobody built roads in hashes as it always did.
 - **Road pieces:** each road tile reports its piece (straight, corner, T, cross or end), its neighbour mask and a rotation, for the browser to draw.
-- **Water** is a mask over the finished layout. Some seeds, `harbor` among them, have a ragged shoreline 3 to 6 tiles deep along one edge. The edge is reserved whether or not the seed is wet, and centres, the tower and parks keep clear of it, so the layout never depends on the water. Tiles under water lose their road and lot; a lot whose road went under is flooded with it, and so is any road the water cut off from the rest. Everything else is identical to the dry city.
+- **Water** is a mask over the finished layout. Some seeds, `harbor` among them, have a ragged shoreline 3 to 6 tiles deep along one edge. The edge is reserved whether or not the seed is wet, and centres, the tower and parks keep clear of it, so the layout never depends on the water. Tiles under water lose their road and lot; a lot whose road went under is flooded with it, and so is any road the water cut off from the rest. Everything else is identical to the dry city. The sim's water is whole tiles. The page draws a smoother coast inside them and leaves a beach, and keeps trees off both (see [Art direction](art.md#water-and-coast)); lots and roads follow the tiles.
 
 Seeds are parts of 1 to 32 characters of `a-z`, `0-9` and `-`, joined by `~` for forks. Each lot's building kind is an index into a table in `core` that names a Kenney pack and model. Street, business and resident names come from built-in lists. `City::hash` is an FNV-1a hash of the whole layout, so the sim and the browser can check they generated the same city. `cargo run -p felix-metro-core --example map -- harbor 2` prints a city as ASCII.
 
@@ -521,6 +521,35 @@ that is not a chapter has none and shows no goals.
   sim reaches after three days with the limits left alone and with both raised. The sim's test rewrites it
   (`METRO_WRITE_FIXTURE=1 cargo test -p felix-metro-sim the_chapter_fixture`) and fails when it is stale; the page's tests
   judge both runs from it.
+
+### Case files
+
+A case file is a city with a question in it and no mayor. The table is `INVESTIGATIONS` in
+`core/src/investigation.rs`, read by the sim and by the page the same way the chapter table is (`investigation(seed)` in
+the wasm build). A city that is not a case file has none and shows no Case section.
+
+| Case  | City            | Question                                                          | Answer            |
+| ----- | --------------- | ----------------------------------------------------------------- | ----------------- |
+| Ember | `ember`, 2 by 2 | The busiest hour of day 1 for trips in a vehicle: street, purpose | Alder, 7 am, work |
+
+- **No commands.** `World::apply` refuses every command in a case file with `REFUSED_UNSUPPORTED`, and the refusal is
+  a function of the seed alone, so a restarted sim refuses the same way. A speed change goes around `apply` and still
+  works, because it moves how fast the day plays, not what happens in it.
+- **No warm-up.** Like a chapter, a case file starts at its first tick. The sim skips the warm-up for a seed in the table.
+- **What the facts mean.** The hour is the one in which the most trips by vehicle set off on the case's day. The street is
+  the one the most of those trips use (a trip counts once per street). The purpose is the activity the most of those
+  drivers set off to do. Walking is not counted.
+- **Kept true by the sim's test.** `world::case_file` recomputes all three from the day's events and fails if the table
+  says anything else, or if a second place comes within 15% for the hour, 30% for the street or a factor of two for the
+  purpose. A change to routing or schedules that moves the answer fails that test, and the table is then rewritten with
+  the new facts or the seed is replaced.
+- **The check.** The page holds the table and checks the answer itself (`web/src/case.ts`): all three parts right or not,
+  and a count of complete answers. An answer with a part missing is not counted. The hints are a two-hour window that holds
+  the hour and a street that crosses the answer. Anyone who reads the JSON from core can read the answer, as with a
+  chapter's goals; the case is a puzzle, not a lock.
+- **Tested against the table.** `web/src/investigation-fixture.json` holds the table. The sim's test rewrites it
+  (`METRO_WRITE_FIXTURE=1 cargo test -p felix-metro-sim the_investigation_fixture`) and fails when it is stale; the page's
+  tests read it.
 
 ### Commands and the registry
 

@@ -1,0 +1,1 @@
+- The two-builders check parks the frames of every open page while another one loads, and opens its pages one after the other, so a page that is already drawing cannot keep a new one from ever drawing.

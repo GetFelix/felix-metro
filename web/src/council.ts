@@ -166,7 +166,8 @@ export function councilSummary(view: CouncilView): string {
 /**
  * Draws the council into `root`, replacing what it held. It is a folded line the player can open, so it does not
  * push the controls below it off a short screen. A redraw updates it in place and keeps it as the player left it; the first
- * draw opens it only if `openFirst`. `goals` is the chapter's, for a city that has one.
+ * draw opens it only if `openFirst`. `goals` is the chapter's, for a city that has one. `caseSection` is a case file's, built
+ * once by the caller so a redraw leaves what the player has chosen in it.
  */
 export function renderCouncil(
   root: HTMLElement,
@@ -174,6 +175,7 @@ export function renderCouncil(
   openFirst: boolean,
   policies: PolicyRow[] = [],
   goals: GoalsView | null = null,
+  caseSection: HTMLElement | null = null,
 ): void {
   const previous = root.firstElementChild as HTMLDetailsElement | null;
   const rows = view.factions.map((f) => {
@@ -215,6 +217,9 @@ export function renderCouncil(
     if (policies.length === 0) shownPolicies?.remove();
     else if (shownPolicies) shownPolicies.replaceWith(policyList(policies));
     else previous.append(policyList(policies));
+    const shownCase = previous.querySelector('.case');
+    if (caseSection === null) shownCase?.remove();
+    else if (!shownCase) previous.append(caseSection);
     return;
   }
   const summary = document.createElement('summary');
@@ -229,6 +234,7 @@ export function renderCouncil(
   });
   if (goals) details.append(goalsList(goals));
   if (policies.length > 0) details.append(policyList(policies));
+  if (caseSection) details.append(caseSection);
   root.replaceChildren(details);
 }
 
