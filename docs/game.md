@@ -100,7 +100,7 @@ and points at the cause: a moment and a place. The answer is checked against the
 events, so it cannot be guessed from a dashboard.
 
 These teach the timeline better than a tutorial does, and they are cheap to write: a
-scenario seed, a planted cause, and a question.
+scenario seed, a planted cause, and a question. The first one is built as [a case file](#a-case-file).
 
 ### What-ifs
 
@@ -162,6 +162,25 @@ Pier starts at its first tick, without the day and a half of history other citie
 the three days are the player's. At the usual four ticks a second they take 72 minutes; `dev/speed.sh pier 16` runs them
 in 18.
 
+## A case file
+
+**Ember.** A city you cannot change, with one question about its first day: _in the hour when the most people set off
+in a vehicle, which street did the most of them use, and what were they driving to do?_ The answer is three parts, a
+street, an hour and a purpose, and you are told only whether all three are right. A wrong answer does not say which part
+is wrong, so guessing does not pay, and the tries are counted.
+
+The council has a Case section with the question, two hints and a choice for each part. The hints are leads: a window of
+two hours that holds the hour, and a street that crosses the answer. They never name it. To answer, watch the day.
+The stats show how many people are on the road, a click on a car follows its driver, and the day card says where that
+resident is going. Rewind and watch the rush again.
+
+Nobody can command Ember. The sim refuses every build, road and policy there with "unsupported", so what the city does
+on its first day is the same for everyone and the answer cannot be moved. Changing the speed still works. Like a chapter,
+Ember starts at its first tick, so the day is the one you watch.
+
+Start it with `dev/city.sh ember` and open `/#ember`. [Case files in design.md](design.md#case-files) has how the
+answer is kept true.
+
 ## What this needs from the sim and the log
 
 - **Money.** Done: the account, the `ledger` and `balance` events and the refusal when the city cannot pay are in the
@@ -194,7 +213,7 @@ in 18.
    warning with its countdown (done).
 4. Policy commands (shop hours and a speed limit for each road class), with a cooldown (done).
 5. Goals and the first chapter, without forks: the player commits changes for real.
-6. Investigations, one or two, checked as a batch.
+6. Investigations, one or two, checked as a batch (the first, Ember, is built).
 7. Measure a fork's morning rush on one broker; then forks, what-ifs and policy
    previews.
 8. Comparing a chapter's fix with other players' fixes.

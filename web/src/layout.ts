@@ -48,6 +48,8 @@ export interface City {
   /** The road graph's nodes (crossings, bends and dead ends) by index, as map tiles `[x, z]`. */
   nodes: [number, number][];
   segments: Segment[];
+  /** Street names, by the street index core gives each segment. */
+  streets: string[];
 }
 
 /** The columns of a road tile row, in the order core writes them in `roadColumns` and `Metro.roadsJson`. */
@@ -76,6 +78,7 @@ export function parseCity(json: string): City {
     roads: parseRoads(raw.roads, raw.roadColumns),
     water: raw.water,
     nodes: raw.nodes ?? [],
+    streets: raw.streets ?? [],
     segments: rows(raw.segmentColumns ?? [], raw.segments ?? []).map((r) => ({
       ...r,
       avenue: r.avenue === 1,

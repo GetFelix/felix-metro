@@ -6,6 +6,7 @@
 
 pub mod chapter;
 pub mod city;
+pub mod investigation;
 pub mod kinds;
 pub mod names;
 pub mod record;
@@ -21,6 +22,7 @@ pub use city::{
     BuiltRoad, City, District, Door, GenerateError, Lot, MAX_ROAD_LENGTH, RoadError, RoadPiece,
     RoadTile, Segment, SegmentClass, Zone,
 };
+pub use investigation::{INVESTIGATIONS, Investigation, investigation_for};
 pub use kinds::{BuildingKind, KINDS, KindInfo};
 pub use names::resident_name;
 pub use resident::{NO_LOT, Places, Resident, day_hash};
