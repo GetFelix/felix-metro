@@ -35,7 +35,7 @@ enough to keep days of it.
 
 1. **Rewind to any moment, quickly.** From any position on the timeline, the city is drawn at that moment in under a second.
 2. **Rewind, then follow live with no gap.** Playing forward from the past joins live delivery without a missing or repeated event.
-3. **A small log.** At 4 ticks a second, a city of 20,000 residents writes about 5.1 KB/s averaged over a day and 9.96 KB/s in the busiest minute of the rush, so a week of history is about 3 GB on one broker. These are extrapolated from measured cities of 522 and 5,568 residents; see the "Log size" section.
+3. **A small log.** At 4 ticks a second, a city of 20,000 residents writes about 5.2 KB/s averaged over a day and 9.99 KB/s in the busiest minute of the rush, so a week of history is about 3 GB on one broker. These are extrapolated from measured cities of 522 and 5,568 residents; see the "Log size" section.
 4. **One authority that survives a restart.** The simulation is fenced at the broker, and a replacement picks up from the log where the last one stopped.
 5. **Forks are cheap.** A branch starts as a copy of the parent's history up to the fork tick and owes it nothing after that.
 
@@ -146,6 +146,9 @@ two places: the latest `trip` or `replan` event of everyone on the road, found i
 each trip against the keyframe's vehicle and refuses to start if they disagree, rather than guess. The cars on each
 road, which new routes are planned around, are counted again from the trips under way.
 
+**Who built what.** The same keyframe tick's `author` events give the builder of each lot, and the `command` event
+before each `built` in the later records gives the rest (see "Who built what" under Records).
+
 **Replaying roads.** A built road takes the next segment id when the sim lays it, and the restart lays it again at the id
 its `roadwork` event names. Within a tick it applies the roads in segment order, not district by district: two roads
 laid in one tick can be in different districts, and the one laid first need not be in the lower district. A logged road
@@ -193,6 +196,7 @@ writes decisions instead, and the client works out positions:
 | `ledger`               | reason (day, build, demolish), earned, spent                                         | Money moved in or out of the city's funds                |
 | `balance`              | amount                                                                               | A district's share of the funds, each keyframe tick      |
 | `council`              | days scored, patience, each faction's demand, measure, satisfaction and unhappy days | How the council's factions feel, each keyframe tick      |
+| `author`               | principal hash, builder name, and each lot they built with the tick it was built     | Who built the buildings on some lots                     |
 | `policy`               | for each policy, its value and the tick it last changed                              | The mayor's policies, on a change and each keyframe tick |
 
 A route is its segment ids from the road graph and one speed byte per segment,
@@ -278,20 +282,27 @@ skips.
 | 12  | `command_cursor` | next command stream offset, varint                               |
 | 13  | `arrival`        | resident, lot, kind `u8`, until: an `arrived` and its `activity` |
 
-The tag is four bits, so only tag 14 is free for a new event kind. Tag 15,
-`extended`, holds the rare events: its body starts with a kind varint, then the
-fields.
+The tag is four bits, and the bare tags stay for events a tick writes in bulk. Tag 14
+is free. Tag 15, `extended`, holds the rare events: its body starts with a kind
+varint, then the fields.
 
 | Kind | Event      | Fields                                                                                                                                                                                                    |
 | ---- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 1    | `ledger`   | reason `u8` (0 day, 1 build, 2 demolish), earned varint, spent varint                                                                                                                                     |
 | 2    | `balance`  | amount, a zigzag varint (may be negative)                                                                                                                                                                 |
+| 3    | `author`   | principal `u64`, name, count, per lot: lot delta, built tick delta                                                                                                                                        |
 | 4    | `council`  | days varint, patience `u8`, then for each of three factions demand varint, measure varint, satisfaction `u8`, unhappy days `u8`; then the open day's commutes varint, commute ticks varint, visits varint |
 | 5    | `policy`   | for each of shop hours, avenue limit and street limit: value `u8`, then the tick of its last change plus one as a varint (0 if it never changed)                                                          |
 | 6    | `roadwork` | segment, change `u8` (2 added, 3 removed), node a, node b: varints                                                                                                                                        |
 | 7    | `forked`   | tick varint, the fork's name (a string), principal hash `u64`                                                                                                                                             |
 
-A reader skips an extended kind it does not know. Kind 3 is the author, which another change writes.
+`author` is the builder's hash and name laid out like those of `command`, a varint
+count, then per lot the lot as a delta from the one before (the first from 0) and
+the tick its building was built as a delta from the record's tick. One event holds
+every lot one builder built in the district. A builder is written about once a city
+hour, so it takes the extended tag and its one extra kind byte.
+
+A reader skips an extended kind it does not know.
 
 Every arrival the sim makes is an `arrived` followed by the same resident's
 `activity`, so the encoder writes the pair as one `arrival` entry and the decoder
@@ -332,6 +343,44 @@ the residents. A removed road stays in the list, because segment ids are never
 reused and a page that starts here has to know the ids that are gone. The counts summarise the residents list for a
 reader that would rather not walk it: the city stats (see [City stats](#city-stats)) are checked against them in a test.
 
+### Who built what
+
+A keyframe lists the buildings that differ from the generated city, not who built
+them or when. A page that joins the live city or seeks to a past tick starts from
+a keyframe, so it could not say who built a lot. The sim writes that as events
+instead of changing the keyframe layout:
+
+- **`author`.** On every keyframe tick each district writes one `author` event per
+  builder who has a building standing in it. The event holds the hash and display
+  name of the builder, from the `command` events that caused the builds, then every
+  such lot in ascending order with the tick of its `built` event.
+- **Between keyframes** nothing new is written. The `command` event just before a
+  `built` already says who built it, and the tick of the record is when.
+- **Demolishing** a lot ends its entry: the next keyframe tick does not list it. A
+  lot that is built on again is credited to the new builder.
+- **Generated buildings** have no entry. A page reads "no entry, and not built
+  since the city was generated" as "here since the start".
+- **Restart.** The sim rebuilds the entries from the `author` events of the newest
+  keyframe tick it restores from, then from the `command` and `built` events of the
+  records after it, the same way it rebuilds the buildings. A log written before
+  `author` existed has no entries, so a restart starts with none.
+
+The page keeps the same table. It takes the `author` events of a keyframe tick when
+it folds one, whether it joined live or seeked there, and the `command` and `built`
+pairs in the records after. A building the table has no builder for reads "Built
+earlier"; with a sim that writes `author` that should not happen.
+
+The event is written once a city hour (a minute at 4 ticks a second). The builder's hash
+and name are written once per builder and district, and each lot costs 2 to 5 bytes: a
+one-byte delta for lots near each other and one to four bytes for how long ago it was
+built, four only in a log six days old. That is under 0.1 B/s per built lot. The
+evening rush has only about 12 B/s of headroom under the 10 KB/s goal, so a test
+(`authors_for_eighty_built_lots_fit_in_the_rushs_headroom`) adds the
+authors of 80 built lots from five builders in a six-day-old log, 10.8 B/s, to the
+extrapolated figures and holds the sum under the goal. The figures in "Log size" are for a
+city nobody has built in, which writes no `author` event; a city with many thousands of
+built lots would leave the goal behind.
+
 ### Log size
 
 The goal is about 10 KB/s for a city of 20,000 residents at 4 ticks a second,
@@ -358,9 +407,9 @@ after 2^21 ticks (22 bytes), so it holds on a long-lived log. The same bound is 
 
 | Extrapolated to 20,000 residents in 16 districts, at 4 ticks a second | Harbor city (522 residents) | 64 residents a home (5,568) |
 | --------------------------------------------------------------------- | --------------------------- | --------------------------- |
-| Mean over a day                                                       | 5.1 KB/s                    | 5.3 KB/s                    |
-| Busiest minute, 07:45 to 08:15                                        | 8.1 KB/s                    | 8.9 KB/s                    |
-| Busiest minute, 17:00 to 17:30                                        | 9.96 KB/s                   | 9.86 KB/s                   |
+| Mean over a day                                                       | 5.2 KB/s                    | 5.3 KB/s                    |
+| Busiest minute, 07:45 to 08:15                                        | 8.2 KB/s                    | 8.9 KB/s                    |
+| Busiest minute, 17:00 to 17:30                                        | 9.99 KB/s                   | 9.86 KB/s                   |
 
 That is under 0.5 GB a day. The header of each district's record, every tick,
 is 1.4 KB/s of it (22 bytes, 16 districts, 4 ticks a second; 1 KB/s on a young

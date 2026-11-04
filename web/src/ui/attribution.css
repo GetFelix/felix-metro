@@ -1,0 +1,69 @@
+/* The card that says who built the building under the pointer. */
+.attribution {
+  position: fixed;
+  z-index: 4;
+  /* So max-width is the whole card; its padding made a long name's card 26 px wider than the screen allowed. */
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 0;
+  max-width: min(360px, calc(100vw - 16px));
+  padding: var(--space-2) var(--space-3);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-l);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  white-space: nowrap;
+  animation: lift var(--quick) var(--ease);
+}
+/* Only the builder's name gives way, so the time and the link stay whole and on screen. */
+.attribution-line {
+  display: flex;
+  min-width: 0;
+}
+.attribution-before,
+.attribution-after,
+.attribution-dot,
+.attribution-link {
+  flex: none;
+}
+.attribution-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.attribution[hidden] {
+  display: none;
+}
+/* Flex items drop the spaces at the edges of their text; these are the card's. */
+.attribution-before,
+.attribution-after,
+.attribution-dot {
+  white-space: pre;
+}
+.attribution-link {
+  padding: 0;
+  background: none;
+  border: 0;
+  color: var(--cyan);
+  font: inherit;
+  cursor: pointer;
+}
+.attribution-link:hover {
+  text-decoration: underline;
+}
+.attribution-link:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
+  border-radius: var(--radius-s);
+}
+/* Photo mode shows the city and nothing on top of it. */
+body.photo .attribution {
+  display: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .attribution {
+    animation: none;
+  }
+}

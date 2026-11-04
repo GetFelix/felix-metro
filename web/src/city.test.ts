@@ -465,6 +465,111 @@ describe('CityState', () => {
     expect(() => state.apply(record(0, 1, [unknown, { type: 'built', lot: 1, kind: 7, rotation: 0 }]))).not.toThrow();
     expect(state.built.get(1)).toEqual({ kind: 7, rotation: 0 });
   });
+
+  describe('who built what', () => {
+    const command = (name: string, result = 0): TickEvent => ({
+      type: 'command',
+      principal: `00000000000000${name.length}${name.length}`,
+      name,
+      id: 1,
+      result,
+    });
+    const built = (lot: number): TickEvent => ({ type: 'built', lot, kind: 7, rotation: 2 });
+    const author = (lot: number, tick: number, name: string): TickEvent => ({
+      type: 'author',
+      principal: `00000000000000${name.length}${name.length}`,
+      name,
+      lots: [[lot, tick]],
+    });
+
+    it('credits the sender of the command just before a built event, at that tick', () => {
+      const state = new CityState(city, trips, 2);
+      state.apply(record(0, 9, [command('Ana'), built(1)]));
+      expect(state.authors.get(1)).toEqual({ tick: 9, principal: '0000000000000033', name: 'Ana' });
+    });
+
+    it('credits nobody for a command that was refused, and not for a building it did not build', () => {
+      const state = new CityState(city, trips, 2);
+      state.apply(record(0, 9, [command('Ana', 3), built(1)]));
+      expect(state.authors.has(1)).toBe(false);
+      // A command that built something does not carry over to the next building.
+      state.apply(record(0, 10, [command('Bo'), built(0), built(1)]));
+      expect(state.authors.get(0)!.name).toBe('Bo');
+      expect(state.authors.has(1)).toBe(false);
+    });
+
+    it('credits the latest builder of a lot, and nobody once it is demolished', () => {
+      const state = new CityState(city, trips, 2);
+      state.apply(record(0, 9, [command('Ana'), built(1)]));
+      state.apply(record(0, 20, [command('Bo'), { type: 'demolished', lot: 1, kind: 7, rotation: 2 }]), true);
+      expect(state.authors.has(1)).toBe(false);
+      state.apply(record(0, 30, [command('Cy'), built(1)]), true);
+      expect(state.authors.get(1)).toMatchObject({ tick: 30, name: 'Cy' });
+    });
+
+    it('learns the authors of a keyframe tick from its author events', () => {
+      const state = new CityState(city, trips, 2);
+      state.apply(record(0, 240, [author(1, 9, 'Ana')], { buildings: [[1, 7, 2]], roads: [] }), true);
+      expect(state.authors.get(1)).toEqual({ tick: 9, principal: '0000000000000033', name: 'Ana' });
+    });
+
+    it('takes every lot a builder’s author event lists', () => {
+      const state = new CityState(city, trips, 2);
+      const both: TickEvent = {
+        type: 'author',
+        principal: 'aa',
+        name: 'Ana',
+        lots: [
+          [0, 7],
+          [1, 9],
+        ],
+      };
+      state.apply(
+        record(0, 240, [both], {
+          buildings: [
+            [0, 7, 0],
+            [1, 7, 0],
+          ],
+          roads: [],
+        }),
+        true,
+      );
+      expect([...state.authors].map(([lot, a]) => [lot, a.tick])).toEqual([
+        [0, 7],
+        [1, 9],
+      ]);
+    });
+
+    it('is the same from a keyframe as from following the events', () => {
+      const followed = new CityState(city, trips, 2);
+      followed.apply(record(0, 9, [command('Ana'), built(1)]));
+      const keyed = new CityState(city, trips, 2);
+      keyed.apply(record(0, 240, [author(1, 9, 'Ana')], { buildings: [[1, 7, 2]], roads: [] }), true);
+      expect([...keyed.authors]).toEqual([...followed.authors]);
+    });
+
+    it('carries on from a keyframe the way a seek folds it: its authors, then the commands after', () => {
+      const state = new CityState(city, trips, 2);
+      state.apply(record(0, 240, [author(1, 9, 'Ana')], { buildings: [[1, 7, 2]], roads: [] }), true);
+      state.apply(record(0, 241, [command('Bo'), built(0)]), true);
+      state.apply(record(0, 242, [command('Cy'), { type: 'demolished', lot: 1, kind: 7, rotation: 2 }]), true);
+      expect([...state.authors].map(([lot, a]) => [lot, a.name])).toEqual([[0, 'Bo']]);
+    });
+
+    it('drops the authors of a district a later keyframe says no longer have the building', () => {
+      const state = new CityState(city, trips, 2);
+      state.apply(record(0, 9, [command('Ana'), built(1)]));
+      state.apply(record(1, 9, [command('Bo'), built(2)]));
+      state.apply(record(0, 240, [], { buildings: [], roads: [] }), true);
+      expect([...state.authors.keys()]).toEqual([2]);
+    });
+
+    it('keeps the author of a lot rebuilt as exactly what was generated, which a keyframe does not list', () => {
+      const state = new CityState(city, trips, 2);
+      state.apply(record(0, 240, [author(1, 9, 'Ana')], { buildings: [], roads: [] }), true);
+      expect(state.authors.get(1)!.name).toBe('Ana');
+    });
+  });
 });
 
 describe('syncRoads', () => {

@@ -335,6 +335,15 @@ pub enum Event {
     CommandCursor {
         next: u64,
     },
+    /// The lots a builder built that still stand, each with the tick of its `built` event.
+    /// A district writes one per builder on every keyframe tick, so a page that starts from a
+    /// keyframe, which lists no builder, can still say who built what. `principal` and `name` are
+    /// those of the `command` events that caused the builds.
+    Author {
+        principal: u64,
+        name: String,
+        lots: Vec<Authored>,
+    },
     /// Money moved in or out of the city's account in this district: a day's
     /// taxes and upkeep, or the price of a build or demolition. `earned` and
     /// `spent` are whole units, never negative; `reason` is a `LEDGER_*`.
@@ -411,6 +420,13 @@ pub struct Tally {
     pub commute_ticks: u64,
     /// Arrivals at a shop.
     pub visits: u32,
+}
+
+/// A lot a builder built, and the tick of its `built` event.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Authored {
+    pub lot: u32,
+    pub built: u32,
 }
 
 /// A district's state at one tick, drawable with nothing before it.

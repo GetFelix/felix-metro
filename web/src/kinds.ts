@@ -46,3 +46,6 @@ export const KINDS: readonly { pack: Pack; model: string }[] = [
   { pack: 'commercial', model: 'detail-parasol-a' },
   { pack: 'suburban', model: 'planter' },
 ];
+
+/** The first kind that is a tree or a plaza prop: nothing a builder counts as a building. */
+export const TREE_FIRST = 38;

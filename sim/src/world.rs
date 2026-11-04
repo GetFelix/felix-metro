@@ -3,7 +3,7 @@
 use std::collections::{BTreeMap, HashSet};
 
 use felix_metro_core::record::{
-    BuildingDiff, Command, Counts, Doing, Event, Keyframe, LEDGER_BUILD, LEDGER_DAY,
+    Authored, BuildingDiff, Command, Counts, Doing, Event, Keyframe, LEDGER_BUILD, LEDGER_DAY,
     LEDGER_DEMOLISH, Leg, NO_BUILDING, REFUSED_BAD_KIND, REFUSED_EMPTY, REFUSED_IN_USE,
     REFUSED_NO_FUNDS, REFUSED_OCCUPIED, REFUSED_ROAD_BLOCKED, REFUSED_UNKNOWN, REFUSED_UNSUPPORTED,
     RESULT_APPLIED, ROAD_ADDED, ROAD_REMOVED, ResidentState, RoadDiff, Vehicle,
@@ -41,6 +41,15 @@ pub(crate) struct DistrictTick {
     pub(crate) keyframe: Option<Keyframe>,
 }
 
+/// Who built the building on a lot and when, from the `command` that caused it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Author {
+    /// The tick of the `built` event.
+    pub(crate) tick: u32,
+    pub(crate) principal: u64,
+    pub(crate) name: String,
+}
+
 struct Person {
     resident: Resident,
     /// The block they are in, or just left.
@@ -70,6 +79,8 @@ pub(crate) struct World {
     cars: Vec<u16>,
     /// The lots whose building was changed after generation, by lot.
     built: BTreeMap<u32, BuildingDiff>,
+    /// Who built the buildings a builder put up and still stand. A generated building has no entry.
+    pub(crate) authors: BTreeMap<u32, Author>,
     /// Lots a resident's schedule sends them to. Demolishing one would strand
     /// the people who go there.
     pub(crate) in_use: HashSet<u32>,
@@ -140,6 +151,7 @@ impl World {
             tick: 0,
             cars,
             built: BTreeMap::new(),
+            authors: BTreeMap::new(),
             in_use,
             removed: Vec::new(),
         }
@@ -271,6 +283,32 @@ impl World {
                 Err(result) => Applied::refused(0, result),
             },
         }
+    }
+
+    /// Notes who is behind the `built` or `demolished` event in `events`, which
+    /// belongs to the tick about to be stepped. A `built` makes `principal` the
+    /// lot's author; a `demolished` leaves it with none.
+    pub(crate) fn attribute(&mut self, events: &[Event], principal: u64, name: &str) {
+        for event in events {
+            match event {
+                Event::Built { lot, .. } => self.set_author(*lot, self.tick, principal, name),
+                Event::Demolished { lot, .. } => {
+                    self.authors.remove(lot);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn set_author(&mut self, lot: u32, tick: u32, principal: u64, name: &str) {
+        self.authors.insert(
+            lot,
+            Author {
+                tick,
+                principal,
+                name: name.to_owned(),
+            },
+        );
     }
 
     /// Change a lot's building, as a `built` or `demolished` event will.
@@ -464,9 +502,42 @@ impl World {
             for (district, keyframe) in self.keyframes(tick).into_iter().enumerate() {
                 out[district].keyframe = Some(keyframe);
             }
+            for (district, event) in self.author_events() {
+                out[district].events.push(event);
+            }
         }
         self.tick += 1;
         out
+    }
+
+    /// One `author` event per district and builder, for the lots that builder built there that still
+    /// stand. A keyframe lists no builders, so each keyframe tick says who built what.
+    pub(crate) fn author_events(&self) -> Vec<(usize, Event)> {
+        let mut groups: BTreeMap<(usize, u64, &str), Vec<Authored>> = BTreeMap::new();
+        for (&lot, author) in &self.authors {
+            let district = usize::from(self.city.lots[lot as usize].district);
+            groups
+                .entry((district, author.principal, author.name.as_str()))
+                .or_default()
+                .push(Authored {
+                    lot,
+                    built: author.tick,
+                });
+        }
+        groups
+            .into_iter()
+            .map(|((district, principal, name), lots)| {
+                let name = name.to_owned();
+                (
+                    district,
+                    Event::Author {
+                        principal,
+                        name,
+                        lots,
+                    },
+                )
+            })
+            .collect()
     }
 
     /// Every district's state at the end of `tick`.

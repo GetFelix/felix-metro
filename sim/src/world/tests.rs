@@ -524,6 +524,61 @@ fn the_busiest_minute_of_a_rush_stays_under_ten_kilobytes_a_second() {
     }
 }
 
+/// Who built what is written on every keyframe tick, whatever the city's size, so it is added to the extrapolated
+/// figure rather than scaled with it. The evening rush has about 12 B/s of headroom: 80 built lots from five
+/// builders, in a log six days old (the widest ticks), stay inside it.
+#[test]
+fn authors_for_eighty_built_lots_fit_in_the_rushs_headroom() {
+    let (world, ticks) = day("harbor", 2);
+    let load = measure_load(&world, &ticks);
+    let mut busy = World::new(City::generate("harbor", 2).unwrap());
+    for lot in 0..80u32 {
+        busy.authors.insert(
+            lot,
+            Author {
+                tick: 100 + lot,
+                principal: 1 + u64::from(lot % 5),
+                name: format!("builder-no-{}", lot % 5),
+            },
+        );
+    }
+    let record = |events: Vec<Event>| {
+        TickRecord {
+            header: Header {
+                epoch: 1,
+                district: 0,
+                tick: 8738 * KEYFRAME_EVERY,
+                speed: 4,
+                keyframe_offset: 0,
+                wall_us: 0,
+            },
+            keyframe: None,
+            events,
+        }
+        .encode()
+        .unwrap()
+        .len()
+    };
+    let empty = record(Vec::new());
+    let mut per_keyframe = 0;
+    let mut all = busy.author_events().into_iter().map(|(_, e)| e).peekable();
+    // Each event is measured in a record of its own, as each district writes its own.
+    while all.peek().is_some() {
+        per_keyframe += record(vec![all.next().unwrap()]) - empty;
+    }
+    // A keyframe tick comes once a minute at 4 ticks a second.
+    let extra = per_keyframe as f64 / 60.0;
+    assert!(extra > 0.0);
+    for r in &load.rushes {
+        assert!(
+            r.at_20k + extra < 10_000.0,
+            "{}: {:.0} B/s and {extra:.0} B/s of authors",
+            r.name,
+            r.at_20k
+        );
+    }
+}
+
 /// A district of about 1,250 residents, the share of a 20,000-resident city in 16 districts, steps
 /// at the morning rush in well under the 250 ms a tick has at 4 ticks a second (the bound is 50 ms, 40 times the debug time). Prints the time:
 /// `cargo test -p felix-metro-sim --release step_time_at_rush -- --nocapture`.

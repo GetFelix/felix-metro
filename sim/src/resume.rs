@@ -411,7 +411,7 @@ impl History {
                     })
                     .collect::<Result<Vec<_>>>()?;
                 let policy = self.policy(base, &city.seed);
-                World::restore(
+                let mut world = World::restore(
                     city,
                     base,
                     &frames,
@@ -419,7 +419,9 @@ impl History {
                     self.council(base),
                     policy,
                     &self.departures,
-                )?
+                )?;
+                world.restore_authors(self.ticks[&base].iter().flatten().flat_map(|r| &r.events));
+                world
             }
             None => World::new(city),
         };

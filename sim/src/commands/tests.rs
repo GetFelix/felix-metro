@@ -1,11 +1,13 @@
 use felix_metro_core::City;
 use felix_metro_core::record::{
-    LEDGER_BUILD, NO_BUILDING, REFUSED_BAD_KIND, REFUSED_BAD_SPEED, REFUSED_EMPTY, REFUSED_IN_USE,
-    REFUSED_MALFORMED, REFUSED_NOT_BUILT, REFUSED_OCCUPIED, REFUSED_UNKNOWN, REFUSED_UNSUPPORTED,
+    Authored, LEDGER_BUILD, NO_BUILDING, REFUSED_BAD_KIND, REFUSED_BAD_SPEED, REFUSED_EMPTY,
+    REFUSED_IN_USE, REFUSED_MALFORMED, REFUSED_NOT_BUILT, REFUSED_OCCUPIED, REFUSED_UNKNOWN,
+    REFUSED_UNSUPPORTED,
 };
 use felix_metro_core::{BuildingKind, KINDS};
 
 use super::*;
+use crate::world::KEYFRAME_EVERY;
 
 pub(crate) fn city() -> City {
     City::generate("harbor", 2).unwrap()
@@ -178,6 +180,223 @@ fn a_demolish_records_what_stood_there() {
         rotation
     }));
     assert_eq!(world.building(lot), Some((NO_BUILDING, 0)));
+}
+
+fn build(world: &mut World, who: &str, lot: u32) {
+    let mut speed = 4;
+    let kind = Command::Build {
+        lot,
+        kind: 3,
+        rotation: 0,
+    };
+    apply_all(world, vec![command(who, 1, kind)], &mut speed);
+}
+
+fn authors_in(step: &[crate::world::DistrictTick]) -> Vec<(usize, Event)> {
+    step.iter()
+        .enumerate()
+        .flat_map(|(d, t)| {
+            t.events
+                .iter()
+                .filter(|e| matches!(e, Event::Author { .. }))
+                .map(move |e| (d, e.clone()))
+        })
+        .collect()
+}
+
+#[test]
+fn a_build_makes_its_sender_the_lots_author_and_a_demolish_clears_it() {
+    let mut world = World::new(city());
+    let lot = free_lot(&world);
+    for _ in 0..3 {
+        world.step();
+    }
+    build(&mut world, "mayor", lot);
+    assert_eq!(
+        world.authors.get(&lot),
+        Some(&crate::world::Author {
+            tick: 3,
+            principal: principal_hash("mayor"),
+            name: "mayor".into(),
+        })
+    );
+    // A refused build says nothing about who built what is there.
+    build(&mut world, "viewer", lot);
+    assert_eq!(world.authors[&lot].name, "mayor");
+    let mut speed = 4;
+    apply_all(
+        &mut world,
+        vec![command("viewer", 2, Command::Demolish { lot })],
+        &mut speed,
+    );
+    assert!(world.authors.is_empty());
+}
+
+#[test]
+fn a_generated_building_has_no_author_even_when_someone_demolishes_it() {
+    let mut world = World::new(city());
+    let lot = spare_building(&world);
+    let mut speed = 4;
+    apply_all(
+        &mut world,
+        vec![command("mayor", 1, Command::Demolish { lot })],
+        &mut speed,
+    );
+    assert!(world.authors.is_empty());
+}
+
+#[test]
+fn every_keyframe_tick_says_who_built_each_lot_in_that_lots_district() {
+    let mut world = World::new(city());
+    let (a, b) = (free_lot(&world), {
+        let a = free_lot(&world);
+        (0..world.city.lots.len() as u32)
+            .find(|&l| {
+                l != a
+                    && world
+                        .building(l)
+                        .is_some_and(|(k, _)| k >= u16::from(BuildingKind::TREE_FIRST))
+            })
+            .unwrap()
+    });
+    for _ in 0..3 {
+        world.step();
+    }
+    build(&mut world, "mayor", a);
+    build(&mut world, "ana", b);
+    let want = |lot: u32, who: &str| {
+        (
+            usize::from(world.city.lots[lot as usize].district),
+            Event::Author {
+                principal: principal_hash(who),
+                name: who.into(),
+                lots: vec![Authored { lot, built: 3 }],
+            },
+        )
+    };
+    let mut want = vec![want(a, "mayor"), want(b, "ana")];
+    want.sort_by_key(|(d, e)| (*d, format!("{e:?}")));
+    let mut steps = Vec::new();
+    for _ in 3..=481 {
+        steps.push(world.step());
+    }
+    // Ticks 3..=481: index 240 - 3 is the keyframe tick 240.
+    for (i, step) in steps.iter().enumerate() {
+        let tick = 3 + i as u32;
+        let mut got = authors_in(step);
+        got.sort_by_key(|(d, e)| (*d, format!("{e:?}")));
+        if tick.is_multiple_of(KEYFRAME_EVERY) {
+            assert_eq!(got, want, "tick {tick}");
+        } else {
+            assert!(got.is_empty(), "tick {tick}");
+        }
+    }
+}
+
+#[test]
+fn one_builder_is_one_event_in_a_district_with_all_their_lots_in_order() {
+    let mut world = World::new(city());
+    let district = |lot: u32| world.city.lots[lot as usize].district;
+    let mut free: Vec<u32> = (0..world.city.lots.len() as u32)
+        .filter(|&l| {
+            world
+                .building(l)
+                .is_some_and(|(k, _)| k >= u16::from(BuildingKind::TREE_FIRST))
+        })
+        .collect();
+    let first = free.remove(0);
+    let same: Vec<u32> = free
+        .into_iter()
+        .filter(|&l| district(l) == district(first))
+        .take(2)
+        .collect();
+    let lots = [first, same[1], same[0]];
+    for lot in lots {
+        build(&mut world, "mayor", lot);
+    }
+    let found = world.author_events();
+    assert_eq!(found.len(), 1);
+    let mut want = lots.to_vec();
+    want.sort_unstable();
+    assert_eq!(
+        found[0].1,
+        Event::Author {
+            principal: principal_hash("mayor"),
+            name: "mayor".into(),
+            lots: want
+                .into_iter()
+                .map(|lot| Authored { lot, built: 0 })
+                .collect(),
+        }
+    );
+}
+
+#[test]
+fn a_restart_reads_the_author_back_from_the_command_and_built_pair() {
+    let mut world = World::new(city());
+    let lot = free_lot(&world);
+    let mine = [
+        Event::Command {
+            principal: principal_hash("mayor"),
+            name: "mayor".into(),
+            id: 1,
+            result: RESULT_APPLIED,
+        },
+        Event::Built {
+            lot,
+            kind: 3,
+            rotation: 0,
+        },
+    ];
+    world
+        .apply_logged_at(7, mine.iter().map(|e| (0, e)))
+        .unwrap();
+    assert_eq!(world.building(lot), Some((3, 0)));
+    assert_eq!(world.authors[&lot].tick, 7);
+    assert_eq!(world.authors[&lot].name, "mayor");
+    // A command that was refused is not an author.
+    let other = (0..world.city.lots.len() as u32)
+        .find(|&l| {
+            l != lot
+                && world
+                    .building(l)
+                    .is_some_and(|(k, _)| k >= u16::from(BuildingKind::TREE_FIRST))
+        })
+        .unwrap();
+    let refused = [
+        Event::Command {
+            principal: principal_hash("viewer"),
+            name: "viewer".into(),
+            id: 2,
+            result: REFUSED_OCCUPIED,
+        },
+        Event::Built {
+            lot: other,
+            kind: 3,
+            rotation: 0,
+        },
+    ];
+    world
+        .apply_logged_at(8, refused.iter().map(|e| (0, e)))
+        .unwrap();
+    assert!(!world.authors.contains_key(&other));
+    let gone = [
+        Event::Command {
+            principal: 1,
+            name: "x".into(),
+            id: 3,
+            result: RESULT_APPLIED,
+        },
+        Event::Demolished {
+            lot,
+            kind: 3,
+            rotation: 0,
+        },
+    ];
+    world
+        .apply_logged_at(9, gone.iter().map(|e| (0, e)))
+        .unwrap();
+    assert!(!world.authors.contains_key(&lot));
 }
 
 #[test]
