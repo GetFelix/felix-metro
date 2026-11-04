@@ -183,8 +183,8 @@ flowchart LR
 The tick is the one the clock shows: the tick drawn, the scrub target while the timeline is dragged, or the held hour
 under `?t=`. A city with no live connection draws the same effects from the hour.
 
-**The truck and the vans** come out of a lot's door and go into one at the end of the round, shrinking at the threshold as
-the sim's cars do. They are placed by `Traffic` after the voyages in each round (`Traffic.extras`), so they are
+**The truck and the vans** come out of a lot's door and go into one at the end of the round, going up to its door at full size,
+as the sim's cars do. They are placed by `Traffic` after the voyages in each round (`Traffic.extras`), so they are
 culled, lit at night and drawn instanced with the other cars. Kinds 1 to 6 are the sim's, and the van reuses the sim's
 delivery model, kind 6. Only the garbage truck, kind 7, is the page's own; the sim never logs a kind above 6, and a test
 keeps it so (`CAR_MODELS` in `web/src/ambient.ts`).
@@ -283,7 +283,9 @@ flowchart LR
 ```
 
 `web/src/traffic.ts` (`Traffic`) holds the maths: the lane or pavement a voyage keeps to, its heading, and the turn into
-the lot at each end of a trip. It places every voyage between `fleet.begin(dt)` and `fleet.end()` and keeps nothing
+the lot at each end of a trip: a car or walker turns in from the road and goes up to the lot's door (just inside the near edge of
+the tile) at full size, and is released there, where the building hides it. It does not shrink or slide into the lot's
+middle. It places every voyage between `fleet.begin(dt)` and `fleet.end()` and keeps nothing
 between rounds, so what is drawn is exactly what the last update placed. `web/src/fleet.ts` turns those poses into
 instances.
 `positionOf(voyage, tick)` gives the same pose for one voyage without placing it, so the camera can follow a resident the

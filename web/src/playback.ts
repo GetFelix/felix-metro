@@ -2,7 +2,7 @@
 // the one after the seek's offset, at the pace of the city's clock, and hands over to the live state when the playhead
 // reaches its tip. Backward, the state is refolded from the hour's keyframe to each tick the playhead passes.
 import type { CityState, TickRecord } from './city';
-import { TICKS_PER_HOUR, type TickClock } from './clock';
+import { TICKS_PER_HOUR, playoutLag, type TickClock } from './clock';
 import { pastEnd, type Gateway } from './gateway';
 import { parse } from './live';
 import { Hour, hourStart } from './rewind';
@@ -22,8 +22,8 @@ const LISTEN_ROOM = AHEAD_RECORDS + TICKS_PER_HOUR;
 /** Ticks past the playhead whose records are applied, so a car about to leave is already known. */
 const APPLY_AHEAD = 2;
 
-/** The live clock's render delay: the playhead joins it this many ticks behind the live tip. */
-export const JOIN_LAG = 1;
+/** The live clock's render delay at a speed: the playhead joins it this many ticks behind the live tip. */
+export const joinLag = (speed: number): number => playoutLag(speed);
 
 /**
  * Seconds a fast-forward to live aims to take, whatever the distance, the most ticks a second it will ask for, and the
@@ -323,7 +323,7 @@ export class Playback {
 
   /** Whether the playhead has reached the live tip's render delay: time to hand over. */
   get atTip(): boolean {
-    return this.head >= this.options.tail() - JOIN_LAG;
+    return this.head >= this.options.tail() - joinLag(this.state.speed);
   }
 
   /** Move the playhead on `dt` seconds and take the records it has come to. */
@@ -341,7 +341,7 @@ export class Playback {
       this.head = Math.max(this.head, Math.min(target, this.state.latest));
     }
     // Before the session is open the tick drawn runs on without the records, but never past the live render delay.
-    const racing = this.attached ? this.head : Math.min(target, this.options.tail() - JOIN_LAG);
+    const racing = this.attached ? this.head : Math.min(target, this.options.tail() - joinLag(this.state.speed));
     this.shown = Math.max(this.shown, this.head, racing);
   }
 
