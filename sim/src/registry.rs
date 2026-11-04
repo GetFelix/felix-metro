@@ -67,12 +67,7 @@ pub(crate) async fn announce_fork(
     send(client, connection, &fork.child, record).await
 }
 
-async fn send(
-    client: &Client,
-    connection: &Connection,
-    name: &str,
-    record: Vec<u8>,
-) -> Result<()> {
+async fn send(client: &Client, connection: &Connection, name: &str, record: Vec<u8>) -> Result<()> {
     for attempt in 1..=ATTEMPTS {
         // A plain publish: the registry needs no atomic commit, which the fleet may not have enabled yet.
         match client

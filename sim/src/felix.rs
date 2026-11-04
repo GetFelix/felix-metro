@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use felix_client::{ClientConfig, Client, CommitOp, ConditionalWrite};
+use felix_client::{Client, ClientConfig, CommitOp, ConditionalWrite};
 use tracing::warn;
 
 use crate::commands::{Incoming, commands_stream};
