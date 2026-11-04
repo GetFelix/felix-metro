@@ -169,7 +169,6 @@ for (let attempt = 1; attempt <= ATTEMPTS && compared < MIN_COMPARED; attempt++)
   // The page now shows the live city, and joined at its tip.
   if (done.shown.past !== null || !done.shown.live) await fail('after the join the page is not showing the live state');
   if (done.shown.sig !== done.liveNow.sig) await fail('after the join the city is not the live one');
-  if (done.tipAtJoin - joined > 5) await fail(`joined at ${joined}, the live tip was ${done.tipAtJoin} at that moment`);
   if (await page.locator('#past').isVisible()) await fail('the past pill is still showing after the join');
 
   // Nothing under way jumped at the join: the tick never went back, and no resident moved much further between the
@@ -183,6 +182,12 @@ for (let attempt = 1; attempt <= ATTEMPTS && compared < MIN_COMPARED; attempt++)
     frames.findIndex((f) => f.tick <= started + HOUR_TICKS),
   );
   const lo = Math.max(1, landed + 1, j - 12);
+  // The page notices it reached the tip on the next frame, and the tip moves on while a slow renderer draws it, so the
+  // gap allowed is a few ticks plus what the tip covers in that frame.
+  const frameSeconds = frames[j] && frames[j - 1] ? (frames[j].t - frames[j - 1].t) / 1000 : 0;
+  const slack = 5 + done.shown.speed * frameSeconds;
+  if (done.tipAtJoin - joined > slack)
+    await fail(`joined at ${joined}, the live tip was ${done.tipAtJoin} at that moment (${slack.toFixed(0)} allowed)`);
   // Enough frames between the seek and the join to see the join in; a slow software renderer draws too few to ask for 8.
   const span = frames[j] && frames[landed] ? (frames[j].t - frames[landed].t) / 1000 : 0;
   const fps = span > 0 ? (j - landed) / span : 0;
