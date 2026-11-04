@@ -151,7 +151,9 @@ await page
     today + 1,
     { polling: 250, timeout: 2 * MINUTE },
   )
-  .catch(async () => fail(`the card never showed day ${today + 1} or later: ${await page.locator('#follow').innerText()}`));
+  .catch(async () =>
+    fail(`the card never showed day ${today + 1} or later: ${await page.locator('#follow').innerText()}`),
+  );
 await walkTo(day + 1);
 const rows = await matchesLog(day, `day ${day + 1}`);
 console.log(`day ${day + 1}: ${rows.length} entries match the log`);
