@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use felix_client::{ClientConfig, ClusterClient, CommitOp, ConditionalWrite};
+use felix_client::{ClientConfig, Client, CommitOp, ConditionalWrite};
 use tracing::warn;
 
 use crate::commands::{Incoming, commands_stream};
@@ -31,7 +31,7 @@ pub struct Connection {
 /// Connects, retrying until a broker answers: in a fresh deployment the sim
 /// can start before the brokers do, or before the broker has written the
 /// certificate it is checked against.
-pub async fn connect(connection: &Connection) -> Result<ClusterClient> {
+pub async fn connect(connection: &Connection) -> Result<Client> {
     let mut attempt = 0u32;
     loop {
         match try_connect(connection).await {
@@ -45,7 +45,7 @@ pub async fn connect(connection: &Connection) -> Result<ClusterClient> {
     }
 }
 
-async fn try_connect(connection: &Connection) -> Result<ClusterClient> {
+async fn try_connect(connection: &Connection) -> Result<Client> {
     let token = std::fs::read_to_string(&connection.token_file)
         .with_context(|| format!("read {}", connection.token_file.display()))?;
     let roots = connection
@@ -59,7 +59,7 @@ async fn try_connect(connection: &Connection) -> Result<ClusterClient> {
     config.auth_tenant_id = Some(connection.tenant.clone());
     config.auth_token = Some(token.trim().to_owned());
     let seeds = resolve(&connection.brokers).await?;
-    ClusterClient::connect(&seeds, &connection.server_name, config).await
+    Client::connect(&seeds, &connection.server_name, config).await
 }
 
 async fn resolve(brokers: &[String]) -> Result<Vec<SocketAddr>> {
@@ -101,7 +101,7 @@ const MARKERS_SHARD: u32 = 0;
 /// A city's event stream on a cluster.
 #[derive(Clone)]
 pub struct FelixLog {
-    client: Arc<ClusterClient>,
+    client: Arc<Client>,
     tenant: Arc<str>,
     namespace: Arc<str>,
     stream: Arc<str>,
@@ -112,7 +112,7 @@ impl FelixLog {
     /// The event stream of `city`, which must exist with a shard for each of
     /// its `districts`.
     pub async fn open(
-        client: Arc<ClusterClient>,
+        client: Arc<Client>,
         connection: &Connection,
         city: &str,
         districts: usize,

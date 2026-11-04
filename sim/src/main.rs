@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use felix_client::ClusterClient;
+use felix_client::Client;
 use felix_metro_core::City;
 use felix_metro_sim::{
     Connection, Directory, FelixLog, ForkRequest, Forks, Settings, StartRequest, announce_later,
@@ -22,7 +22,7 @@ use crate::config::{CitySpec, Config};
 /// What every city task of the sim shares.
 #[derive(Clone)]
 struct Shared {
-    client: Arc<ClusterClient>,
+    client: Arc<Client>,
     connection: Connection,
     ticks_per_second: u8,
     warmup_ticks: u32,
@@ -269,7 +269,7 @@ async fn run_city(
 
 /// The city and its streams, ready to run.
 async fn open_city(
-    client: &Arc<ClusterClient>,
+    client: &Arc<Client>,
     connection: &Connection,
     spec: &CitySpec,
 ) -> Result<(City, FelixLog)> {
