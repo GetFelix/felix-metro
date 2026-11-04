@@ -218,6 +218,7 @@ pub(crate) fn apply_all_with(
                 },
                 other => {
                     let applied = world.apply(&other);
+                    world.attribute(&applied.events, item.principal, &name);
                     (applied.district, applied.result, applied.events, name, id)
                 }
             },

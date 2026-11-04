@@ -2,10 +2,11 @@
 
 use super::wire::{Reader, Writer};
 use super::{
-    BuildingDiff, Command, CommandRecord, Counts, DecodeError, Doing, EncodeError, Event, FACTIONS,
-    FLAG_KEYFRAME, Header, KIND_COMMAND, KIND_MARKERS, KIND_REGISTRY, KIND_TICK, Keyframe, Leg,
-    MARK_BUILT, MARK_DEMOLISHED, MARK_ROAD, MAX_PROGRESS, Marker, MarkersRecord, POLICIES,
-    PolicySetting, RegistryRecord, ResidentState, RoadDiff, Standing, Tally, TickRecord, Vehicle,
+    Authored, BuildingDiff, Command, CommandRecord, Counts, DecodeError, Doing, EncodeError, Event,
+    FACTIONS, FLAG_KEYFRAME, Header, KIND_COMMAND, KIND_MARKERS, KIND_REGISTRY, KIND_TICK,
+    Keyframe, Leg, MARK_BUILT, MARK_DEMOLISHED, MARK_ROAD, MAX_PROGRESS, Marker, MarkersRecord,
+    POLICIES, PolicySetting, RegistryRecord, ResidentState, RoadDiff, Standing, Tally, TickRecord,
+    Vehicle,
 };
 use crate::city::City;
 use crate::schedule::TICKS_PER_DAY;
@@ -33,8 +34,9 @@ const EV_ARRIVAL: u8 = 13;
 const EV_EXTENDED: u8 = 15;
 const EXT_LEDGER: u64 = 1;
 const EXT_BALANCE: u64 = 2;
+/// Written about once a city hour per builder, so it does not need a bare tag.
+const EXT_AUTHOR: u64 = 3;
 const EXT_FORKED: u64 = 7;
-// Kind 3 is taken by the author event on another branch.
 const EXT_COUNCIL: u64 = 4;
 const EXT_POLICY: u64 = 5;
 const EXT_ROADWORK: u64 = 6;
@@ -365,6 +367,24 @@ fn put_event(w: &mut Writer, e: &Event, tick: u32) -> Result<(), EncodeError> {
             b.varint(*next);
             Ok(())
         }),
+        Event::Author {
+            principal,
+            name,
+            lots,
+        } => w.framed(EV_EXTENDED, EVENT_TAG_BITS, |b| {
+            b.varint(EXT_AUTHOR);
+            b.u64(*principal);
+            b.str(name)?;
+            b.varint(lots.len() as u64);
+            // Lots are usually listed in order and built some time before the record, so both are deltas.
+            let mut prev = 0;
+            for a in lots {
+                b.delta(prev, a.lot);
+                prev = a.lot;
+                b.delta(tick, a.built);
+            }
+            Ok(())
+        }),
         Event::Ledger {
             reason,
             earned,
@@ -504,6 +524,26 @@ fn get_entry(r: &mut Reader, tick: u32, out: &mut Vec<Event>) -> Result<(), Deco
             EXT_BALANCE => Event::Balance {
                 amount: r.svarint()?,
             },
+            EXT_AUTHOR => {
+                let principal = r.u64()?;
+                let name = r.str()?;
+                // Each lot is two bytes at least, so a count that cannot fit is cut off early.
+                let n = r.count()?;
+                let mut prev = 0;
+                let mut lots = Vec::with_capacity(n);
+                for _ in 0..n {
+                    prev = r.delta(prev)?;
+                    lots.push(Authored {
+                        lot: prev,
+                        built: r.delta(tick)?,
+                    });
+                }
+                Event::Author {
+                    principal,
+                    name,
+                    lots,
+                }
+            }
             EXT_FORKED => Event::Forked {
                 tick: u32::try_from(r.varint()?).map_err(|_| DecodeError::Invalid("fork tick"))?,
                 name: r.str()?,

@@ -8,9 +8,11 @@ import {
   hash as cityHash,
   initSync,
   investigation,
+  principalHash as wasmPrincipalHash,
   residentDayHash,
   residentName,
 } from './core/felix_metro_core.js';
+import { principalHash } from './attribution';
 
 const built = (name: string) => readFileSync(new URL(`./core/${name}`, import.meta.url));
 
@@ -179,6 +181,30 @@ describe('records in WebAssembly', () => {
         { tick: 7100, kind: 'road', label: 'A road was closed' },
       ],
     });
+  });
+
+  it('reads an author event with who built which lots and when', () => {
+    const events = fixture.records.flatMap((r) => JSON.parse(decodeRecord(bytes(r.record))).events ?? []) as {
+      type: string;
+    }[];
+    expect(events.find((e) => e.type === 'author')).toEqual({
+      type: 'author',
+      principal: 'deadbeef01234567',
+      name: 'Ana "the" Builder',
+      lots: [
+        [17, 31000],
+        [18, 99],
+      ],
+    });
+  });
+
+  it('hashes a principal to the same digits as the page’s own copy of the hash', () => {
+    for (const principal of ['', 'a', 'mayor', 'viewer', 'é', 'a principal with spaces and 雪']) {
+      expect(principalHash(principal), principal).toBe(wasmPrincipalHash(principal));
+    }
+    // The vectors core/src/record/tests.rs pins.
+    expect(wasmPrincipalHash('')).toBe('cbf29ce484222325');
+    expect(wasmPrincipalHash('a')).toBe('af63dc4c8601ec8c');
   });
 
   it('refuses truncated bytes and unknown kinds', () => {

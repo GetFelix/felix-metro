@@ -66,6 +66,13 @@ export interface CommandEvent {
   id: number;
   result: number;
 }
+/** The lots one builder built that still stand, each with the tick of its `built` event; every keyframe tick repeats it. */
+interface AuthorEvent {
+  type: 'author';
+  principal: string;
+  name: string;
+  lots: [lot: number, tick: number][];
+}
 interface LedgerEvent {
   type: 'ledger';
   reason: number;
@@ -86,11 +93,15 @@ export type TickEvent =
   | RoadworkEvent
   | SpeedEvent
   | CommandEvent
+  | AuthorEvent
   | LedgerEvent
   | BalanceEvent
   | CouncilEvent
   | PolicyEvent
   | { type: 'other' };
+
+/** The result of a `command` event that changed the city. */
+const APPLIED = 0;
 
 /** A resident in a keyframe: indoors (`activity`, `lot`, `until`) or on the road (`vehicle`). */
 export interface KeyframeResident {
@@ -214,6 +225,15 @@ export interface Falling extends Building {
   from: number;
 }
 
+/** Who built a building and when. */
+export interface Author {
+  /** The tick it went up. */
+  tick: number;
+  /** [`principalHash`](./attribution) of the builder, 16 hex digits. */
+  principal: string;
+  name: string;
+}
+
 export class CityState {
   /**
    * Lots whose building went up within the last few ticks, by the tick of the `built` event. The log has one instant
@@ -226,6 +246,12 @@ export class CityState {
   readonly falling = new Map<number, Falling>();
   /** Lots that differ from the generated city. */
   readonly built = new Map<number, Building>();
+  /**
+   * Who built the buildings a builder put up that still stand. A keyframe lists the buildings but not who built them,
+   * so the sim repeats each lot's author in the records of every keyframe tick, and later builds are told by the
+   * `command` event just before their `built`. A generated building has no entry.
+   */
+  readonly authors = new Map<number, Author>();
   /**
    * Every road a builder added, by segment, including the ones taken away again: segment ids are never reused, so
    * core needs the gaps to number the live ones.
@@ -353,6 +379,8 @@ export class CityState {
       this.keyframe(d, record.keyframe.buildings, record.keyframe.roads ?? [], fresh);
       if (record.keyframe.residents) this.restore(d, record.tick, record.keyframe.residents);
     }
+    // A `built` or `demolished` comes right after the `command` that caused it, in the same record.
+    let by: { principal: string; name: string } | null = null;
     for (const e of record.events) {
       if (e.type === 'trip') {
         const t = e;
@@ -393,12 +421,18 @@ export class CityState {
           e.lot,
           e.type === 'built' ? { kind: e.kind, rotation: e.rotation } : { kind: NO_BUILDING, rotation: 0 },
         );
+        if (e.type === 'built' && by) this.authors.set(e.lot, { tick: record.tick, ...by });
+        else this.authors.delete(e.lot);
+        by = null;
+      } else if (e.type === 'command') {
+        by = e.result === APPLIED ? { principal: e.principal, name: e.name } : null;
+        this.onCommand?.(e);
+      } else if (e.type === 'author') {
+        for (const [lot, tick] of e.lots) this.authors.set(lot, { tick, principal: e.principal, name: e.name });
       } else if (e.type === 'roadwork') {
         this.road(d, e.segment, { change: e.change, a: e.a, b: e.b });
       } else if (e.type === 'speed') {
         this.speed = e.ticksPerSecond;
-      } else if (e.type === 'command') {
-        this.onCommand?.(e);
       } else if (e.type === 'ledger') {
         const share = this.shares[d];
         if (share !== null && share !== undefined) this.shares[d] = share + e.earned - e.spent;
@@ -687,6 +721,10 @@ export class CityState {
     }
     for (const lot of [...this.built.keys()]) {
       if (this.city.lots[lot]?.district === district && !listed.has(lot)) this.set(lot, null);
+    }
+    // The author events in the same record put back the ones whose building still stands.
+    for (const lot of [...this.authors.keys()]) {
+      if (this.city.lots[lot]?.district === district) this.authors.delete(lot);
     }
     for (const [lot, kind, rotation] of diffs) this.set(lot, { kind, rotation });
     // The keyframe lists every road of the district, so one it leaves out was never built as of its tick.

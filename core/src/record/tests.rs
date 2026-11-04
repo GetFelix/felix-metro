@@ -26,7 +26,7 @@ fn name(rng: &mut Rng) -> String {
 
 fn event(rng: &mut Rng) -> Event {
     let resident = rng.next_u64() as u32;
-    match rng.below(18) {
+    match rng.below(19) {
         0 => Event::Trip {
             resident,
             vehicle: rng.below(6) as u8,
@@ -103,7 +103,17 @@ fn event(rng: &mut Rng) -> Event {
         14 => Event::Balance {
             amount: (rng.next_u64() as i64) >> rng.below(64),
         },
-        16 => Event::Forked {
+        16 => Event::Author {
+            principal: rng.next_u64(),
+            name: name(rng),
+            lots: (0..rng.below(6))
+                .map(|_| Authored {
+                    lot: rng.next_u64() as u32,
+                    built: rng.next_u64() as u32,
+                })
+                .collect(),
+        },
+        17 => Event::Forked {
             tick: rng.next_u64() as u32,
             name: name(rng),
             principal: rng.next_u64(),
@@ -469,7 +479,7 @@ const FLAGS_AT: usize = 5;
 const COUNT_AT: usize = 15;
 
 /// A tag no build has used.
-const UNKNOWN_EVENT_TAG: u8 = 14;
+const UNKNOWN_EVENT_TAG: u8 = 0;
 
 /// A tick record's header for `events` events, with a keyframe if asked, then `body`.
 fn raw_tick(keyframe: bool, events: u8, body: &[u8]) -> Vec<u8> {
@@ -822,6 +832,89 @@ fn json_names_every_field_and_escapes_text() {
         r#"{"kind":"tick","epoch":2,"district":3,"tick":4,"speed":5,"keyframeOffset":6,"wallUs":7,"keyframe":null,"events":[{"type":"command","principal":"00000000000000ff","name":"Ana","id":1,"result":0}]}"#
     );
     assert_eq!(decode_json(&c.encode().unwrap()).unwrap(), c.to_json());
+}
+
+#[test]
+fn an_author_event_round_trips_and_has_its_json() {
+    let author = Event::Author {
+        principal: 255,
+        name: "Ana \"A\"".into(),
+        lots: vec![
+            Authored {
+                lot: 1234,
+                built: 4,
+            },
+            Authored { lot: 9, built: 5 },
+        ],
+    };
+    let tick = plain_tick(vec![author]);
+    assert_eq!(TickRecord::decode(&tick.encode().unwrap()).unwrap(), tick);
+    assert_eq!(
+        tick.to_json(),
+        r#"{"kind":"tick","epoch":1,"district":0,"tick":5,"speed":4,"keyframeOffset":0,"wallUs":0,"keyframe":null,"events":[{"type":"author","principal":"00000000000000ff","name":"Ana \"A\"","lots":[[1234,4],[9,5]]}]}"#
+    );
+}
+
+#[test]
+fn an_author_event_is_an_extended_event_of_kind_3() {
+    let author = Event::Author {
+        principal: 1,
+        name: "A".into(),
+        lots: vec![Authored { lot: 7, built: 3 }],
+    };
+    let bytes = plain_tick(vec![author.clone()]).encode().unwrap();
+    // Kind 3, the principal, the name (length, bytes), a count of 1, then a lot delta and a tick delta (zigzag).
+    let body = [3, 1, 0, 0, 0, 0, 0, 0, 0, 1, b'A', 1, 14, 3];
+    // The frame head is a varint: the length above four bits of tag 15.
+    let mut raw = vec![0xef, 0x01];
+    raw.extend_from_slice(&body);
+    assert_eq!(&bytes[PLAIN_HEADER..], &raw);
+    assert_eq!(
+        TickRecord::decode(&raw_tick(false, 1, &raw))
+            .unwrap()
+            .events,
+        [author]
+    );
+}
+
+#[test]
+fn an_author_event_costs_the_name_once_and_a_few_bytes_a_lot() {
+    // The cost design.md quotes, in the worst case: a log six days old (ticks of 2^21), builds from the first day,
+    // and lots a few apart. A lot is a one-byte delta and a four-byte tick delta.
+    let at = 1 << 21;
+    let lots = |n: u32| {
+        (0..n)
+            .map(|i| Authored {
+                lot: 1000 + 3 * i,
+                built: 100 + i,
+            })
+            .collect::<Vec<_>>()
+    };
+    let size = |n: u32| {
+        let mut r = plain_tick(vec![Event::Author {
+            principal: 1,
+            name: "Marcus".into(),
+            lots: lots(n),
+        }]);
+        r.header.tick = at;
+        r.encode().unwrap().len()
+    };
+    // The first lot's delta is from 0, so it is a byte or two longer than the ones after it.
+    assert_eq!(size(1) - size(0), 6);
+    assert_eq!(size(101) - size(1), 100 * 5);
+}
+
+#[test]
+fn an_author_name_over_the_limit_is_refused() {
+    let event = Event::Author {
+        principal: 1,
+        name: "x".repeat(MAX_STR + 1),
+        lots: Vec::new(),
+    };
+    assert_eq!(
+        plain_tick(vec![event]).encode(),
+        Err(EncodeError::StringTooLong)
+    );
 }
 
 #[test]

@@ -67,6 +67,10 @@ followed by `built` or `demolished` and the `ledger` event that paid for it. A r
 city steps exactly as if it had not been sent. A command with no district, such as a
 malformed record or an unknown lot, is recorded in district 0.
 
+The sim also remembers who built each lot. A keyframe lists buildings but not who built them, so every
+keyframe tick each district writes an `author` event per builder: their hash and name, and the lots they
+built there with the tick of each.
+
 | Command | Applied when | Refused with |
 |---|---|---|
 | `build` | the lot is bare or holds only trees and props, no resident goes there, the kind is a building and the rotation 0 to 3, and the city can pay | unknown lot, bad kind, occupied, in use, no funds |
@@ -194,6 +198,9 @@ diagram. What to know when you run it:
   `command_cursor` event: the offset on `metro.commands.<city>` the sim reads next. The command follower opens its
   subscription there, so a command sent while the sim was down runs when it comes back, and none runs twice. A new city
   reads the command stream from the start. A log written before the cursor existed follows the stream's tail.
+- **Who built what is restored.** The builders come from the `author` events of the keyframe tick the restart starts from
+  and the `command` and `built` events after it. A log written before `author` existed has none, so a restart starts
+  with none.
 - **A tick killed halfway is finished.** Districts commit a tick one by one, so a kill can leave some districts a tick
   ahead. The restart commits that tick to the districts that lack it.
 - **A killed warm-up carries on live** from where its districts stopped, with less history than a finished one.

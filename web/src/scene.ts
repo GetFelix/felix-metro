@@ -10,8 +10,8 @@ import { createMaterials } from './materials';
 import type { Tier } from './params';
 import { settingsFor } from './quality';
 import { clockwise, facingAngle, lotLook, roadModel, type City, type Road } from './layout';
-import { KINDS } from './kinds';
-const TREE_FIRST = 38; // kinds from here are trees and plaza props: no building
+import { KINDS, TREE_FIRST } from './kinds';
+import { lotsAlong, type Ray } from './picking';
 import { NO_BUILDING, type Building } from './city';
 import { Ambient, type ModelPart } from './ambient-fx';
 import { CAR_MODELS } from './ambient';
@@ -100,6 +100,10 @@ const CARS = [
 const CAR_SCALE = 0.12;
 const PEOPLE = 'abcdef'.split('').flatMap((c) => [`character-female-${c}`, `character-male-${c}`]);
 
+// A building is picked from lots whose centre lies this near the pointer's ray, between the ground and this height.
+const PICK_REACH = 0.8;
+const PICK_CEILING = 6;
+
 // The frame's map is 17 tiles across; a bigger city widens the shadow, fog and ground to match.
 const FRAME_TILES = 17;
 
@@ -136,6 +140,9 @@ export async function createCity(
     changed: () => {},
     centre: () => [0, 0],
   };
+  let pickLotDrawn: (ray: Ray) => number | null = () => null;
+  /** The Felix tower is drawn apart from the other lots, with its crown. */
+  let towerObjects: THREE.Object3D[] = [];
   const span = city ? Math.max(1, city.tiles / FRAME_TILES) : 1;
   const half = city ? (city.tiles - 1) / 2 : 0;
   const scene = new THREE.Scene();
@@ -656,6 +663,25 @@ export async function createCity(
       for (const job of mine.jobs) void job.then((o) => tintGhost(o, fits));
     };
 
+    // The lot a ray first meets: only the lots along its way down are tested against their meshes.
+    const centres = c.lots.map((lot) => ({ id: lot.id, x: wx(lot.x), z: wx(lot.z) }));
+    const raycaster = new THREE.Raycaster();
+    pickLotDrawn = (ray) => {
+      let found: number | null = null;
+      let nearest = Infinity;
+      for (const id of lotsAlong(ray, centres, PICK_REACH, PICK_CEILING)) {
+        const objects = id === c.tower ? towerObjects : (lotObjects.get(id)?.objects ?? []);
+        raycaster.ray.origin.set(ray.origin.x, ray.origin.y, ray.origin.z);
+        raycaster.ray.direction.set(ray.direction.x, ray.direction.y, ray.direction.z);
+        const hit = raycaster.intersectObjects(objects as THREE.Object3D[], true)[0];
+        if (hit && hit.distance < nearest) {
+          nearest = hit.distance;
+          found = id;
+        }
+      }
+      return found;
+    };
+
     // Trees past the map, on dry land only: the sea runs along the shore's whole side and past the corners.
     if (coast)
       for (const [tx, tz] of outerTrees(c, coast, rand))
@@ -789,6 +815,7 @@ export async function createCity(
   const towerLot = city?.lots[city.tower];
   const [tx, tz] = towerLot ? [towerLot.x - half, towerLot.z - half] : [-2, 2];
   const tower = await place('commercial', 'building-skyscraper-e', tx, tz, 0, 1, 0.3, 4);
+  towerObjects = [tower];
   const towerBox = new THREE.Box3().setFromObject(tower);
   const towerSize = towerBox.getSize(new THREE.Vector3());
   const top = towerBox.max.y;
@@ -1012,6 +1039,8 @@ export async function createCity(
     fleet: crowd?.fleet ?? null,
     pick: crowd?.pick.bind(crowd) ?? null,
     setLot: (id: number, b: Building | null) => setLotDrawn(id, b),
+    /** The lot the ray first meets, or `null`. Only the generated city has lots to meet. */
+    pickLot: (ray: Ray) => pickLotDrawn(ray),
     /** Draw the road tiles as core lays them, the generated ones and the builders', in place of what is drawn. */
     setRoads: (roads: readonly Road[]) => setRoadsDrawn(roads),
     /** Show the building a builder's tool would put on lot `id` as a ghost, or none with null; `fits` tints it. */

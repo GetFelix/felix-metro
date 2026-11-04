@@ -1,5 +1,6 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { GO_UP_TEXT, cardText } from '../attribution';
 import { canRemoveRoad, families, refusal, roadRefusal } from '../build';
 import { whyNot } from '../placement';
 import { BUILD_LABEL, DEMOLISH_LABEL, HINTS, ROAD_LABEL, ROAD_SECOND } from './build-bar';
@@ -37,6 +38,11 @@ const words = [
   ...kinds.map(archetypeLabel),
   ...said,
   HINT_TEXT,
+  GO_UP_TEXT,
+  cardText({ kind: 'built', name: 'Ana', mine: false, tick: 5760 + 2208 }),
+  cardText({ kind: 'built', name: 'Ana', mine: true, tick: 0 }),
+  cardText({ kind: 'start' }),
+  cardText({ kind: 'earlier' }),
   UNAVAILABLE_TEXT,
   SHARE_LABEL,
   SHARE_COPIED,

@@ -5,8 +5,8 @@ use std::collections::HashMap;
 
 use anyhow::{Context, Result, bail, ensure};
 use felix_metro_core::record::{
-    BuildingDiff, Doing, Event, Keyframe, LEDGER_DAY, Leg, NO_BUILDING, ROAD_ADDED, ROAD_REMOVED,
-    Vehicle,
+    BuildingDiff, Doing, Event, Keyframe, LEDGER_DAY, Leg, NO_BUILDING, RESULT_APPLIED, ROAD_ADDED,
+    ROAD_REMOVED, Vehicle,
 };
 use felix_metro_core::{BuiltRoad, City, Mode, TICKS_PER_DAY};
 
@@ -155,10 +155,40 @@ impl World {
         Ok(world)
     }
 
-    /// Carries out what one tick's logged events say, given as `(district, event)`
-    /// in any order of districts.
+    /// Takes the builders from the `author` events of the keyframe tick the
+    /// world was restored at. A keyframe lists the buildings but not who built
+    /// them, so the log says it alongside.
+    pub(crate) fn restore_authors<'a>(&mut self, events: impl Iterator<Item = &'a Event>) {
+        for event in events {
+            let Event::Author {
+                principal,
+                name,
+                lots,
+            } = event
+            else {
+                continue;
+            };
+            for a in lots {
+                if (a.lot as usize) < self.city.lots.len() {
+                    self.set_author(a.lot, a.built, *principal, name);
+                }
+            }
+        }
+    }
+
+    /// Carries out what the next tick's logged events say: see [`World::apply_logged_at`].
     pub(crate) fn apply_logged_tick<'a>(
         &mut self,
+        events: impl IntoIterator<Item = (usize, &'a Event)>,
+    ) -> Result<()> {
+        self.apply_logged_at(self.tick, events)
+    }
+
+    /// Carries out what the events logged for `tick` say, given as `(district, event)`
+    /// in any order of districts, and whose command built what.
+    pub(crate) fn apply_logged_at<'a>(
+        &mut self,
+        tick: u32,
         events: impl IntoIterator<Item = (usize, &'a Event)>,
     ) -> Result<()> {
         let mut events: Vec<_> = events.into_iter().collect();
@@ -170,8 +200,30 @@ impl World {
             } => Some((*segment, *change == ROAD_REMOVED)),
             _ => None,
         });
+        // A `built` or `demolished` comes right after the `command` that caused it, in the same district.
+        let mut by: HashMap<usize, (u64, &str)> = HashMap::new();
         for (district, event) in events {
             self.apply_logged(district, event)?;
+            match event {
+                Event::Command {
+                    principal,
+                    name,
+                    result: RESULT_APPLIED,
+                    ..
+                } => {
+                    by.insert(district, (*principal, name));
+                }
+                Event::Built { lot, .. } => {
+                    if let Some((principal, name)) = by.remove(&district) {
+                        self.set_author(*lot, tick, principal, name);
+                    }
+                }
+                Event::Demolished { lot, .. } => {
+                    self.authors.remove(lot);
+                    by.remove(&district);
+                }
+                _ => {}
+            }
         }
         Ok(())
     }

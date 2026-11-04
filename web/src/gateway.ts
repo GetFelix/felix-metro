@@ -5,6 +5,22 @@
 /** The optional protocol features the city needs. */
 export const FEATURES = ['binary_events', 'slots', 'shards', 'state', 'read'] as const;
 
+/**
+ * Features the page uses when the gateway has them and does without when it has not. `principal` has `hello` name the
+ * session's Felix principal, which is how the page knows which buildings are its own.
+ */
+const OPTIONAL_FEATURES = ['principal'] as const;
+
+let ownPrincipal: string | null = null;
+
+/**
+ * The Felix principal of the person signed in on this page, once a session has joined a gateway that names it; `null`
+ * before that, and with a gateway that does not. The same string `stamp_sender` writes before each command.
+ */
+export function sessionPrincipal(): string | null {
+  return ownPrincipal;
+}
+
 /** How long to wait before each new try after a failed one; the last step repeats. */
 export const RETRY_MS = [1000, 2000, 5000];
 
@@ -158,7 +174,9 @@ export class Gateway {
       socket.addEventListener('error', () => fail(new Error(`cannot reach ${url}`)), { once: true });
       socket.addEventListener('close', () => reject(new Error(`${url} closed before it answered`)), { once: true });
       socket.addEventListener('open', () =>
-        socket.send(JSON.stringify({ type: 'join', protocol: 1, features: FEATURES, city, token })),
+        socket.send(
+          JSON.stringify({ type: 'join', protocol: 1, features: [...FEATURES, ...OPTIONAL_FEATURES], city, token }),
+        ),
       );
       socket.addEventListener(
         'message',
@@ -170,6 +188,8 @@ export class Gateway {
           const features = hello.features as string[];
           const missing = FEATURES.filter((feature) => !features.includes(feature));
           if (missing.length > 0) return fail(new Error(`the gateway lacks ${missing.join(', ')}`));
+          // A gateway without the feature must not leave the last one's principal behind.
+          ownPrincipal = typeof hello.principal === 'string' ? hello.principal : null;
           resolve(new Gateway(socket, (hello.missing as string[] | undefined) ?? []));
         },
         { once: true },

@@ -8,7 +8,7 @@
 //   node dev/check-restart.mjs after [city]     the ticks from the noted offsets run on one after another, with
 //                                               none repeated or missing; the command sent while the sim was
 //                                               down ran once; the keyframes after the restart still list the
-//                                               builds. Then it takes them down.
+//                                               builds and say who built each, and when. Then it takes them down.
 //
 // The notes between phases are in CHECK_RESTART_FILE (default: the temp directory).
 import { readFile, writeFile } from "node:fs/promises";
@@ -125,6 +125,20 @@ for (const { lot: l, tick } of state.taken) {
   if (down.length !== 1) fail(`the markers list the demolish of lot ${lot} ${down.length} times, wanted once`);
 }
 console.log(`${city}: the markers survived the restart`);
+
+// The same keyframe ticks say who built each lot and at which tick, and say nothing of the one that came down.
+for (const { lot: l, district, tick } of state.taken) {
+  const frame = byDistrict(district).find((r) => r.keyframe && r.tick > noted);
+  const author = frame.events
+    .filter((e) => e.type === "author")
+    .flatMap((e) => e.lots.filter(([lot]) => lot === l).map(([, built]) => ({ name: e.name, tick: built })))[0];
+  if (l === lot) {
+    if (author) fail(`the keyframe at tick ${frame.tick} still names ${author.name} as the author of lot ${l}, which came down`);
+  } else if (!author || author.name !== NAME || author.tick !== tick) {
+    fail(`the keyframe at tick ${frame.tick} has ${JSON.stringify(author)} for lot ${l}, built by ${NAME} at tick ${tick}`);
+  }
+}
+console.log(`${city}: the keyframes after the restart say who built each lot`);
 
 // Leave the city as the next check expects.
 const rest = state.taken.filter((t) => t.lot !== lot);

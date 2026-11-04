@@ -169,7 +169,21 @@ export function decode(bytes) {
       const ext = { i: 0 };
       const raw = new Uint8Array(body.buffer, body.byteOffset, length);
       const kind = varint(raw, ext);
-      if (kind === 6) {
+      if (kind === 3) {
+        // A builder's hash and display name, then a count and, per lot, a lot delta and a delta of its tick from the
+        // record's.
+        const principal = body.getBigUint64(1, true);
+        const nameLength = body.getUint8(9);
+        const name = Buffer.from(bytes.subarray(start + 10, start + 10 + nameLength)).toString("utf8");
+        const inner = { i: start + 10 + nameLength };
+        const lots = [];
+        let lot = 0;
+        for (let n = varint(bytes, inner); n > 0; n--) {
+          lot = delta(bytes, inner, lot);
+          lots.push([lot, delta(bytes, inner, tick)]);
+        }
+        out.events.push({ type: "author", principal, name, lots });
+      } else if (kind === 6) {
         // A builder's road added or taken away.
         const segment = varint(raw, ext);
         const change = raw[ext.i++];

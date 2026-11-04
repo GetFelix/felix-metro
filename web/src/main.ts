@@ -26,10 +26,11 @@ import init, {
 import { parseCity, type City } from './layout';
 import { RoadsOnScreen } from './roads-drawn';
 import { beforeSignIn, fetchOidc, signIn } from './auth';
-import { CityState, ROAD_ADDED, syncRoads, type Building, type TickRecord } from './city';
+import { CityState, NO_BUILDING, ROAD_ADDED, syncRoads, type Building, type TickRecord } from './city';
+import { cardParts, goUpTick, provenance } from './attribution';
 import { TICKS_PER_HOUR, TickClock, cityTime } from './clock';
 import { connectLive, onOldLog } from './live';
-import { Gateway, GatewayError } from './gateway';
+import { Gateway, GatewayError, sessionPrincipal } from './gateway';
 import { Playback, handOver } from './playback';
 import { IDLE_MS, SeekError, Seeker, fold, tryFoldMore, type SeekResult } from './seek';
 import { neighbours } from './rewind';
@@ -38,7 +39,10 @@ import { Latest } from './scrub';
 import { createMarkerFeed, mergeMarkers, type Marker } from './markers';
 import { createMarkerRow } from './marker-row';
 import { agoText, createGuess, createTimeline, moveRange, stepTick, clampTick, type Range } from './timeline';
+import { TREE_FIRST } from './kinds';
+import { createCard } from './ui/attribution';
 import { createLoader, type Loader } from './ui/loader';
+import { createLotHover, type LotHover } from './ui/lot-hover';
 import { createPicker } from './ui/picker';
 import { createShell, type Shell } from './ui/shell';
 import { createStatsPanel, type StatsPanel } from './ui/stats';
@@ -231,6 +235,19 @@ declare global {
     __day?: { show(view: DayView | null): void; onPick: ((index: number) => void) | null };
     /** The settings sheet, key list and first-visit tip, for the CI check and the console; null when the overlay is off. */
     __ui?: Shell;
+    /** Who built what, for the CI check: the lots someone built, the generated buildings, and the card on screen. */
+    __lots?: {
+      built(): { lot: number; name: string; tick: number }[];
+      seeded(): number[];
+      /** Look at a lot from close by and say where it is on screen, in viewport pixels. */
+      aim(lot: number): Promise<{ x: number; y: number }>;
+      /** The text of the card now showing, or null. */
+      card(): string | null;
+      /** Whether the city on screen has a building standing on the lot. */
+      standing(lot: number): boolean;
+      /** The lot under a viewport point. */
+      pick(x: number, y: number): number | null;
+    };
     __quality?: {
       history: readonly Tier[];
       memory: { tier: Tier; textures: number; geometries: number }[];
@@ -472,6 +489,8 @@ async function main() {
   let scrubSettled: () => Promise<void> = async () => {};
   /** Moves a playback on and says which tick it draws, or null when nothing is playing. */
   let playFrame: ((dt: number) => number | null) | null = null;
+  /** Keeps the attribution card true to the scene it describes; set where the card is built. */
+  let refreshCard: (() => void) | null = null;
   /** Called after each timer step of a playback, to notice its failure or its arrival at the tip. */
   let playbackTimer: (() => void) | null = null;
   /** Told the frame after the city changed has been drawn. */
@@ -555,6 +574,7 @@ async function main() {
     setRoads,
     lots,
     previewBuilding,
+    pickLot,
   } = await createCity(renderer, quality.tier, city, state !== null, drawn);
   const hud = showHud ? createHud(renderer, quality) : null;
 
@@ -1225,6 +1245,86 @@ async function main() {
         void refreshRange();
       })();
     }
+    /**
+     * "See it go up": the past at `tick` through the timeline's own path, then played on so the building is seen rising.
+     * A page with no live connection cannot play, so it stays paused at that moment.
+     */
+    const seeItGoUp = async (tick: number) => {
+      if (!range) await refreshRange();
+      // The history could not be opened, which refreshRange has logged: say so, since go() would do nothing.
+      if (!range) return note('The city cannot go back to that moment right now.');
+      if (tick < range.oldest) return note('That part of the city is no longer kept.');
+      if (hasLive && tick >= tipTick() - LIVE_SNAP_TICKS)
+        return note('It only just went up, so you are already seeing it.');
+      go(tick, false);
+      await scrubLatest.settled();
+      // Landed live (it went up a moment ago), or the seek failed and said so: nothing to play from.
+      if (pastTick === null || pastTick > tick + 1 || scrubTarget !== null) return;
+      if (!playback || playback.paused) await togglePlay();
+    };
+    if (shell) {
+      const canvas = renderer.domElement;
+      const caster = new THREE.Raycaster();
+      const at = new THREE.Vector2();
+      let hover: LotHover | null = null;
+      const card = createCard(
+        document.body,
+        () => hover?.onCard(true),
+        () => hover?.onCard(false),
+      );
+      hover = createLotHover({
+        canvas,
+        pick(x, y) {
+          const box = canvas.getBoundingClientRect();
+          at.set(((x - box.left) / box.width) * 2 - 1, -((y - box.top) / box.height) * 2 + 1);
+          caster.setFromCamera(at, camera);
+          return pickLot(caster.ray);
+        },
+        say(lot) {
+          const p = provenance(lot, city!, state!, sessionPrincipal());
+          return p && { parts: cardParts(p), goUp: goUpTick(p) };
+        },
+        card,
+        goUp: (tick) => void seeItGoUp(tick),
+        // A tool in hand reads the lot under the pointer itself, so the card stays out of its way.
+        hidden: () => document.body.classList.contains('photo') || toolHeld(),
+      });
+      refreshCard = () => hover?.refresh();
+      if (hooks) {
+        const half = (city!.tiles - 1) / 2;
+        const ground = new THREE.Vector3();
+        window.__lots = {
+          built: () => [...state!.authors].map(([lot, a]) => ({ lot, name: a.name, tick: a.tick })),
+          seeded: () => city!.lots.filter((l) => l.kind < TREE_FIRST && !state!.built.has(l.id)).map((l) => l.id),
+          // Look straight at a lot from close by, and say where on the screen it is.
+          async aim(lot) {
+            const l = city!.lots[lot]!;
+            controls.moveTo({ x: l.x - half, z: l.z - half }, 3, Math.PI / 4, 1.1, { ease: false });
+            await new Promise<void>((done) => frameWaiters.push(done));
+            ground.set(l.x - half, 0.35, l.z - half).project(camera);
+            const box = canvas.getBoundingClientRect();
+            return {
+              x: box.left + ((ground.x + 1) / 2) * box.width,
+              y: box.top + ((1 - ground.y) / 2) * box.height,
+            };
+          },
+          standing: (lot) => {
+            const b = state!.built.get(lot);
+            return b ? b.kind !== NO_BUILDING : city!.lots[lot]!.kind < TREE_FIRST;
+          },
+          card: () => {
+            const el = document.getElementById('attribution');
+            return el && !el.hidden ? (el.textContent ?? '') : null;
+          },
+          pick: (x, y) => {
+            const box = canvas.getBoundingClientRect();
+            at.set(((x - box.left) / box.width) * 2 - 1, -((y - box.top) / box.height) * 2 + 1);
+            caster.setFromCamera(at, camera);
+            return pickLot(caster.ray);
+          },
+        };
+      }
+    }
     const metroHooks: NonNullable<Window['__metro']> = {
       async prepare() {
         await (await seeker())?.warm();
@@ -1614,6 +1714,7 @@ async function main() {
     traffic?.sync();
     if (paint) post!.render(controls.target);
     for (const done of frameWaiters.splice(0)) done();
+    refreshCard?.();
     // A live state the page has left keeps taking records; let its finished trips go.
     if (liveState && liveState !== state) liveState.retire(liveState.latest);
     if (window.__quality && memory[memory.length - 1]?.tier !== quality.tier) {
