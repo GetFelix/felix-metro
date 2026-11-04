@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
-use felix_client::{AckMode, ClusterClient};
+use felix_client::{AckMode, Client};
 use felix_metro_core::record::RegistryRecord;
 use tracing::{info, warn};
 
@@ -40,7 +40,7 @@ fn wall_us() -> u64 {
 /// Writes `name` to the registry. A record that was sent twice because the first answer was lost is
 /// harmless: readers list a name once.
 pub async fn announce(
-    client: &ClusterClient,
+    client: &Client,
     connection: &Connection,
     name: &str,
     districts_per_side: u16,
@@ -51,7 +51,7 @@ pub async fn announce(
 
 /// Lists a fork, once its streams hold the history it was made from.
 pub(crate) async fn announce_fork(
-    client: &ClusterClient,
+    client: &Client,
     connection: &Connection,
     fork: &Request,
 ) -> Result<()> {
@@ -67,12 +67,7 @@ pub(crate) async fn announce_fork(
     send(client, connection, &fork.child, record).await
 }
 
-async fn send(
-    client: &ClusterClient,
-    connection: &Connection,
-    name: &str,
-    record: Vec<u8>,
-) -> Result<()> {
+async fn send(client: &Client, connection: &Connection, name: &str, record: Vec<u8>) -> Result<()> {
     for attempt in 1..=ATTEMPTS {
         // A plain publish: the registry needs no atomic commit, which the fleet may not have enabled yet.
         match client
@@ -100,7 +95,7 @@ async fn send(
 }
 
 /// Every record of the registry, oldest first.
-pub async fn list(client: &ClusterClient, connection: &Connection) -> Result<Vec<RegistryRecord>> {
+pub async fn list(client: &Client, connection: &Connection) -> Result<Vec<RegistryRecord>> {
     let mut found = Vec::new();
     let mut next = 0;
     loop {
@@ -135,7 +130,7 @@ const RETRY_AFTER: Duration = Duration::from_secs(30);
 /// Announces `name` in the background until it is listed. A city that runs without a registry entry is only missing
 /// from the picker, which is no reason to stop it.
 pub fn announce_later(
-    client: Arc<ClusterClient>,
+    client: Arc<Client>,
     connection: Connection,
     name: String,
     districts_per_side: u16,
