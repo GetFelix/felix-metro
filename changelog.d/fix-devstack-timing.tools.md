@@ -1,0 +1,1 @@
+- The dev-stack checks no longer fail on a slow runner: the playback check allows the live tip to move on during the frame that notices the join, and the day check accepts the card on a later day when the city crosses midnight while the log is read.
