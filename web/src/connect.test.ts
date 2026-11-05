@@ -1,11 +1,11 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GatewayError, type EventFrame } from './gateway';
 
 vi.mock('./core/felix_metro_core.js', () => ({
   decodeRecord: (bytes: Uint8Array) => new TextDecoder().decode(bytes),
 }));
-vi.mock('./auth', () => ({ signIn: async () => 'token' }));
-const { connect } = vi.hoisted(() => ({ connect: vi.fn() }));
+const { connect, signIn } = vi.hoisted(() => ({ connect: vi.fn(), signIn: vi.fn() }));
+vi.mock('./auth', () => ({ signIn }));
 vi.mock('./gateway', async (original) => ({
   ...(await original<typeof import('./gateway')>()),
   Gateway: { connect },
@@ -27,8 +27,11 @@ const listing = () => ({
   },
 });
 
+beforeEach(() => signIn.mockResolvedValue('token'));
+
 afterEach(() => {
   vi.useRealTimers();
+  signIn.mockReset();
   connect.mockReset();
 });
 
@@ -97,6 +100,7 @@ describe('connectLive', () => {
     const session = joined([]);
     connect.mockResolvedValue(session);
     const state = new CityState({ lots: [] } as never, { trip: () => undefined }, 1);
+    state.ticks[0] = 0;
     const live = await connectLive({ url: 'ws://x/ws', oidc: {} as never, city: 'harbor', state });
     expect(live.commands.blocked()).toBeNull();
     await live.commands.send(Uint8Array.of(1, 2));
@@ -114,6 +118,37 @@ describe('connectLive', () => {
     const live = await connectLive({ url: 'ws://x/ws', oidc: {} as never, city: 'harbor', state });
     expect(live.commands.blocked()).toBe('viewer');
     live.close();
+  });
+
+  it('knows a city the sim has not started: caught up, and not one tick', async () => {
+    connect.mockResolvedValue(joined([]));
+    const state = new CityState({ lots: [] } as never, { trip: () => undefined }, 1);
+    const live = await connectLive({ url: 'ws://x/ws', oidc: {} as never, city: 'pier', state });
+    expect(live.commands.blocked()).toBe('idle');
+    expect(live.commands.signedIn.city).toBe('pier');
+    state.ticks[0] = 0;
+    expect(live.commands.blocked()).toBeNull();
+    live.close();
+  });
+
+  it('says who is signed in, from the token and the provider', async () => {
+    const claims = (sub: string) => `h.${btoa(JSON.stringify({ sub, name: 'Ana' }))}.s`;
+    connect.mockResolvedValue(joined([]));
+    const state = new CityState({ lots: [] } as never, { trip: () => undefined }, 1);
+    const stand = { issuer: 'http://127.0.0.1:9400', client_id: 'x', scopes: 'openid' };
+    signIn.mockResolvedValue(claims('viewer'));
+    const local = await connectLive({ url: 'ws://x/ws', oidc: stand, city: 'harbor', state });
+    expect(local.commands.signedIn).toEqual({ user: 'viewer', standIn: true, city: 'harbor' });
+    local.close();
+    signIn.mockResolvedValue(claims('a1b2'));
+    const real = await connectLive({
+      url: 'ws://x/ws',
+      oidc: { ...stand, issuer: 'https://login.example.com' },
+      city: 'harbor',
+      state,
+    });
+    expect(real.commands.signedIn).toEqual({ user: 'Ana', standIn: false, city: 'harbor' });
+    real.close();
   });
 
   it('is out of reach before it has a session', async () => {

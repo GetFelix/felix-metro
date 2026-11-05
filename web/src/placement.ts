@@ -19,16 +19,40 @@ import {
   type Ground,
 } from './build';
 import { GatewayError } from './gateway';
+import { displayName } from './registry';
 
 export type Tool = 'build' | 'demolish' | 'road';
 
-/** What stops commands going out now, from the live connection: signed in without the right, or out of reach. */
-export type Blocked = 'viewer' | 'down';
+/**
+ * What stops commands going out now, from the live connection: signed in without the right, a city the sim has not
+ * started, or out of reach.
+ */
+export type Blocked = 'viewer' | 'idle' | 'down';
+
+/** Who is signed in, as far as saying what to do about a refusal needs. */
+export interface SignedIn {
+  /** The stand-in's user (`viewer`), or the display name a real provider gives. Empty when the token names no one. */
+  readonly user: string;
+  /** Whether the provider is the development stand-in, where `?as` picks the user. */
+  readonly standIn: boolean;
+  /** The city's name at the gateway. */
+  readonly city: string;
+}
+
+/** The user the stand-in signs in to build. */
+export const BUILDER = 'mayor';
+
+/** A part of a message that is a link to open, not text. `label` is the words in the message that carry it. */
+export interface Fix {
+  label: string;
+  user: string;
+}
 
 /** The way commands leave the page. */
 export interface CommandLink {
   /** The display name commands carry, from the sign-in. */
   readonly name: string;
+  readonly signedIn: SignedIn;
   blocked(): Blocked | null;
   send(record: Uint8Array): Promise<void>;
 }
@@ -88,12 +112,40 @@ const no = (why: string): Check => ({ ok: false, why });
 const SENDING = 'Sending…';
 const WAITING = 'Waiting for the city…';
 
+/** The role that may build in a city, as the dev stack's seed names it. A fork has the role of the city it began from. */
+const buildRole = (city: string) => `role:metro-${city.split(/[_~]/)[0]}-build`;
+
+/** The words `watchOnly` links, when it links anything. */
+export const FIX_LABEL = `?as=${BUILDER}`;
+
+/** Why a sign-in without the build right cannot build, and the way out. */
+export function watchOnly(who: SignedIn): string {
+  const first = who.user ? `Signed in as ${who.user}, who can only watch.` : "You're signed in but can only watch.";
+  if (!who.standIn) return `${first} Building here needs the build role, ${buildRole(who.city)}.`;
+  // The stand-in's builder is already the one refused, so ?as=mayor would only open the same sign-in again.
+  if (who.user === BUILDER) return 'Signed in as mayor, who may not build in this city.';
+  return `${first} Open ${FIX_LABEL} in a new tab to build.`;
+}
+
+/** The cities the dev stack's sim holds back until `dev/city.sh` starts them (`SIM_ON_DEMAND` in dev/compose.yml). */
+const HELD_BACK = ['lakeside', 'pier', 'ember'];
+
+/** What to do about a city the sim has not started. */
+export function notRunning(city: string): string {
+  const name = city.replaceAll('_', '~');
+  const start = HELD_BACK.includes(name)
+    ? `Start it with dev/city.sh ${name} (./city.sh ${name} in the release bundle).`
+    : 'Check that the sim is up, or restart the stack with dev/up.sh (./up.sh in the release bundle).';
+  return `${displayName(name)} is not running. ${start}`;
+}
+
 /** Why the tools are not usable now, in plain words, or null when they are. */
 export function whyNot(deps: Pick<PlacementDeps, 'link' | 'atTip' | 'wantsLive'>): string | null {
   if (!deps.wantsLive || !deps.link) return 'Building needs a live city.';
   if (!deps.atTip()) return 'Go back to live to build.';
   const blocked = deps.link.blocked();
-  if (blocked === 'viewer') return 'Your sign-in cannot build in this city.';
+  if (blocked === 'viewer') return watchOnly(deps.link.signedIn);
+  if (blocked === 'idle') return notRunning(deps.link.signedIn.city);
   if (blocked === 'down') return 'The city is out of reach. Try again in a moment.';
   return null;
 }
@@ -147,6 +199,12 @@ export class Placement {
   /** Why the tools cannot be used now, or null. */
   unavailable(): string | null {
     return whyNot(this.deps);
+  }
+
+  /** The link a message of {@link watchOnly} carries, which only the development sign-in has. */
+  fix(): Fix | null {
+    const who = this.deps.link?.signedIn;
+    return who?.standIn && who.user !== BUILDER ? { label: FIX_LABEL, user: BUILDER } : null;
   }
 
   /** Pick a tool, or put it away with `null` or by picking the one already held. False, and no change, when blocked. */
@@ -332,7 +390,7 @@ export class Placement {
       this.answered++;
       const text =
         err instanceof GatewayError && err.code === 'forbidden'
-          ? 'Your sign-in cannot build in this city.'
+          ? watchOnly(this.deps.link!.signedIn)
           : 'That could not be sent. Try again in a moment.';
       this.status = { state: 'refused', text };
       this.changed();

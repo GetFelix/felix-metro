@@ -1,6 +1,8 @@
 // Signing in at the gateway's OpenID Connect provider: the authorization code flow with PKCE, as a public client. The
 // ID token it returns goes in the gateway's `join`.
 
+import { isStandIn, subjectOf } from './identity';
+
 export interface Oidc {
   issuer: string;
   client_id: string;
@@ -14,6 +16,8 @@ interface Discovery {
 
 const TOKEN_KEY = 'metro.token';
 const FLOW_KEY = 'metro.auth';
+/** Whom the sign-in that produced the held token asked for with `?as`, so a provider that answers otherwise is not asked again. */
+const ASKED_KEY = 'metro.asked';
 
 const b64url = (bytes: Uint8Array) =>
   btoa(String.fromCharCode(...bytes))
@@ -27,8 +31,6 @@ export async function challengeFor(verifier: string): Promise<string> {
 }
 
 const random = () => b64url(crypto.getRandomValues(new Uint8Array(32)));
-
-const isLoopback = (url: string) => ['127.0.0.1', 'localhost', '[::1]'].includes(new URL(url).hostname);
 
 /**
  * Where to send the browser to sign in. The development provider skips its chooser when told who is signing in, so a
@@ -52,13 +54,25 @@ export function authorizeUrl(
     code_challenge: challenge,
     code_challenge_method: 'S256',
   }).toString();
-  if (isLoopback(oidc.issuer)) url.searchParams.set('sub', user);
+  if (isStandIn(oidc.issuer)) url.searchParams.set('sub', user);
   return url.href;
 }
 
 /** Who a loopback sign-in asks for: `?as=mayor` signs in as the builder, and the default is the viewer who only watches. */
 export function userFrom(search: string): string {
-  return new URLSearchParams(search).get('as')?.trim() || 'viewer';
+  return askedFor(search) ?? 'viewer';
+}
+
+/** Who the address asks to be signed in as, or `null` when it names no one. */
+export function askedFor(search: string): string | null {
+  return new URLSearchParams(search).get('as')?.trim() || null;
+}
+
+/** `href` with `?as=user`, keeping the rest of the address, for a link that opens the page signed in as someone else. */
+export function signedInAs(href: string, user: string): string {
+  const url = new URL(href);
+  url.searchParams.set('as', user);
+  return url.href;
 }
 
 /** What the gateway says about signing in, or `null` when nothing here answers like a gateway. */
@@ -93,21 +107,32 @@ function expiry(token: string): number {
   }
 }
 
-function remembered(): string | null {
+/**
+ * The token this tab holds, if it is still good. A browser copies session storage into a tab that is duplicated or
+ * opened from a link, so on the stand-in the token is dropped when the address asks for someone else.
+ */
+function remembered(oidc: Oidc): string | null {
   try {
     const token = sessionStorage.getItem(TOKEN_KEY);
-    return token && expiry(token) > Date.now() + 60_000 ? token : null;
+    if (!token || expiry(token) <= Date.now() + 60_000) return null;
+    const asked = askedFor(location.search);
+    if (asked && isStandIn(oidc.issuer) && subjectOf(token) !== asked && sessionStorage.getItem(ASKED_KEY) !== asked) {
+      sessionStorage.removeItem(TOKEN_KEY);
+      return null;
+    }
+    return token;
   } catch {
     return null;
   }
 }
 
 /**
- * An ID token for the gateway. Returns the one this tab already has, finishes a sign-in the provider just sent the
- * browser back from, or sends the browser to the provider and never returns.
+ * An ID token for the gateway. Returns the one this tab already has (not if `?as` asks the stand-in for someone
+ * else), finishes a sign-in the provider just sent the browser back from, or sends the browser to the provider and
+ * never returns.
  */
 export async function signIn(oidc: Oidc): Promise<string> {
-  const held = remembered();
+  const held = remembered(oidc);
   if (held) return held;
   const discovery = (await (
     await fetch(`${oidc.issuer.replace(/\/$/, '')}/.well-known/openid-configuration`)
@@ -139,6 +164,7 @@ export async function signIn(oidc: Oidc): Promise<string> {
     if (!response.ok) throw new Error(`sign-in failed: ${response.status}`);
     const token = String((await response.json()).id_token);
     sessionStorage.setItem(TOKEN_KEY, token);
+    sessionStorage.setItem(ASKED_KEY, askedFor(flow.search) ?? '');
     history.replaceState(null, '', redirectUri + flow.search + flow.hash);
     return token;
   }

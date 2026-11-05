@@ -3,13 +3,24 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import { NO_BUILDING, ROAD_ADDED, ROAD_REMOVED } from './city';
 import { decodeRecord, initSync } from './core/felix_metro_core.js';
 import { GatewayError } from './gateway';
-import { ANSWER_MS, Placement, whyNot, type Blocked, type CommandLink, type PlacementDeps } from './placement';
+import {
+  ANSWER_MS,
+  Placement,
+  notRunning,
+  whyNot,
+  type Blocked,
+  type CommandLink,
+  type PlacementDeps,
+  type SignedIn,
+} from './placement';
 
 beforeAll(() => {
   initSync({ module: readFileSync(new URL('./core/felix_metro_core_bg.wasm', import.meta.url)) });
 });
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
+
+const stand: SignedIn = { user: 'viewer', standIn: true, city: 'harbor' };
 
 const decode = (bytes: Uint8Array) => JSON.parse(decodeRecord(bytes));
 
@@ -20,6 +31,7 @@ function setup(over: Partial<PlacementDeps> = {}) {
   const state = { tip: true, blocked: null as Blocked | null, fail: null as Error | null };
   const link: CommandLink = {
     name: 'Ana',
+    signedIn: stand,
     blocked: () => state.blocked,
     send: async (bytes) => {
       if (state.fail) throw state.fail;
@@ -49,14 +61,78 @@ describe('when the tools can be used', () => {
   it('needs a live city, a page at the live tip and a sign-in that may build', () => {
     const base = { link: null, atTip: () => true, wantsLive: true };
     expect(whyNot(base)).toBe('Building needs a live city.');
-    const link = { name: 'Ana', blocked: () => null as Blocked | null, send: async () => {} };
+    const link = { name: 'Ana', signedIn: stand, blocked: () => null as Blocked | null, send: async () => {} };
     expect(whyNot({ ...base, link, wantsLive: false })).toBe('Building needs a live city.');
     expect(whyNot({ ...base, link, atTip: () => false })).toBe('Go back to live to build.');
     expect(whyNot({ ...base, link: { ...link, blocked: () => 'viewer' } })).toBe(
-      'Your sign-in cannot build in this city.',
+      'Signed in as viewer, who can only watch. Open ?as=mayor in a new tab to build.',
     );
     expect(whyNot({ ...base, link: { ...link, blocked: () => 'down' } })).toMatch(/out of reach/);
     expect(whyNot({ ...base, link })).toBeNull();
+  });
+
+  it('tells a viewer on a real provider which role builds, with no ?as link', () => {
+    const base = { atTip: () => true, wantsLive: true };
+    const real: SignedIn = { user: 'Ana', standIn: false, city: 'harbor_bridge-closed' };
+    const link = { name: 'Ana', signedIn: real, blocked: () => 'viewer' as Blocked | null, send: async () => {} };
+    expect(whyNot({ ...base, link })).toBe(
+      'Signed in as Ana, who can only watch. Building here needs the build role, role:metro-harbor-build.',
+    );
+    const { placement } = setup({ link });
+    expect(placement.fix()).toBeNull();
+  });
+
+  it('does not send the stand-in builder to ?as=mayor, which is who they already are', async () => {
+    const mayor: SignedIn = { ...stand, user: 'mayor' };
+    const link = { name: 'Ana', signedIn: mayor, blocked: () => 'viewer' as Blocked | null, send: async () => {} };
+    const base = { atTip: () => true, wantsLive: true };
+    expect(whyNot({ ...base, link })).toBe('Signed in as mayor, who may not build in this city.');
+    expect(setup({ link }).placement.fix()).toBeNull();
+    const refused = setup({
+      link: { ...link, blocked: () => null, send: async () => Promise.reject(new GatewayError('forbidden', 'no')) },
+    });
+    refused.placement.select('build');
+    expect(await refused.placement.commit(1)).toBe('Signed in as mayor, who may not build in this city.');
+  });
+
+  it('does not name a sign-in that names no one', () => {
+    const base = { atTip: () => true, wantsLive: true };
+    const link = {
+      name: 'Ana',
+      signedIn: { ...stand, user: '' },
+      blocked: () => 'viewer' as Blocked | null,
+      send: async () => {},
+    };
+    expect(whyNot({ ...base, link })).toBe(
+      "You're signed in but can only watch. Open ?as=mayor in a new tab to build.",
+    );
+  });
+
+  it('names a fork by its lineage, and only tells the held-back cities to use city.sh', () => {
+    const restart = 'Check that the sim is up, or restart the stack with dev/up.sh (./up.sh in the release bundle).';
+    expect(notRunning('harbor_bridge')).toBe(`Harbor~bridge is not running. ${restart}`);
+    expect(notRunning('harbor')).toBe(`Harbor is not running. ${restart}`);
+    for (const held of ['lakeside', 'pier', 'ember']) {
+      expect(notRunning(held)).toMatch(new RegExp(`Start it with dev/city.sh ${held} \\(`));
+    }
+  });
+
+  it('links ?as=mayor only on the stand-in', () => {
+    expect(setup().placement.fix()).toEqual({ label: '?as=mayor', user: 'mayor' });
+  });
+
+  it('says a city the sim has not started is not running, and how to start it', () => {
+    const base = { atTip: () => true, wantsLive: true };
+    const link = {
+      name: 'Ana',
+      signedIn: { ...stand, user: 'mayor', city: 'pier' },
+      blocked: () => 'idle' as Blocked | null,
+      send: async () => {},
+    };
+    expect(whyNot({ ...base, link })).toBe(
+      'Pier is not running. Start it with dev/city.sh pier (./city.sh pier in the release bundle).',
+    );
+    expect(whyNot({ ...base, link: { ...link, signedIn: { ...stand, city: 'harbor' } } })).toMatch(/restart the stack/);
   });
 
   it('will not pick a tool while blocked, and puts it away if the page leaves the tip', () => {
@@ -195,7 +271,9 @@ describe('sending', () => {
     expect(await placement.commit(1)).toBe('That could not be sent. Try again in a moment.');
     expect(placement.pending).toBe(0);
     state.fail = new GatewayError('forbidden', 'no');
-    expect(await placement.commit(1)).toBe('Your sign-in cannot build in this city.');
+    expect(await placement.commit(1)).toBe(
+      'Signed in as viewer, who can only watch. Open ?as=mayor in a new tab to build.',
+    );
     state.fail = null;
     expect(await placement.commit(1)).toBeNull();
   });
@@ -238,7 +316,7 @@ describe('what became of a command', () => {
     let release = () => {};
     const slow = new Promise<void>((resolve) => (release = resolve));
     const { placement } = setup({
-      link: { name: 'Ana', blocked: () => null, send: () => slow },
+      link: { name: 'Ana', signedIn: stand, blocked: () => null, send: () => slow },
     });
     placement.select('build');
     const sending = placement.commit(1);

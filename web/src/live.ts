@@ -5,7 +5,8 @@ import { nameFrom } from './build';
 import type { CityState, TickRecord } from './city';
 import { decodeRecord } from './core/felix_metro_core.js';
 import { Gateway, GatewayError, RETRY_MS, type EventFrame } from './gateway';
-import type { CommandLink } from './placement';
+import { isStandIn, subjectOf } from './identity';
+import type { CommandLink, SignedIn } from './placement';
 import { Registry, type CityEntry } from './registry';
 
 const STREAM = 'events';
@@ -267,11 +268,23 @@ export async function connectLive(
   /** The session that has caught up, which commands go out through. */
   let sender: Gateway | null = null;
   let who = nameFrom('');
+  let signedIn: SignedIn = { user: 'Builder', standIn: false, city };
   const commands: CommandLink = {
     get name() {
       return who;
     },
-    blocked: () => (!sender?.alive ? 'down' : sender.missing.includes(COMMANDS) ? 'viewer' : null),
+    get signedIn() {
+      return signedIn;
+    },
+    // A city whose district has never ticked has no sim running it, however far the page has caught up.
+    blocked: () =>
+      !sender?.alive
+        ? 'down'
+        : sender.missing.includes(COMMANDS)
+          ? 'viewer'
+          : state.ticks.every((tick) => tick < 0)
+            ? 'idle'
+            : null,
     async send(record) {
       if (!sender?.alive) throw new GatewayError('closed', 'the city is out of reach');
       await sender.publish(COMMANDS, record);
@@ -284,6 +297,9 @@ export async function connectLive(
   const session = async () => {
     const token = await signIn(oidc);
     who = nameFrom(token);
+    const standIn = isStandIn(oidc.issuer);
+    const named = nameFrom(token, '');
+    signedIn = { user: (standIn ? subjectOf(token) : named || subjectOf(token)) || '', standIn, city };
     const gateway = await Gateway.connect(url, city, token);
     current = gateway;
     let end = () => {};

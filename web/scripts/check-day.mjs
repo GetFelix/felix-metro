@@ -161,19 +161,23 @@ await page.screenshot({ path: join(out, 'day.png') });
 
 // The arrows: nothing before the first day, and the day before once there is one.
 const prev = page.locator('#follow [data-prev]');
+let earlier = [];
 if (day === 0) {
   if ((await prev.getAttribute('aria-disabled')) === 'false') await fail('the first day has a day before it');
 } else {
   await walkTo(day);
-  await matchesLog(day - 1, `day ${day}`);
+  earlier = await matchesLog(day - 1, `day ${day}`);
   console.log(`day ${day}: matches the log`);
   await walkTo(day + 1);
   await matchesLog(day, `day ${day + 1} again`);
 }
 
 // A click seeks the timeline there, and the card marks the entry as the one they are in.
-const target = rows.find((r) => r.kind === 'trip' && !r.carried && r.tick <= upTo - 60);
+// Just after midnight the day's only trips can be too fresh to seek to, so the day before supplies one then.
+const seekable = (r) => r.kind === 'trip' && !r.carried && r.tick <= upTo - 60;
+const target = rows.find(seekable) ?? earlier.find(seekable);
 if (!target) await fail('no trip far enough behind the newest tick to seek to');
+if (!rows.includes(target)) await walkTo(day);
 await page.locator(`#follow [data-log] li[data-tick="${target.tick}"][data-kind="trip"] button`).click();
 await page
   .waitForFunction((t) => window.__metro.shown().past === t, target.tick, { polling: 250, timeout: 2 * MINUTE })

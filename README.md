@@ -158,10 +158,18 @@ short note saying why, when:
 
 - the page has no live city (`?live=0`, a city opened at a moment with `?at`, or no gateway), or you are looking at an
   earlier moment. Go back to live;
-- the sign-in may only watch. The stand-in sign-in of the dev stack signs in as `viewer`, who cannot build; open
-  `/?as=mayor#harbor` in a new tab to sign in as `mayor`, who can. The `?as` parameter only picks which login the dev
-  stack's stand-in identity provider gives you. It grants nothing, and a real provider ignores it. A tab that is already
-  signed in keeps its token, so use a new tab to change who you are;
+- the sign-in may only watch. The page says `Signed in as viewer, who can only watch.` and, on the dev stack, ends
+  with a link: `Open ?as=mayor in a new tab to build.` The dev stack's stand-in identity provider signs in as `viewer`
+  by default, who cannot build; `/?as=mayor#harbor` signs in as `mayor`, who can. If `mayor` is refused anyway, the
+  page says `Signed in as mayor, who may not build in this city.` and has no link. The `?as` parameter only picks which
+  login the stand-in gives you. It grants nothing, and a real provider ignores it. A tab that already holds a token for
+  another user drops it and signs in again as the user `?as` names, so a duplicated or Cmd-clicked tab works. With a
+  real provider the page names the build role instead, such as `role:metro-harbor-build`, which the city's
+  administrator grants;
+- the city is not running, so it has nothing to build in. The dev stack holds `lakeside`, `pier` and `ember` back
+  until you start them ([Run it locally](#run-it-locally) explains how), and the page says `Pier is not running. Start
+  it with dev/city.sh pier (./city.sh pier in the release bundle).` Any other city, a fork or a sim that has stopped,
+  says `Check that the sim is up, or restart the stack with dev/up.sh (./up.sh in the release bundle).`;
 - the connection to the city is down.
 
 The tools do not exist under `?ui=0` or `?capture`. Zones are not built yet, since a zone has no record in the log;

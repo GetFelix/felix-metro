@@ -70,16 +70,16 @@ controls looking like the ones already there.
 
 These page parameters change the overlay:
 
-| Parameter        | Effect                                                                                                                                                                                                                 |
-| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `?tier=low`      | Forces a quality for this visit (`low`, `medium` or `high`). It overrides the saved choice                                                                                                                             |
-| `?ui=0`          | Hides the overlay: no chips, no buttons, no `?` or `M` key, no hint and no building card                                                                                                                               |
-| `?capture&trace` | The same as `?ui=0` for the controls and the hint, since a clip must draw as is                                                                                                                                        |
-| `?attract=30`    | Seconds with no input before the camera turns on its own (60 by default, `0` for never)                                                                                                                                |
-| `?follow=412`    | Opens with the camera on resident 412 and their card. A resident the city lacks is said so                                                                                                                             |
-| `?live=0`        | Draws the city with no gateway; the timeline never appears, so there is no hint, and the build buttons are off                                                                                                         |
-| `?as=mayor`      | Picks which login the dev stack's stand-in identity provider signs in (`viewer` if left out); `mayor` may build. It grants nothing with a real provider, and a tab already signed in keeps its token, so use a new tab |
-| `?hud`           | Shows the frame rate and frame times under the Felix Metro chip, for tuning                                                                                                                                            |
+| Parameter        | Effect                                                                                                                                                                                                                                        |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `?tier=low`      | Forces a quality for this visit (`low`, `medium` or `high`). It overrides the saved choice                                                                                                                                                    |
+| `?ui=0`          | Hides the overlay: no chips, no buttons, no `?` or `M` key, no hint and no building card                                                                                                                                                      |
+| `?capture&trace` | The same as `?ui=0` for the controls and the hint, since a clip must draw as is                                                                                                                                                               |
+| `?attract=30`    | Seconds with no input before the camera turns on its own (60 by default, `0` for never)                                                                                                                                                       |
+| `?follow=412`    | Opens with the camera on resident 412 and their card. A resident the city lacks is said so                                                                                                                                                    |
+| `?live=0`        | Draws the city with no gateway; the timeline never appears, so there is no hint, and the build buttons are off                                                                                                                                |
+| `?as=mayor`      | Picks which login the dev stack's stand-in identity provider signs in (`viewer` if left out); `mayor` may build. It grants nothing with a real provider. A tab signed in as someone else drops its token and signs in again as the user named |
+| `?hud`           | Shows the frame rate and frame times under the Felix Metro chip, for tuning                                                                                                                                                                   |
 
 ## How it is built
 
