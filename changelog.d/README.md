@@ -56,5 +56,5 @@ fragments are still here.
 non-empty bodies; CI runs it. The assembler's own tests run with
 `python3 .github/scripts/test_changelog_assemble.py`.
 
-The Felix bump bot (`.github/felix-bump.sh`) still writes its "Built on Felix" line
-straight into `CHANGELOG.md`. It is one line in `### Changed`, and the assembler keeps it.
+The Felix bump bot (`.github/felix-bump.sh`) writes `changelog.d/felix-version.changed.md`,
+overwriting it on each bump, so several bumps before a release leave one "Built on Felix" line.
