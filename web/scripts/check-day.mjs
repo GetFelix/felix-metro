@@ -143,9 +143,17 @@ const walkTo = async (n) => {
 };
 await page.evaluate((r) => window.__following.start(r), resident);
 // The card opens on the day the city is in; the arrows walk it back to the day being checked.
-await labelIs(today + 1).catch(async () =>
-  fail(`the card never showed day ${today + 1}: ${await page.locator('#follow').innerText()}`),
-);
+// Reading the log takes a while at 16x, so the city may already be in a later day than `today`; any day from it on is the
+// day the city is in, and walkTo goes back from there.
+await page
+  .waitForFunction(
+    (n) => Number(document.querySelector('#follow [data-label]')?.textContent.match(/^Day (\d+)/)?.[1]) >= n,
+    today + 1,
+    { polling: 250, timeout: 2 * MINUTE },
+  )
+  .catch(async () =>
+    fail(`the card never showed day ${today + 1} or later: ${await page.locator('#follow').innerText()}`),
+  );
 await walkTo(day + 1);
 const rows = await matchesLog(day, `day ${day + 1}`);
 console.log(`day ${day + 1}: ${rows.length} entries match the log`);
