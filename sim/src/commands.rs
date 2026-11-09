@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use felix_client::{ClusterClient, SubscribeCursorError};
+use felix_client::{Client, SubscribeCursorError};
 use felix_metro_core::record::{
     Command, CommandRecord, Event, REFUSED_BAD_SPEED, REFUSED_BUSY, REFUSED_MALFORMED,
     REFUSED_UNSUPPORTED, RESULT_APPLIED, principal_hash, split_stamp,
@@ -72,7 +72,7 @@ pub fn commands_stream(city: &str) -> String {
 /// electing its leaders refuses it at startup; from the tail, commands sent
 /// before it opens are not seen.
 pub fn follow(
-    client: Arc<ClusterClient>,
+    client: Arc<Client>,
     connection: Connection,
     city: String,
     from: Option<u64>,

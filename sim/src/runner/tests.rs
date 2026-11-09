@@ -185,6 +185,7 @@ impl Log for Memory {
                 reason: felix_wire::CursorErrorReason::TooOld,
                 requested: offset,
                 available: floor,
+                trim_headers: None,
             }
             .into());
         }
@@ -232,6 +233,7 @@ fn past_the_tail(offset: u64, len: usize) -> Result<()> {
             reason: felix_wire::CursorErrorReason::InFuture,
             requested: offset,
             available: len as u64,
+            trim_headers: None,
         }
         .into());
     }
