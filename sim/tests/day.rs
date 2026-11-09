@@ -434,7 +434,7 @@ async fn a_city_runs_through_pause_and_every_speed_with_no_gap() {
 
 /// Every record of a city's event stream, by district.
 async fn read_city(
-    client: &felix_client::ClusterClient,
+    client: &felix_client::Client,
     connection: &Connection,
     stream: &str,
 ) -> HashMap<u16, Vec<(u64, TickRecord)>> {

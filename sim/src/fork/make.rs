@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
-use felix_client::ClusterClient;
+use felix_client::Client;
 use felix_metro_core::record::RegistryRecord;
 use tokio::sync::mpsc;
 use tracing::{error, info, warn};
@@ -23,7 +23,7 @@ const MAX_WAIT: Duration = Duration::from_secs(30);
 /// What it takes to make a fork.
 #[derive(Clone)]
 pub(crate) struct Maker {
-    pub(crate) client: Arc<ClusterClient>,
+    pub(crate) client: Arc<Client>,
     pub(crate) connection: Connection,
     /// Where the provisioner listens, `http://host:port`.
     pub(crate) provisioner: String,
@@ -45,7 +45,7 @@ pub struct Started {
 /// city the sim runs, by name; a fork has its root's. A root city may have
 /// `limit` forks, forks of forks included.
 pub async fn start(
-    client: Arc<ClusterClient>,
+    client: Arc<Client>,
     connection: Connection,
     provisioner: String,
     sides: &HashMap<String, u16>,
