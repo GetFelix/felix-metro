@@ -1,1 +1,0 @@
-- The seek check waits for the follow card and the camera to reach the resident instead of a fixed second and a half, and logs how long that took. CI draws the page in software at well under one frame a second, so the fixed wait could end before the frame that shows the card.

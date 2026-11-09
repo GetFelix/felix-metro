@@ -1,1 +1,0 @@
-- The live page check clicks another car when a click misses one that has moved on since it was drawn, and the day card check pages through days from the day the card shows, so a city that crosses midnight mid-check does not fail it.

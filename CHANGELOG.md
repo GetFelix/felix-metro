@@ -2,6 +2,99 @@
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-09
+
+This release uses Felix 0.7.0 and needs a Felix 0.7 broker and control plane.
+
+### The sim
+
+- A first case file, the city `ember`: a seed nobody can command. The sim refuses every build, road and policy there with
+  "unsupported" and skips the warm-up, so its first day is the same for everyone. The dev stack seeds `ember` and holds it
+  back; `dev/city.sh ember` starts it.
+- The sim records who built each building. On every keyframe tick each district writes an `author` event (an
+  extended event, kind 3: a builder's hash and name and the lots they built that still stand, with the tick each was built) per builder
+  and district, so a page that starts from a keyframe can say who built what. A restart restores them from the newest
+  keyframe tick and the `command` and `built` events after it. Each lot costs 2 to 5 bytes an hour (under 0.1 B/s) and
+  a test holds the evening rush under the 10 KB/s goal with 80 built lots added. A city nobody has built in writes
+  none, so the log-size figures are for that city.
+- A `fork` command makes a new city `<city>~<name>` from a past tick. The fork copies the parent's history through that
+  tick into streams of its own, is listed in the registry with who made it, and ticks on independently. New result codes
+  16 to 19 refuse a bad or too deep name, a tick that has not run and a name already taken, and a `forked` event
+  (extended kind 7) records it in the parent. A sim needs `SIM_FORK_PROVISION_URL` (a service that makes the streams;
+  the dev stack runs `dev/provision.mjs`) or it refuses `fork` as before. A fork has its parent's seed, so `City::generate`
+  and `resident_name` draw from the part of the name before the first `~`. The registry's `forked` record gains the
+  forking principal. See docs/design.md, Branching.
+  Result 20 refuses a fork of a city whose log retention has trimmed, and 21 a fork past `SIM_MAX_FORKS_PER_CITY` (default
+  8, forks of forks counted against the root). A fork's copy leaves out its parent's `forked` events, a restart resumes
+  only a city's own forks, and a fork listed twice in the registry starts one city. City names in `SIM_CITIES` and
+  `SIM_ON_DEMAND` may no longer hold `_`.
+
+### Changed
+
+- Built on Felix 0.7.0: the sim's `felix-client` and `felix-wire` pins, the dev stack and CI images.
+- The night sound is a quiet field recording of crickets instead of two pulsed tones, which rang like a phone. The
+  recording is CC0 (credited in `prototype/assets/CREDITS.md`), plays low under the traffic bed, starts from a random point
+  and drifts in level at irregular gaps, so nothing repeats on a beat. It still follows dusk and dawn and respects the
+  sound button.
+
+### Fixed
+
+- `?as=mayor` signs in as the mayor in a tab that already holds a token for someone else, such as a duplicated or Cmd-clicked tab, where the page used to keep the cached viewer token and ignore `?as`. A real provider still ignores `?as`.
+- Cars, walkers, delivery vans and the garbage truck no longer collapse into buildings and parks when a trip ends. They turn in from the road, go up to the
+  lot's door at full size and are hidden there by the building; a trip leaving a lot comes out of its door the same way.
+  Before, each shrank to nothing while sliding to the lot's middle over the last tick, which looked like being sucked in.
+- The live clock keeps half a second of real time (2 ticks at the default speed, 8 at 16 ticks a second) behind the newest
+  tick instead of one tick, so a record that arrives a few hundred ms late no longer freezes the cars until the next one.
+- The sea no longer looks like a mirror. It is shaded by depth (lighter at the shore, darker offshore), ripples a little,
+  catches a pale sheen of the sky at a low angle and has a line of foam at the beach, and it no longer reflects a bright
+  blob of the room onto the page. The low tier draws it in one flat colour.
+- The shoreline is no longer squared off. The page draws a smoothed, slightly wandering coast inside the sim's water tiles
+  (the same seed gives the same coast) and a sand beach in the strip the water gives up. The water never covers a land
+  tile, so no road or lot overhangs it.
+- Trees no longer stand on the water. Every tree the page places by hand, in the landscape past the map and on a lot,
+  must be on land and clear of the beach. The trees past the map used to line the whole side of the map, including where
+  the sea runs past its corners.
+
+### The page
+
+- A Case section in the council of a case file: the question about the day's busiest street, hour and purpose, two hints
+  (a two-hour window and a street that crosses the answer), and a choice for each part. The page says only whether all three
+  are right and counts the tries.
+- Point at a building (tap it on a phone) and a card says who built it and when: "Built by Ana · Day 2, 09:12 · See
+  it go up". Your own read "Built by you", and buildings the city began with read "Here since the start". "See it go
+  up" takes the city to 30 city seconds before the building was built through the timeline's own seek, and plays it
+  forward. The page asks the gateway for the `principal` feature to know which buildings are yours; a gateway without
+  it (before 0.8.0) shows names only. The card is left out with `?ui=0`.
+- A tap is timed from when the browser made the touch events, so a busy page that handles them late still opens the card.
+- On a phone the card stays after the tap that opened it; the finger leaving the canvas used to hide it a third of a second later.
+- The card for a very long builder name no longer runs off the right edge of a phone screen.
+- The generated city is drawn as instances. Every road tile, lamp, building, tree and prop was an object of its own, so
+  draw calls grew with the size of the city: 6,317 for the default 2 by 2 districts and 25,103 for 4 by 4 on the high
+  tier. A model's mesh is now drawn once for all its places, so the same cities draw 205 and 235 calls, and the frame on
+  an Apple M4 Max falls from 10.1 ms to 1.8 ms (2 by 2) and from 35.9 ms to 4.4 ms (4 by 4) at 1280 by 720. The look is
+  the same: windows still light by the hour, a rising building still scales out of its lot, and a click still finds its
+  lot. docs/art.md, "The static city", says how.
+- The sun's shadow map is drawn once a frame, not once for every pass that draws the scene, and the distance blur on the
+  high tier reads the depth the ambient occlusion pass already drew instead of drawing it again.
+- The automatic quality choice no longer takes a 60 Hz display whose frames each take two refreshes for a 30 Hz display.
+  A steady 28 to 30 fps was never stepped down, because the choice read the display's rhythm from the frames alone. When
+  a window of frames is too slow for 60 Hz but fit for 30 Hz, the page now draws nothing for a dozen frames, reads the
+  display's real interval from them and decides with it. `?hud` shows the display it measured.
+- A sign-in that cannot build is told who it is and the way out: `Signed in as viewer, who can only watch. Open ?as=mayor in a new tab to build.` with `?as=mayor` a link on the dev stack, and the build role to ask for with a real provider. A city whose sim has not started says `Pier is not running. Start it with dev/city.sh pier (./city.sh pier in the release bundle).` instead of refusing the build; one that is not held back says to check the sim or restart the stack.
+
+### Tools
+
+- `dev/check-restart.mjs` also checks that the keyframes after a restart still say who built each lot, and when.
+- `web/scripts/check-attribution.mjs` hovers a building someone built and a generated one in the live page, reads the
+  card, and follows "See it go up". CI runs it in the dev-stack job.
+- The traffic check bounds the draw calls of the whole frame (`TRAFFIC_MAX_CALLS`) and of the 16 district measuring page
+  (`TRAFFIC_MAX_RUN_CALLS`), so the static city cannot go back to a draw call for each object. `web/traffic-load.html`
+  gives scripts the renderer and scene as `window.__three`.
+- The seek check waits for the follow card and the camera to reach the resident instead of a fixed second and a half, and logs how long that took. CI draws the page in software at well under one frame a second, so the fixed wait could end before the frame that shows the card.
+- The live page check clicks another car when a click misses one that has moved on since it was drawn, and the day card check pages through days from the day the card shows, so a city that crosses midnight mid-check does not fail it.
+- The dev-stack checks no longer fail on a slow runner: the playback check allows the live tip to move on during the frame that notices the join, and the day check accepts the card on a later day when the city crosses midnight while the log is read.
+- The two-builders check parks the frames of every open page while another one loads, and opens its pages one after the other, so a page that is already drawing cannot keep a new one from ever drawing.
+
 ## [0.2.3] - 2026-11-02
 
 ### The sim

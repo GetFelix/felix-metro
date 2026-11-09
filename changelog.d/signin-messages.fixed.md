@@ -1,1 +1,0 @@
-- `?as=mayor` signs in as the mayor in a tab that already holds a token for someone else, such as a duplicated or Cmd-clicked tab, where the page used to keep the cached viewer token and ignore `?as`. A real provider still ignores `?as`.
