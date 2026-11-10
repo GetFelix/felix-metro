@@ -378,7 +378,7 @@ density -- harbor 2` in `core/` prints the cars and walkers on the road from the
 
 Each [release](https://github.com/GetFelix/felix-metro/releases) has a compose bundle
 that pulls the published images instead of building them. You need Docker or Podman as
-described below. The compose bundle runs Felix 0.7.0.
+described below. The compose bundle runs Felix 0.7.1.
 
 ```sh
 curl -fsSL https://github.com/GetFelix/felix-metro/releases/download/v0.3.0/felix-metro-compose-0.3.0.tar.gz | tar xz
