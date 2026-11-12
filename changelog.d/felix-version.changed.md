@@ -1,1 +1,1 @@
-- Built on Felix 0.7.1: the sim's `felix-client` and `felix-wire` pins, the dev stack and CI images.
+- Built on Felix 0.7.2: the sim's `felix-client` and `felix-wire` pins, the dev stack and CI images.
