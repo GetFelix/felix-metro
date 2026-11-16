@@ -2,6 +2,24 @@
 
 # Felix Metro
 
+<p align="center">
+  <a href="https://github.com/GetFelix/felix-metro/actions/workflows/ci.yml">
+    <img src="https://github.com/GetFelix/felix-metro/actions/workflows/ci.yml/badge.svg?branch=main&event=push" alt="CI" />
+  </a>
+  <a href="https://github.com/GetFelix/felix-metro/releases">
+    <img src="https://img.shields.io/github/v/release/GetFelix/felix-metro?sort=semver&label=release" alt="Latest release" />
+  </a>
+  <a href="https://github.com/GetFelix/felix-metro/blob/main/LICENSE">
+    <img src="https://img.shields.io/badge/license-MIT-blue" alt="License: MIT" />
+  </a>
+  <a href="https://www.rust-lang.org/">
+    <img src="https://img.shields.io/badge/rust%20min-1.97-blue" alt="Minimum supported Rust 1.97" />
+  </a>
+  <a href="https://github.com/GetFelix/felix-metro/blob/main/rust-toolchain.toml">
+    <img src="https://img.shields.io/badge/rust%20built%20with-1.97-blue" alt="Built and tested with Rust 1.97" />
+  </a>
+</p>
+
 A 3D city simulator that runs in the browser, built on
 [Felix](https://github.com/GetFelix/felix). Everything that happens in the city
 is stored in durable Felix streams, so you can scrub back to any earlier moment
